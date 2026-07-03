@@ -472,6 +472,56 @@ pause
 _START_BAT_LEGACY = _START_BAT  # alias por compatibilidad
 
 
+_STOP_BAT = """@echo off
+title Cinema Productions - Detener
+color 0C
+cd /d "%~dp0"
+
+echo.
+echo  ==========================================================
+echo    CINEMA PRODUCTIONS - Detener servidor
+echo  ==========================================================
+echo.
+echo  Cerrando todos los procesos relacionados...
+echo.
+
+REM ---- 1. Matar procesos escuchando en el puerto 8001 (backend) -----
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8001" ^| findstr LISTENING') do (
+    echo   [+] Cerrando PID %%p ^(puerto 8001^)
+    taskkill /F /PID %%p >nul 2>&1
+)
+
+REM ---- 2. Matar procesos escuchando en el puerto 3000 (frontend dev) --
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3000" ^| findstr LISTENING') do (
+    echo   [+] Cerrando PID %%p ^(puerto 3000^)
+    taskkill /F /PID %%p >nul 2>&1
+)
+
+REM ---- 3. Cerrar cualquier python/pythonw que ejecute app.py o launcher.pyw
+wmic process where "(name='python.exe' or name='pythonw.exe' or name='py.exe') and (commandline like '%%app.py%%' or commandline like '%%launcher.pyw%%' or commandline like '%%uvicorn%%')" call terminate >nul 2>&1
+
+REM ---- 4. Cerrar ventanas con el titulo "Cinema Productions" ---------
+taskkill /F /FI "WINDOWTITLE eq Cinema Productions*" >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq Cinema Productions - Launcher*" >nul 2>&1
+
+REM ---- 5. Cerrar el navegador solo si abrio localhost:8001 (opcional)
+REM (Comentado para no afectar otras pestanas del usuario)
+REM taskkill /F /FI "WINDOWTITLE eq *localhost:8001*" >nul 2>&1
+
+timeout /t 2 /nobreak >nul
+
+echo.
+echo  ==========================================================
+echo    Cinema Productions ha sido DETENIDO.
+echo    Para volver a arrancar la app, ejecuta:
+echo         Iniciar.vbs  (o  start.bat)
+echo  ==========================================================
+echo.
+timeout /t 3 /nobreak >nul
+exit /b 0
+"""
+
+
 _START_SH = """#!/bin/bash
 clear
 echo ""
@@ -583,6 +633,11 @@ INICIO RAPIDO (Windows):
      Aparece una ventanita con barra de progreso.
   3. La app se abre sola en tu navegador. Las siguientes veces arranca en segundos.
 
+DETENER LA APP:
+  Doble clic en  Detener.bat  para cerrar completamente el servidor.
+  Cerrara todos los procesos python/pythonw relacionados y liberara los
+  puertos 8001 y 3000. Para arrancar de nuevo: ejecuta  Iniciar.vbs.
+
 REQUISITO: Python 3.11, 3.12 o 3.13
   https://www.python.org/downloads/
   IMPORTANTE: marcar "Add Python to PATH" al instalar.
@@ -603,8 +658,8 @@ DATOS:
 
 ACTUALIZAR:
   La app revisa tu repositorio de GitHub e informa si hay una version nueva.
-  Para actualizar, descarga de nuevo el paquete y reemplaza los archivos
-  (conserva tu  cinema_data.json).
+  Ve a Actualizaciones -> "Aplicar actualizacion" y la app se actualizara y
+  reiniciara automaticamente. Tu  cinema_data.json  y  .env  se conservan.
 
 SI ALGO FALLA:
   Revisa  error_log.txt  y  server_log.txt  en esta carpeta: contienen el detalle.

@@ -1792,7 +1792,7 @@ async def trigger_reminders_manual():
 
 from desktop_package import (
     _ENV_TEMPLATE, _CONFIG_PY, _CONFIG_BAT, _LAUNCHER_PYW, _START_BAT,
-    _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README, _INICIAR_VBS,
+    _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README, _INICIAR_VBS, _STOP_BAT,
 )
 
 
@@ -2139,6 +2139,7 @@ async def download_package(request: Request):
         ('cinema-productions/.env', _win_lines(_ENV_TEMPLATE).encode('utf-8')),
         ('cinema-productions/requirements.txt', _REQUIREMENTS.encode('utf-8')),
         ('cinema-productions/start.bat', _win_lines(_START_BAT).encode('utf-8')),
+        ('cinema-productions/Detener.bat', _win_lines(_STOP_BAT).encode('utf-8')),
         ('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS).encode('utf-8')),
         ('cinema-productions/launcher.pyw', _LAUNCHER_PYW.encode('utf-8')),
         ('cinema-productions/start.sh', _START_SH.encode('utf-8')),
