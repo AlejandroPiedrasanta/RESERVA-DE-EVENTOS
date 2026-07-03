@@ -45,6 +45,7 @@ export const testDbConnection = (url) => api.post("/settings/database/test", { u
 export const switchDatabase = (url) => api.post("/settings/database/connect", { url }).then(r => r.data);
 export const resetDatabase = () => api.post("/settings/database/reset").then(r => r.data);
 export const optimizeDatabase = () => api.post("/settings/database/optimize").then(r => r.data);
+export const getFactoryPresets = () => api.get("/settings/database/factory-presets").then(r => r.data);
 
 // Reminders
 export const sendTestReminder   = () => api.post("/reminders/send").then(r => r.data);
@@ -97,10 +98,19 @@ export const verifyAppPassword = (password) => api.post("/security/verify", { pa
 export const removeAppPassword = (current_password) => api.post("/security/remove-password", { current_password }).then(r => r.data);
 export const setPageProtection = (enabled) => api.put("/security/protection", { enabled }).then(r => r.data);
 export const setAdvancedSecurity = (data) => api.put("/security/advanced-config", data).then(r => r.data);
+export const getZipPassword = () => api.get("/security/zip-password").then(r => r.data);
+export const setZipPassword = (new_password) => api.post("/security/zip-password", { new_password }).then(r => r.data);
+export const resetZipPassword = () => api.post("/security/zip-password/reset").then(r => r.data);
 
 // GitHub Integration
 export const getGithubConfig = () => api.get("/github/config").then(r => r.data);
 export const saveGithubConfig = (data) => api.post("/github/config", data).then(r => r.data);
+export const connectGithub = (token, repo_url, branch) => api.post("/github/connect", { token, repo_url, branch }).then(r => r.data);
+export const disconnectGithub = () => api.post("/github/disconnect").then(r => r.data);
+export const githubPushAll = (message) => api.post("/github/push-all", { message }).then(r => r.data);
+export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart").then(r => r.data);
+export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
+export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);
 export const checkGithubUpdates = () => api.get("/github/check-updates").then(r => r.data);
 export const applyGithubUpdate = (force = true) => api.post("/github/apply-update", { force }).then(r => r.data);
 

@@ -857,6 +857,27 @@ body.page-protected [contenteditable="true"] {
 }
 body.page-protected img { pointer-events: none; }
 
+/* Blindaje 1-clic: difuminar contenido al perder foco */
+body.app-blur-unfocus > #root {
+  filter: blur(14px) saturate(1.2);
+  transition: filter 0.28s ease-out;
+  pointer-events: none;
+}
+body.app-blur-unfocus::after {
+  content: "🔒 Contenido protegido — click para continuar";
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 14px/1.4 "Cabinet Grotesk", system-ui, sans-serif;
+  color: #fff;
+  background: rgba(15, 14, 23, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  letter-spacing: 0.02em;
+}
+
 /* ═══════════════════════════════════════════
    ANIMACIONES ÉPICAS INMERSIVAS (v2)
 ═══════════════════════════════════════════ */

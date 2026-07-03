@@ -146,6 +146,27 @@ async def lifespan(app_instance: FastAPI):
     )
     scheduler.start()
     logger.info("Scheduler started")
+
+    # ── Seed factory GitHub config (viene "de fábrica") ────────────────
+    # Solo se escribe si no existe configuración previa; nunca sobreescribe
+    # cambios del usuario. Se guarda en la BD para que las copias de seguridad
+    # y la app compilada de escritorio también lo hereden automáticamente.
+    try:
+        current = await db.app_settings.find_one({}, {"github_config": 1}) or {}
+        gh_cfg = current.get("github_config") or {}
+        if not gh_cfg.get("repo_url"):
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "github_config.repo_url": SUGGESTED_GITHUB_REPO,
+                    "github_config.branch": DEFAULT_GITHUB_BRANCH,
+                }},
+                upsert=True,
+            )
+            logger.info(f"Factory GitHub repo seeded: {SUGGESTED_GITHUB_REPO}")
+    except Exception as e:
+        logger.warning(f"Could not seed factory GitHub config: {e}")
+
     yield
     scheduler.shutdown()
     client.close()
@@ -1640,6 +1661,14 @@ async def reset_database():
         raise HTTPException(status_code=400, detail=f"Error al restaurar: {e}")
 
 
+@api_router.get("/settings/database/factory-presets")
+async def get_factory_presets():
+    """Conexiones MongoDB que vienen DE FÁBRICA con el proyecto.
+    El frontend las carga automáticamente y las mezcla con las que el usuario
+    haya guardado localmente. Vienen ya listas al clonar el repositorio."""
+    return {"presets": FACTORY_SAVED_CONNECTIONS}
+
+
 # ─── Reminders (manual trigger) ───────────────────────────
 
 @api_router.get("/notifications/pending")
@@ -2041,6 +2070,7 @@ async def get_build_status():
 @api_router.get("/download/package")
 async def download_package(request: Request):
     import zipfile
+    import pyzipper
 
     build_dir = ROOT_DIR.parent / "frontend" / "build"
     if not build_dir.exists() or not (build_dir / "index.html").exists():
@@ -2053,35 +2083,60 @@ async def download_package(request: Request):
     standalone_py = (ROOT_DIR / 'standalone_app.py').read_text()
 
     # Version corta incremental estilo v1.10 (v1.<build>). Se guarda un contador.
-    _cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
+    _cdoc = await db.app_settings.find_one({}, {"desktop_build": 1, "security_config": 1}) or {}
     _build = int(_cdoc.get("desktop_build", 9)) + 1
     await db.app_settings.update_one({}, {"$set": {"desktop_build": _build}}, upsert=True)
     auto_version = f"1.{_build}"
 
+    # ── ¿Cifrar ZIP con contraseña? ─────────────────────────────────
+    sec_cfg = _cdoc.get("security_config") or {}
+    zip_pwd = sec_cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD
+    zip_pwd_enabled = bool(sec_cfg.get("zip_password_enabled", True))
+
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('cinema-productions/app.py', standalone_py)
-        # .env, .bat, config.py necesitan CRLF para Windows
-        def _win_lines(s: str) -> str:
-            return s.replace('\r\n', '\n').replace('\n', '\r\n')
-        zf.writestr('cinema-productions/.env', _win_lines(_ENV_TEMPLATE))
-        zf.writestr('cinema-productions/requirements.txt', _REQUIREMENTS)
-        zf.writestr('cinema-productions/start.bat', _win_lines(_START_BAT))
-        zf.writestr('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS))
-        zf.writestr('cinema-productions/launcher.pyw', _LAUNCHER_PYW)
-        zf.writestr('cinema-productions/start.sh', _START_SH)
-        zf.writestr('cinema-productions/README.txt', _win_lines(_README))
-        # App 100% independiente: sin URL de servidor Emergent. La versión local
-        # se guarda para mostrarla; las actualizaciones se revisan vía GitHub.
-        zf.writestr('cinema-productions/version.txt', auto_version)
 
-        # Dependencias empaquetadas (wheels win_amd64) → instalacion offline y rapida.
-        wheels_dir = await asyncio.to_thread(_ensure_desktop_wheels)
-        for whl in sorted(wheels_dir.glob('*.whl')):
-            zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
+    def _win_lines(s: str) -> str:
+        return s.replace('\r\n', '\n').replace('\n', '\r\n')
 
-        for file_path in sorted(build_dir.rglob('*')):
-            if file_path.is_file():
+    # Recolectamos los archivos primero, luego los escribimos con o sin cifrado.
+    files_to_add = [
+        ('cinema-productions/app.py', standalone_py.encode('utf-8')),
+        ('cinema-productions/.env', _win_lines(_ENV_TEMPLATE).encode('utf-8')),
+        ('cinema-productions/requirements.txt', _REQUIREMENTS.encode('utf-8')),
+        ('cinema-productions/start.bat', _win_lines(_START_BAT).encode('utf-8')),
+        ('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS).encode('utf-8')),
+        ('cinema-productions/launcher.pyw', _LAUNCHER_PYW.encode('utf-8')),
+        ('cinema-productions/start.sh', _START_SH.encode('utf-8')),
+        ('cinema-productions/README.txt', _win_lines(_README).encode('utf-8')),
+        ('cinema-productions/version.txt', auto_version.encode('utf-8')),
+    ]
+
+    wheels_dir = await asyncio.to_thread(_ensure_desktop_wheels)
+    wheel_files = sorted(wheels_dir.glob('*.whl'))
+    build_files = [f for f in sorted(build_dir.rglob('*')) if f.is_file()]
+
+    if zip_pwd_enabled and zip_pwd:
+        # ZIP cifrado AES-256 (compatible con WinRAR, 7-Zip; NO con el zip de Windows nativo)
+        with pyzipper.AESZipFile(buf, 'w', compression=pyzipper.ZIP_DEFLATED,
+                                 encryption=pyzipper.WZ_AES) as zf:
+            zf.setpassword(zip_pwd.encode('utf-8'))
+            for arc_name, content in files_to_add:
+                zf.writestr(arc_name, content)
+            for whl in wheel_files:
+                zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
+            for file_path in build_files:
+                arc_name = 'cinema-productions/build/' + str(file_path.relative_to(build_dir))
+                zf.write(str(file_path), arc_name)
+            # Nota informativa dentro del ZIP (sin cifrar sería útil, pero por consistencia
+            # dejamos todo cifrado y ponemos la ayuda en README.txt).
+    else:
+        # ZIP normal sin cifrar
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for arc_name, content in files_to_add:
+                zf.writestr(arc_name, content)
+            for whl in wheel_files:
+                zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
+            for file_path in build_files:
                 arc_name = 'cinema-productions/build/' + str(file_path.relative_to(build_dir))
                 zf.write(str(file_path), arc_name)
 
@@ -2097,19 +2152,24 @@ async def download_package(request: Request):
         "version": auto_version,
         "filename": filename,
         "stored_name": safe_name,
-        "notes": "Generada automáticamente al descargar desde Ajustes",
+        "notes": "Generada automáticamente al descargar desde Ajustes"
+                 + (" (protegido con contraseña)" if zip_pwd_enabled else ""),
         "channel": "stable",
         "file_size": len(zip_bytes),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "is_latest": True,
         "download_url": f"{cloud_url}/api/updates/download",
+        "encrypted": zip_pwd_enabled,
     }
     await db.app_updates.insert_one(update_doc)
 
+    headers = {'Content-Disposition': f'attachment; filename={filename}'}
+    if zip_pwd_enabled:
+        headers['X-Zip-Encrypted'] = 'AES-256'
     return Response(
         content=zip_bytes,
         media_type='application/zip',
-        headers={'Content-Disposition': f'attachment; filename={filename}'}
+        headers=headers,
     )
 
 
@@ -2381,6 +2441,12 @@ async def get_security_status():
         "protected_sections": cfg.get("protected_sections", []),
         "failed_attempts": int(cfg.get("failed_attempts", 0)),
         "locked_until": cfg.get("locked_until", ""),
+        # ── Nuevos toggles one-click ──
+        "block_devtools": bool(cfg.get("block_devtools", False)),
+        "blur_on_unfocus": bool(cfg.get("blur_on_unfocus", False)),
+        "block_printscreen": bool(cfg.get("block_printscreen", False)),
+        "block_drag_drop": bool(cfg.get("block_drag_drop", False)),
+        "zip_password_enabled": bool(cfg.get("zip_password_enabled", True)),
     }
 
 
@@ -2412,9 +2478,62 @@ async def set_advanced_security_config(payload: dict = Body(...)):
         valid = ["/base-de-datos", "/ajustes", "/socios", "/reservaciones", "/apariencia", "/actualizaciones", "/calendario"]
         sections = [s for s in sections if s in valid]
         update["security_config.protected_sections"] = sections
+    # ── Nuevos toggles one-click ──
+    for k in ("block_devtools", "blur_on_unfocus", "block_printscreen", "block_drag_drop", "zip_password_enabled"):
+        if k in payload:
+            update[f"security_config.{k}"] = bool(payload[k])
     if update:
         await db.app_settings.update_one({}, {"$set": update}, upsert=True)
     return {"success": True, "updated_keys": list(update.keys())}
+
+
+# ── ZIP password (para la app compilada) ─────────────────────────────
+DEFAULT_ZIP_PASSWORD = "2868"
+
+async def _get_zip_password() -> str:
+    doc = await db.app_settings.find_one({}, {"security_config": 1}) or {}
+    cfg = doc.get("security_config") or {}
+    return cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD
+
+
+@api_router.get("/security/zip-password")
+async def get_zip_password():
+    """Devuelve la contraseña actual del ZIP compilado (visible para el dueño de la app)."""
+    doc = await db.app_settings.find_one({}, {"security_config": 1}) or {}
+    cfg = doc.get("security_config") or {}
+    pwd = cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD
+    return {
+        "password": pwd,
+        "is_default": pwd == DEFAULT_ZIP_PASSWORD,
+        "enabled": bool(cfg.get("zip_password_enabled", True)),
+    }
+
+
+@api_router.post("/security/zip-password")
+async def set_zip_password(payload: dict = Body(...)):
+    """Cambia la contraseña que se usará al comprimir la app de escritorio."""
+    new_pwd = (payload.get("new_password") or "").strip()
+    if len(new_pwd) < 3:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 3 caracteres")
+    if len(new_pwd) > 64:
+        raise HTTPException(status_code=400, detail="La contraseña no puede exceder 64 caracteres")
+    await db.app_settings.update_one(
+        {},
+        {"$set": {"security_config.zip_password": new_pwd}},
+        upsert=True,
+    )
+    return {"success": True, "password": new_pwd}
+
+
+@api_router.post("/security/zip-password/reset")
+async def reset_zip_password():
+    """Restaura la contraseña ZIP al valor de fábrica (2868)."""
+    await db.app_settings.update_one(
+        {},
+        {"$set": {"security_config.zip_password": DEFAULT_ZIP_PASSWORD}},
+        upsert=True,
+    )
+    return {"success": True, "password": DEFAULT_ZIP_PASSWORD}
 
 
 @api_router.post("/security/set-password")
@@ -2532,9 +2651,23 @@ def _parse_github_url(url: str):
     return m.group(1), m.group(2)
 
 
-# Repo GitHub sugerido (NO se persiste automáticamente — solo se muestra como sugerencia en la UI)
+# Repo GitHub que viene DE FÁBRICA en el proyecto. Se auto-persiste al arrancar
+# la app si no hay configuración previa en la base de datos.
 SUGGESTED_GITHUB_REPO = "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
 DEFAULT_GITHUB_BRANCH = "main"
+
+# Conexiones MongoDB que vienen DE FÁBRICA en el proyecto. Se exponen en
+# /api/settings/database/factory-presets y el frontend las carga automáticamente
+# junto con las guardadas localmente (localStorage). El usuario puede modificar
+# o eliminarlas desde la UI (solo se persisten en su navegador).
+FACTORY_SAVED_CONNECTIONS = [
+    {
+        "name": "MongoDB Atlas (por defecto)",
+        "url": "mongodb+srv://reu1:cinemaproductions@cluster0.ozg25wu.mongodb.net/?appName=Cluster0",
+        "color": "emerald",
+        "factory": True,
+    },
+]
 
 
 async def _get_github_config():
@@ -2555,6 +2688,11 @@ async def get_github_config():
         "branch": cfg.get("branch", DEFAULT_GITHUB_BRANCH),
         "is_configured": bool(repo_url),
         "suggested_repo": SUGGESTED_GITHUB_REPO,
+        "username": cfg.get("username", ""),
+        "avatar_url": cfg.get("avatar_url", ""),
+        "connected_at": cfg.get("connected_at", ""),
+        "last_push_at": cfg.get("last_push_at", ""),
+        "last_push_message": cfg.get("last_push_message", ""),
     }
 
 
@@ -2591,6 +2729,452 @@ async def save_github_config(payload: dict = Body(...)):
             logger.warning(f"No se pudo actualizar remote: {e}")
 
     return {"success": True, "repo_url": repo_url, "branch": branch}
+
+
+@api_router.post("/github/connect")
+async def github_connect(payload: dict = Body(...)):
+    """Conecta con GitHub usando un Personal Access Token.
+    Valida el token contra la API de GitHub, obtiene el usuario y guarda todo
+    en app_settings.github_config junto con el repo por defecto de fábrica."""
+    import urllib.request, json as _json
+
+    token = (payload.get("token") or "").strip()
+    repo_url = (payload.get("repo_url") or SUGGESTED_GITHUB_REPO).strip()
+    branch = (payload.get("branch") or DEFAULT_GITHUB_BRANCH).strip()
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Token requerido. Crea uno en https://github.com/settings/tokens con scope 'repo'.")
+
+    # Validar contra GitHub API
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "cinema-productions",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            user_data = _json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = "Token inválido o expirado" if e.code == 401 else f"GitHub API error: {e.code}"
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar GitHub: {e}")
+
+    username = user_data.get("login", "")
+    avatar = user_data.get("avatar_url", "")
+
+    # Guardar en la BD
+    await db.app_settings.update_one(
+        {},
+        {"$set": {
+            "github_config.token": token,
+            "github_config.repo_url": repo_url,
+            "github_config.branch": branch,
+            "github_config.username": username,
+            "github_config.avatar_url": avatar,
+            "github_config.connected_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+
+    # Configurar git remoto con auth embebida
+    try:
+        auth_url = repo_url.replace("https://", f"https://{username}:{token}@") if username else repo_url
+        subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "remote", "set-url", "origin", auth_url],
+            capture_output=True, timeout=10, check=False,
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo configurar remote autenticado: {e}")
+
+    return {
+        "success": True,
+        "username": username,
+        "avatar_url": avatar,
+        "repo_url": repo_url,
+        "branch": branch,
+    }
+
+
+@api_router.post("/github/disconnect")
+async def github_disconnect():
+    """Desconecta la cuenta de GitHub (borra token, username, avatar). Deja el repo_url intacto."""
+    await db.app_settings.update_one(
+        {},
+        {"$unset": {
+            "github_config.token": "",
+            "github_config.username": "",
+            "github_config.avatar_url": "",
+            "github_config.connected_at": "",
+        }},
+        upsert=True,
+    )
+    return {"success": True}
+
+
+@api_router.post("/github/push-all")
+async def github_push_all(payload: dict = Body(default={})):
+    """Sube TODO el código actual al repositorio de GitHub, funcionando como
+    el botón "Save to GitHub" de Emergent.
+
+    Flujo:
+    1. Clona el repo remoto en una carpeta temporal (--depth 1)
+    2. Copia el backend/, frontend/ y archivos raíz actuales dentro del clone,
+       preservando el .git del clone. NUNCA copia .env, node_modules, __pycache__,
+       build/, backups/, uploads/.
+    3. Configura git identity con la cuenta conectada
+    4. git add -A && git commit && git push origin <branch>
+    5. Limpia la carpeta temporal.
+
+    Requiere:
+    - github_config.token (via POST /github/connect)
+    - github_config.repo_url y username
+    """
+    import shutil, tempfile
+
+    cfg = await _get_github_config()
+    token = cfg.get("token", "")
+    repo_url = cfg.get("repo_url", "")
+    branch = cfg.get("branch", DEFAULT_GITHUB_BRANCH)
+    username = cfg.get("username", "")
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Sin cuenta conectada. Usa 'Conectar con GitHub' primero.")
+    if not repo_url or not username:
+        raise HTTPException(status_code=400, detail="Repositorio o usuario no configurado.")
+
+    message = (payload.get("message") or f"Auto-save from Cinema Productions — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}").strip()
+
+    # URL con auth para el clone/push
+    auth_url = repo_url.replace("https://", f"https://{username}:{token}@")
+
+    # Directorio temporal (limpio) para clonar
+    work_dir = Path(tempfile.mkdtemp(prefix="cp_push_"))
+
+    # Helper para ejecutar comandos git
+    def _run(args, cwd=None, timeout=120, sensitive=False):
+        result = subprocess.run(
+            args, cwd=str(cwd) if cwd else None,
+            capture_output=True, text=True, timeout=timeout,
+        )
+        out = (result.stdout or "") + (result.stderr or "")
+        # Ocultar el token de los logs
+        if sensitive and token:
+            out = out.replace(token, "***")
+        return result.returncode, out
+
+    try:
+        # ── 1. Clonar el repo remoto ─────────────────────────────────
+        rc, out = _run(
+            ["git", "clone", "--depth", "1", "--branch", branch, auth_url, str(work_dir)],
+            timeout=180, sensitive=True,
+        )
+        if rc != 0:
+            # Puede ser porque la rama no existe aún → clonar sin branch
+            rc2, out2 = _run(["git", "clone", "--depth", "1", auth_url, str(work_dir)], timeout=180, sensitive=True)
+            if rc2 != 0:
+                raise HTTPException(status_code=502, detail=f"git clone falló: {out2[-400:]}")
+            # Crear la rama solicitada
+            _run(["git", "checkout", "-b", branch], cwd=work_dir)
+
+        # ── 2. Configurar identidad ──────────────────────────────────
+        _run(["git", "config", "user.email", f"{username}@users.noreply.github.com"], cwd=work_dir)
+        _run(["git", "config", "user.name", username], cwd=work_dir)
+
+        # ── 3. Copiar contenido actual sobre el clone (sin tocar .git) ──
+        # Directorios completos a espejar
+        mirror_dirs = ["backend", "frontend"]
+
+        # Patrones a ignorar SIEMPRE (nunca subir a GitHub)
+        ignore_patterns = shutil.ignore_patterns(
+            "__pycache__", "*.pyc", ".pytest_cache",
+            "node_modules", "build", ".cache",
+            ".env", ".env.local", ".env.production", ".env.development",
+            ".db_override", "backups", "uploads",
+            "cinema_data.json", "cinema_data.json.bak",
+            "*.log", ".DS_Store", "desktop_wheels",
+        )
+
+        for d in mirror_dirs:
+            src = ROOT_DIR.parent / d
+            dst = work_dir / d
+            if src.exists():
+                if dst.exists():
+                    shutil.rmtree(str(dst))
+                shutil.copytree(str(src), str(dst), ignore=ignore_patterns)
+
+        # Archivos raíz del repo (README, bootstrap, ARCHITECTURE, etc.)
+        root_files = [
+            "README.md", "bootstrap.sh", "INSTRUCCIONES_PARA_LA_IA.md",
+            "ARCHITECTURE.md", "design_guidelines.json",
+        ]
+        for f in root_files:
+            src = ROOT_DIR.parent / f
+            if src.exists() and src.is_file():
+                shutil.copy2(str(src), str(work_dir / f))
+
+        # ── 4. Add + Commit + Push ───────────────────────────────────
+        _run(["git", "add", "-A"], cwd=work_dir)
+
+        rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
+        if not status_out.strip():
+            shutil.rmtree(str(work_dir), ignore_errors=True)
+            return {
+                "success": True,
+                "nothing_to_commit": True,
+                "message": "Sin cambios que subir — el repositorio ya está sincronizado",
+            }
+
+        # Contar archivos cambiados para el resumen
+        changed = len([l for l in status_out.strip().split("\n") if l.strip()])
+
+        rc_c, out_c = _run(["git", "commit", "-m", message], cwd=work_dir)
+        if rc_c != 0:
+            raise HTTPException(status_code=500, detail=f"git commit falló: {out_c[-400:]}")
+
+        rc_p, out_p = _run(["git", "push", "origin", branch], cwd=work_dir, timeout=300, sensitive=True)
+        if rc_p != 0:
+            raise HTTPException(status_code=502, detail=f"git push falló: {out_p[-500:]}")
+
+        # ── 5. Obtener SHA del commit ────────────────────────────────
+        rc_sha, sha = _run(["git", "rev-parse", "HEAD"], cwd=work_dir)
+        new_sha = sha.strip() if rc_sha == 0 else ""
+
+        # Guardar en la BD
+        await db.app_settings.update_one(
+            {},
+            {"$set": {
+                "github_config.last_commit_sha": new_sha,
+                "github_config.last_push_at": datetime.now(timezone.utc).isoformat(),
+                "github_config.last_push_message": message,
+                "github_config.last_push_files": changed,
+            }},
+            upsert=True,
+        )
+
+        return {
+            "success": True,
+            "nothing_to_commit": False,
+            "commit_sha": new_sha,
+            "commit_short": new_sha[:7] if new_sha else "",
+            "branch": branch,
+            "message": message,
+            "files_changed": changed,
+            "repo_url": repo_url,
+        }
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail=f"Timeout ({e.timeout}s). Verifica tu conexión y tamaño del repo.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error inesperado: {type(e).__name__}: {e}")
+    finally:
+        try:
+            shutil.rmtree(str(work_dir), ignore_errors=True)
+        except Exception:
+            pass
+
+
+# ── DIAGNÓSTICO DE LA APP ─────────────────────────────────────────
+@api_router.get("/diagnostic")
+async def run_diagnostic():
+    """Ejecuta chequeos de salud sobre la app: dependencias, DB, GitHub, seguridad."""
+    import importlib.util, sys as _sys
+
+    checks = []
+
+    def add(id_, label, ok, detail="", severity="error", fixable=False):
+        checks.append({
+            "id": id_,
+            "label": label,
+            "ok": bool(ok),
+            "detail": detail,
+            "severity": severity if not ok else "ok",
+            "fixable": bool(fixable),
+        })
+
+    # 1) Dependencias Python críticas
+    critical_py = ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt", "pyzipper", "requests"]
+    missing_py = [p for p in critical_py if importlib.util.find_spec(p) is None]
+    add("python_deps",
+        f"Dependencias Python ({len(critical_py)} críticas)",
+        not missing_py,
+        f"Faltantes: {', '.join(missing_py)}" if missing_py else f"Todas instaladas: {', '.join(critical_py)}",
+        fixable=True,
+    )
+
+    # 2) Dependencias Node
+    node_modules = ROOT_DIR.parent / "frontend" / "node_modules"
+    yarn_lock = ROOT_DIR.parent / "frontend" / "yarn.lock"
+    add("node_deps",
+        "Dependencias Node (yarn install)",
+        node_modules.exists() and yarn_lock.exists(),
+        "node_modules OK y yarn.lock presente" if node_modules.exists() else "Falta node_modules — ejecuta yarn install",
+        fixable=True,
+    )
+
+    # 3) Servidor MongoDB
+    try:
+        await db.command("ping")
+        server_info = await db.client.server_info()
+        mongo_version = server_info.get("version", "?")
+        add("mongo_conn", f"MongoDB conectado (v{mongo_version})", True, f"URL: {_mongo_url[:35]}...")
+    except Exception as e:
+        add("mongo_conn", "MongoDB conectado", False, str(e)[:200])
+
+    # 4) Solo la BD por defecto (sin bases externas rondando)
+    try:
+        db_list = await db.client.list_database_names()
+        user_dbs = [d for d in db_list if d not in ("admin", "config", "local")]
+        expected = DB_NAME
+        extras = [d for d in user_dbs if d != expected]
+        add("mongo_isolation",
+            "Aislamiento de base de datos",
+            len(extras) == 0,
+            f"Solo '{expected}' (correcto)" if not extras else f"Bases extra detectadas: {', '.join(extras)}",
+            severity="warning",
+        )
+    except Exception as e:
+        add("mongo_isolation", "Aislamiento de base de datos", False, str(e)[:120])
+
+    # 5) Sin usuarios/autenticación en la instancia local
+    try:
+        users_info = await db.client.admin.command({"usersInfo": 1})
+        users = users_info.get("users", [])
+        add("mongo_no_auth",
+            "MongoDB sin cuentas externas",
+            len(users) == 0,
+            "Sin usuarios asociados (instancia limpia)" if not users else f"{len(users)} usuario(s) detectado(s)",
+            severity="warning",
+        )
+    except Exception:
+        # Muchas instalaciones locales no exponen usersInfo — no es error
+        add("mongo_no_auth", "MongoDB sin cuentas externas", True, "N/A (instancia local sin auth)")
+
+    # 6) Repo GitHub configurado con el default
+    cfg = await _get_github_config()
+    repo_url = cfg.get("repo_url", "")
+    is_default_repo = repo_url == SUGGESTED_GITHUB_REPO
+    add("github_default_repo",
+        "Repositorio GitHub por defecto",
+        is_default_repo,
+        f"OK: {repo_url}" if is_default_repo else (f"Otro repo: {repo_url}" if repo_url else "Sin repo configurado"),
+        severity="warning",
+        fixable=True,
+    )
+
+    # 7) Token de GitHub
+    add("github_token",
+        "Cuenta de GitHub vinculada",
+        bool(cfg.get("token")),
+        f"Conectado como @{cfg.get('username', '?')}" if cfg.get("token") else "Sin token — usa 'Conectar con GitHub'",
+        severity="warning",
+    )
+
+    # 8) Variables de entorno críticas
+    env_ok = bool(os.environ.get("MONGO_URL")) and bool(os.environ.get("DB_NAME"))
+    add("env_vars", "Variables de entorno (backend/.env)", env_ok,
+        "MONGO_URL y DB_NAME configuradas" if env_ok else "Faltan variables críticas")
+
+    # 9) Seguridad — contraseña ZIP no está vacía
+    sec_cfg = (await db.app_settings.find_one({}, {"security_config": 1}) or {}).get("security_config") or {}
+    zip_pwd = sec_cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD
+    add("zip_password",
+        "Contraseña ZIP configurada",
+        len(zip_pwd) >= 3,
+        f"Longitud: {len(zip_pwd)} chars ({'DEFAULT (2868)' if zip_pwd == DEFAULT_ZIP_PASSWORD else 'personalizada'})",
+        severity="warning",
+    )
+
+    # 10) Directorio de backups escribible
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        test_file = BACKUP_DIR / ".diagnostic_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        add("backup_writable", "Directorio de backups escribible", True, str(BACKUP_DIR))
+    except Exception as e:
+        add("backup_writable", "Directorio de backups escribible", False, str(e)[:120], fixable=True)
+
+    # 11) Frontend build (para el paquete desktop)
+    build_dir = ROOT_DIR.parent / "frontend" / "build"
+    has_build = build_dir.exists() and (build_dir / "index.html").exists()
+    add("frontend_build",
+        "Build de frontend (para app de escritorio)",
+        has_build,
+        "Build presente" if has_build else "Sin build — compila desde Ajustes → App de Escritorio",
+        severity="info",
+    )
+
+    # Score global
+    total = len(checks)
+    ok_count = sum(1 for c in checks if c["ok"])
+    errors = sum(1 for c in checks if not c["ok"] and c["severity"] == "error")
+    warnings = sum(1 for c in checks if not c["ok"] and c["severity"] == "warning")
+
+    return {
+        "checks": checks,
+        "summary": {
+            "total": total,
+            "ok": ok_count,
+            "errors": errors,
+            "warnings": warnings,
+            "score": round((ok_count / total) * 100) if total else 0,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api_router.post("/diagnostic/fix")
+async def diagnostic_fix(payload: dict = Body(...)):
+    """Aplica una corrección concreta al item indicado por id."""
+    check_id = (payload.get("id") or "").strip()
+    if not check_id:
+        raise HTTPException(status_code=400, detail="Falta 'id' del chequeo a corregir")
+
+    fixed = False
+    detail = ""
+
+    if check_id == "python_deps":
+        # Reinstala los que faltan
+        result = subprocess.run(
+            ["pip", "install", "--quiet", "-r", str(ROOT_DIR / "requirements.txt")],
+            capture_output=True, text=True, timeout=180,
+        )
+        fixed = result.returncode == 0
+        detail = (result.stderr or result.stdout or "")[-400:]
+    elif check_id == "node_deps":
+        result = subprocess.run(
+            ["yarn", "install"], cwd=str(ROOT_DIR.parent / "frontend"),
+            capture_output=True, text=True, timeout=300,
+        )
+        fixed = result.returncode == 0
+        detail = (result.stderr or result.stdout or "")[-400:]
+    elif check_id == "github_default_repo":
+        await db.app_settings.update_one(
+            {},
+            {"$set": {
+                "github_config.repo_url": SUGGESTED_GITHUB_REPO,
+                "github_config.branch": DEFAULT_GITHUB_BRANCH,
+            }},
+            upsert=True,
+        )
+        fixed = True
+        detail = f"Repositorio restaurado a {SUGGESTED_GITHUB_REPO}"
+    elif check_id == "backup_writable":
+        try:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            fixed = True
+            detail = f"Directorio creado: {BACKUP_DIR}"
+        except Exception as e:
+            detail = str(e)
+    else:
+        raise HTTPException(status_code=400, detail=f"El chequeo '{check_id}' no es corregible automáticamente")
+
+    return {"success": fixed, "id": check_id, "detail": detail}
 
 
 def _get_local_commit_sha():

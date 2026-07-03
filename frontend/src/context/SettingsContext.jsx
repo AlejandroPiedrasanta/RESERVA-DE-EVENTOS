@@ -888,13 +888,25 @@ export function SettingsProvider({ children }) {
   }, [theme, preset, animations, radius, pdfTheme, darkMode, fontScale, bgIntensity, sidebarCompact, dateFormat, fontFamily, cardStyle, animSpeed, shadowDepth, pageWidth, btnCorner, scrollbar, customBgEnabled, bgColor1, bgColor2, customAccent, saturation, hoverEffect, glassBlur, layoutDensity, pageTransition, iconSize, sidebarStyle, bgImage, advancedStyle, customLabels, customStatuses, reservationFormDesign, socioFormDesign, swapNameEventType, formFieldsVisibility, socioFieldsVisibility, dashboardWidgets, dashboardRecentStyle, islandMargins, eventConfigs, logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, navConfig]);
 
   // ── App security (password lock + page protection) ─────────────────────────
-  const [security, setSecurity] = useState({ loaded: false, passwordEnabled: false, hint: "", protectionEnabled: false });
+  const [security, setSecurity] = useState({
+    loaded: false, passwordEnabled: false, hint: "", protectionEnabled: false,
+    blockDevtools: false, blurOnUnfocus: false, blockPrintscreen: false, blockDragDrop: false,
+  });
   const [appLocked, setAppLocked] = useState(false);
 
   const refreshSecurity = async () => {
     try {
       const s = await getSecurityStatus();
-      setSecurity({ loaded: true, passwordEnabled: !!s.password_enabled, hint: s.hint || "", protectionEnabled: !!s.protection_enabled });
+      setSecurity({
+        loaded: true,
+        passwordEnabled: !!s.password_enabled,
+        hint: s.hint || "",
+        protectionEnabled: !!s.protection_enabled,
+        blockDevtools: !!s.block_devtools,
+        blurOnUnfocus: !!s.blur_on_unfocus,
+        blockPrintscreen: !!s.block_printscreen,
+        blockDragDrop: !!s.block_drag_drop,
+      });
       return s;
     } catch {
       setSecurity(prev => ({ ...prev, loaded: true }));
@@ -907,6 +919,10 @@ export function SettingsProvider({ children }) {
       const s = await refreshSecurity();
       if (s?.password_enabled && sessionStorage.getItem("cp_app_unlocked") !== "true") setAppLocked(true);
     })();
+    // Refresca al recibir el evento disparado por SecuritySection
+    const onSecUpdate = () => refreshSecurity();
+    window.addEventListener("cp:security-updated", onSecUpdate);
+    return () => window.removeEventListener("cp:security-updated", onSecUpdate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -927,6 +943,84 @@ export function SettingsProvider({ children }) {
       events.forEach(ev => document.removeEventListener(ev, block));
     };
   }, [security.protectionEnabled]);
+
+  // ── Blindaje 1-clic: bloquear DevTools / F12 ──
+  useEffect(() => {
+    if (!security.blockDevtools) return;
+    const handler = (e) => {
+      if (e.key === "F12" ||
+          (e.ctrlKey && e.shiftKey && ["I","J","C"].includes(e.key.toUpperCase())) ||
+          (e.ctrlKey && e.key.toUpperCase() === "U")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [security.blockDevtools]);
+
+  // ── Blindaje 1-clic: difuminar al perder foco ──
+  useEffect(() => {
+    if (!security.blurOnUnfocus) return;
+    const onBlur = () => document.body.classList.add("app-blur-unfocus");
+    const onFocus = () => document.body.classList.remove("app-blur-unfocus");
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      document.body.classList.remove("app-blur-unfocus");
+    };
+  }, [security.blurOnUnfocus]);
+
+  // ── Blindaje 1-clic: bloquear captura de pantalla y Ctrl+P ──
+  useEffect(() => {
+    if (!security.blockPrintscreen) return;
+    const handler = (e) => {
+      // Print Screen key
+      if (e.key === "PrintScreen") {
+        e.preventDefault();
+        try { navigator.clipboard.writeText(""); } catch {}
+      }
+      // Ctrl+P (imprimir)
+      if (e.ctrlKey && e.key.toUpperCase() === "P") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    // Bloquear imprimir vía menú
+    const beforePrint = (e) => { e.preventDefault?.(); };
+    window.addEventListener("beforeprint", beforePrint);
+    return () => {
+      document.removeEventListener("keydown", handler, true);
+      window.removeEventListener("beforeprint", beforePrint);
+    };
+  }, [security.blockPrintscreen]);
+
+  // ── Blindaje 1-clic: bloquear arrastrar/soltar archivos ──
+  useEffect(() => {
+    if (!security.blockDragDrop) return;
+    const block = (e) => {
+      // Solo bloquear drops de archivos externos y arrastres de imágenes salientes
+      if (e.type === "drop" || e.type === "dragover") {
+        if (e.dataTransfer?.types?.includes?.("Files")) {
+          e.preventDefault();
+        }
+      }
+      if (e.type === "dragstart" && e.target?.tagName === "IMG") {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("dragover", block);
+    document.addEventListener("drop", block);
+    document.addEventListener("dragstart", block);
+    return () => {
+      document.removeEventListener("dragover", block);
+      document.removeEventListener("drop", block);
+      document.removeEventListener("dragstart", block);
+    };
+  }, [security.blockDragDrop]);
 
   const baseT = T[language] || T.es;
   const tr = (() => {

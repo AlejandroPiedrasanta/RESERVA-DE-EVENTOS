@@ -49,6 +49,17 @@ BACKUP_COLLECTIONS = ['reservations', 'socios', 'app_settings']
 # ── Repo de GitHub de fábrica (pre-cargado, independiente de Emergent) ────────
 DEFAULT_GITHUB_REPO = "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
 DEFAULT_GITHUB_BRANCH = "main"
+
+# ── Conexiones MongoDB "de fábrica" que vienen con el ejecutable de escritorio ─
+FACTORY_SAVED_CONNECTIONS = [
+    {
+        "name": "MongoDB Atlas (por defecto)",
+        "url": "mongodb+srv://reu1:cinemaproductions@cluster0.ozg25wu.mongodb.net/?appName=Cluster0",
+        "color": "emerald",
+        "factory": True,
+    },
+]
+
 _DEFAULT_AI_CONTEXT = (
     "# Contexto — Cinema Productions (App de escritorio independiente)\n\n"
     "Esta es la versión de escritorio: 100% local e independiente. Base de datos\n"
@@ -192,6 +203,28 @@ async def lifespan(app_instance: FastAPI):
     if _using_embedded:
         await _load_embedded_data()
         _task = asyncio.create_task(_auto_save_loop())
+
+    # ── SEED_APP_SETTINGS: sembrar github_config de fábrica ──────────────────
+    # Persiste el repositorio oficial en la BD si no existe (funciona tanto en
+    # embedded como en MongoDB real). Así la copia de seguridad y cualquier
+    # herramienta que lea app_settings lo hereda automáticamente.
+    try:
+        existing = await db.app_settings.find_one({}, {"github_config": 1}) or {}
+        gh = existing.get("github_config") or {}
+        if not gh.get("repo_url"):
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "github_config.repo_url": DEFAULT_GITHUB_REPO,
+                    "github_config.branch": DEFAULT_GITHUB_BRANCH,
+                }},
+                upsert=True,
+            )
+            logger.warning(f"Factory GitHub repo seeded: {DEFAULT_GITHUB_REPO}")
+            if _using_embedded:
+                await _save_embedded_data()
+    except Exception as _seed_err:
+        logger.warning(f"No se pudo sembrar github_config de fábrica: {_seed_err}")
 
     # ── Check for updates in background ──────────────────────────────────────
     asyncio.create_task(_check_for_updates())
@@ -786,6 +819,12 @@ async def switch_database(req: DBConnectRequest):
         return {"success": True, "message": "Base de datos conectada correctamente"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al conectar: {e}")
+
+
+@api_router.get("/settings/database/factory-presets")
+async def get_factory_presets():
+    """Conexiones MongoDB de fábrica embebidas en la app de escritorio."""
+    return {"presets": FACTORY_SAVED_CONNECTIONS}
 
 
 @api_router.post("/settings/database/reset")
@@ -1395,6 +1434,178 @@ async def dismiss_update():
     global _update_status
     _update_status = {**_update_status, "has_update": False}
     return {"message": "OK"}
+
+
+# ── AUTO-UPDATE: descarga, aplica y reinicia el ejecutable ──────────────────
+@api_router.post("/updates/apply-and-restart")
+async def apply_update_and_restart(payload: dict = Body(default={})):
+    """Descarga el ZIP más reciente (del shared MongoDB), lo descomprime en la
+    misma carpeta del ejecutable actual, y reinicia la app.
+
+    Parámetros:
+    - dry_run (bool): si True, no reinicia el proceso (útil para tests).
+    - force (bool): si True, aplica aunque la versión sea la misma.
+
+    Funcionamiento paso a paso:
+    1. Localiza la carpeta donde se está ejecutando `app.py` (o el .exe).
+    2. Consulta el último update en MongoDB (compartido con la app en la nube).
+    3. Descarga el ZIP → ubicación temporal → lo extrae sobre la carpeta actual.
+    4. Programa un reinicio del proceso (os.execv) tras responder al cliente.
+
+    Requisitos: el ZIP debe estar cifrado con la contraseña que trae la app o
+    debe usar la contraseña guardada en security_config.zip_password.
+    """
+    import sys, subprocess, zipfile, shutil, tempfile, threading, time
+    try:
+        import pyzipper
+        _has_pyzipper = True
+    except ImportError:
+        _has_pyzipper = False
+
+    dry_run = bool(payload.get("dry_run", False))
+    force = bool(payload.get("force", False))
+
+    # 1) Últimas update en la BD
+    latest = await db.app_updates.find_one({"is_latest": True}, sort=[("created_at", -1)])
+    if not latest:
+        raise HTTPException(status_code=404, detail="No hay actualizaciones disponibles")
+    if latest["version"] == _local_version and not force:
+        return {"success": True, "message": "Ya estás en la última versión", "restarted": False}
+
+    # 2) Detectar carpeta del ejecutable actual
+    if getattr(sys, 'frozen', False):
+        install_dir = Path(sys.executable).resolve().parent
+    else:
+        install_dir = Path(__file__).resolve().parent
+
+    # 3) Descargar ZIP a tmp
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cp_update_"))
+    zip_path = tmp_dir / latest["filename"]
+
+    if _update_server_url:
+        # Descarga vía HTTP
+        import urllib.request
+        dl_url = f"{_update_server_url}/api/updates/download"
+        try:
+            with urllib.request.urlopen(dl_url, timeout=60) as resp:
+                zip_path.write_bytes(resp.read())
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Descarga falló: {e}")
+    else:
+        # Sin server URL configurada — intentar leer directamente del disco (dev/mismo pod)
+        local_zip = UPDATES_DIR / latest.get("stored_name", "")
+        if local_zip.exists():
+            shutil.copy2(str(local_zip), str(zip_path))
+        else:
+            raise HTTPException(status_code=400, detail="ZIP no encontrado ni en URL remota ni en /uploads/updates")
+
+    # 4) Obtener contraseña del ZIP (si existe)
+    zip_pwd = None
+    try:
+        sec = (await db.app_settings.find_one({}, {"security_config": 1}) or {}).get("security_config") or {}
+        zip_pwd = sec.get("zip_password") or "2868"
+    except Exception:
+        zip_pwd = "2868"
+
+    # 5) Extraer sobre la instalación
+    extract_dir = tmp_dir / "extracted"
+    extract_dir.mkdir(exist_ok=True)
+    try:
+        # Intentar como AES primero
+        if _has_pyzipper:
+            try:
+                with pyzipper.AESZipFile(str(zip_path)) as zf:
+                    zf.setpassword(zip_pwd.encode() if zip_pwd else None)
+                    zf.extractall(str(extract_dir))
+            except Exception:
+                # Fallback a ZIP normal
+                with zipfile.ZipFile(str(zip_path)) as zf:
+                    zf.extractall(str(extract_dir))
+        else:
+            with zipfile.ZipFile(str(zip_path)) as zf:
+                zf.extractall(str(extract_dir))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Descompresión falló (¿contraseña incorrecta?): {e}")
+
+    # 6) Localizar la subcarpeta 'cinema-productions/' dentro del extract
+    src_root = extract_dir / "cinema-productions"
+    if not src_root.exists():
+        # Puede que el ZIP no tenga esa subcarpeta
+        src_root = extract_dir
+
+    # 7) Copiar archivos NO destructivamente (preserva backups, data locales, .env con datos del usuario)
+    preserve = {".env", "cinema_data.json", "backups", "uploads"}
+    copied = 0
+    for item in src_root.rglob("*"):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(src_root)
+        if rel.parts and rel.parts[0] in preserve:
+            continue
+        dest = install_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(item), str(dest))
+        copied += 1
+
+    # 8) Actualizar version.txt
+    version_file = install_dir / "version.txt"
+    try:
+        version_file.write_text(latest["version"])
+    except Exception:
+        pass
+
+    # 9) Programar reinicio del proceso en background (a menos que sea dry_run)
+    if dry_run:
+        try:
+            shutil.rmtree(str(tmp_dir), ignore_errors=True)
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "restarted": False,
+            "dry_run": True,
+            "old_version": _local_version,
+            "new_version": latest["version"],
+            "files_updated": copied,
+            "install_dir": str(install_dir),
+            "message": "DRY RUN — archivos copiados pero el proceso NO se reinició",
+        }
+
+    def _restart_process():
+        time.sleep(2)  # dar tiempo a que la respuesta HTTP termine
+        try:
+            # Limpieza
+            shutil.rmtree(str(tmp_dir), ignore_errors=True)
+        except Exception:
+            pass
+
+        try:
+            if getattr(sys, 'frozen', False):
+                # Ejecutable compilado: relanzar
+                subprocess.Popen([str(sys.executable)], cwd=str(install_dir))
+            else:
+                # Modo desarrollo: relanzar el python actual
+                launcher = install_dir / "launcher.pyw"
+                if launcher.exists():
+                    subprocess.Popen([sys.executable, str(launcher)], cwd=str(install_dir))
+                else:
+                    subprocess.Popen([sys.executable, str(install_dir / "app.py")], cwd=str(install_dir))
+            # Terminar este proceso
+            os._exit(0)
+        except Exception as e:
+            logger.error(f"Restart failed: {e}")
+
+    threading.Thread(target=_restart_process, daemon=True).start()
+
+    return {
+        "success": True,
+        "restarted": True,
+        "old_version": _local_version,
+        "new_version": latest["version"],
+        "files_updated": copied,
+        "install_dir": str(install_dir),
+        "message": "Actualización aplicada. La app se reiniciará en 2 segundos.",
+    }
 
 
 # ── APP UPDATES (local + remote check) ──────────────────────────────────────

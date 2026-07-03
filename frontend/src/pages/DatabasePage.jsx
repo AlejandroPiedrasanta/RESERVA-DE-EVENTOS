@@ -9,14 +9,18 @@ import {
   Star, Bookmark, ChevronDown, Sparkles, Scissors,
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
+  Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {
   getDbStats, testDbConnection, switchDatabase, resetDatabase, optimizeDatabase,
+  getFactoryPresets,
   getReservations, getBackupHistory, createServerBackup,
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
+  connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue,
+  githubPushAll,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -138,7 +142,7 @@ export default function DatabasePage() {
   const [backupModal, setBackupModal]   = useState(false);
   const [optimizing, setOptimizing]     = useState(false);
   const [showClear, setShowClear]       = useState(false);
-  const [openBlocks, setOpenBlocks] = useState({ backup: true, conn: true, github: true, cleanup: false, updates: false, options: false, danger: false });
+  const [openBlocks, setOpenBlocks] = useState({ backup: false, conn: false, github: false, diagnostic: false, cleanup: false, updates: false, options: false, danger: false });
   const toggleBlock = (k) => setOpenBlocks(p => ({ ...p, [k]: !p[k] }));
   const [clearLoading, setClearLoading] = useState(false);
 
@@ -155,6 +159,15 @@ export default function DatabasePage() {
   const [ctxSaving, setCtxSaving] = useState(false);
   const [ctxEditing, setCtxEditing] = useState(false);
   const [ctxUpdatedAt, setCtxUpdatedAt] = useState("");
+
+  // ── GitHub Connect Modal + Diagnostic ─────────────────────────────
+  const [ghConnectOpen, setGhConnectOpen] = useState(false);
+  const [ghConnectToken, setGhConnectToken] = useState("");
+  const [ghConnectSaving, setGhConnectSaving] = useState(false);
+  const [ghPushing, setGhPushing] = useState(false);
+  const [diagnostic, setDiagnostic] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagFixingId, setDiagFixingId] = useState("");
 
   // ── Connection mode ────────────────────────────────────────────────────────
   const [connMode, setConnMode] = useState("url"); // "url" | "fields" | "nas"
@@ -236,6 +249,45 @@ export default function DatabasePage() {
     localStorage.setItem("cp_db_presets", JSON.stringify(list));
   };
 
+  // ── Cargar conexiones de fábrica (vienen precargadas desde el backend) ────
+  // Se mezclan con las guardadas del usuario (dedupe por URL) y NO se pueden
+  // borrar (marcadas con "factory": true). Se persisten como "vistas" en
+  // localStorage la primera vez para respetar cambios futuros del usuario.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getFactoryPresets();
+        const factory = Array.isArray(res?.presets) ? res.presets : [];
+        if (cancelled || factory.length === 0) return;
+
+        const userList = (() => {
+          try { return JSON.parse(localStorage.getItem("cp_db_presets")) || []; }
+          catch { return []; }
+        })();
+
+        // Añade solo las que el usuario no haya eliminado explícitamente.
+        const dismissed = (() => {
+          try { return JSON.parse(localStorage.getItem("cp_db_factory_dismissed")) || []; }
+          catch { return []; }
+        })();
+
+        const userUrls = new Set(userList.map(p => p.url));
+        const toAdd = factory.filter(fp =>
+          !userUrls.has(fp.url) && !dismissed.includes(fp.url)
+        );
+        if (toAdd.length > 0) {
+          const merged = [...toAdd, ...userList];
+          savePresets(merged);
+        }
+      } catch (err) {
+        console.error("[factory presets]", err);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = () => { loadDbStats(); loadBackupHistory(); loadCleanupPreview(); loadDbUpdates(); loadGithubConfig(); };
@@ -269,6 +321,116 @@ export default function DatabasePage() {
       toast({ title: "Error al guardar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
     } finally {
       setGhSaving(false);
+    }
+  };
+
+  // ── Conectar con GitHub via PAT ────────────────────────────────────
+  const handleConnectGithub = async () => {
+    if (!ghConnectToken.trim()) {
+      toast({ title: "Pega tu Personal Access Token", variant: "destructive" });
+      return;
+    }
+    setGhConnectSaving(true);
+    try {
+      const res = await connectGithub(
+        ghConnectToken.trim(),
+        ghRepoInput.trim() || ghConfig.suggested_repo || "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS",
+        ghBranchInput.trim() || "main",
+      );
+      toast({
+        title: `¡Conectado como @${res.username}!`,
+        description: "Ya puedes guardar cambios en el repositorio.",
+      });
+      setGhConnectToken("");
+      setGhConnectOpen(false);
+      await loadGithubConfig();
+    } catch (err) {
+      toast({
+        title: "Error al conectar",
+        description: err?.response?.data?.detail || String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setGhConnectSaving(false);
+    }
+  };
+
+  const handleDisconnectGithub = async () => {
+    if (!window.confirm("¿Desconectar la cuenta de GitHub? El repositorio quedará configurado, solo se borra el token.")) return;
+    try {
+      await disconnectGithub();
+      toast({ title: "Cuenta desconectada" });
+      await loadGithubConfig();
+    } catch (err) {
+      toast({ title: "Error", variant: "destructive" });
+    }
+  };
+
+  // ── Guardar TODO el repositorio a GitHub (git add + commit + push) ──
+  const handlePushAllToGithub = async () => {
+    if (!ghConfig.username) {
+      toast({ title: "Conecta tu cuenta de GitHub primero", variant: "destructive" });
+      return;
+    }
+    const message = window.prompt(
+      "Mensaje del commit:",
+      `Auto-save from Cinema Productions — ${new Date().toLocaleString("es-GT")}`,
+    );
+    if (message === null) return; // usuario canceló
+    setGhPushing(true);
+    try {
+      const res = await githubPushAll(message || undefined);
+      if (res.nothing_to_commit) {
+        toast({
+          title: "Sin cambios que subir",
+          description: "El repositorio ya está sincronizado.",
+        });
+      } else {
+        toast({
+          title: `✓ Subido a GitHub`,
+          description: `Commit ${res.commit_short} en rama ${res.branch}`,
+        });
+        fireEpic();
+      }
+      await loadGithubConfig();
+    } catch (err) {
+      toast({
+        title: "Error al subir",
+        description: err?.response?.data?.detail?.slice(0, 200) || String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setGhPushing(false);
+    }
+  };
+
+  // ── Diagnóstico ────────────────────────────────────────────────────
+  const loadDiagnostic = async () => {
+    setDiagLoading(true);
+    try {
+      const d = await runDiagnostic();
+      setDiagnostic(d);
+    } catch (err) {
+      toast({ title: "Error al ejecutar diagnóstico", variant: "destructive" });
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
+  const handleFixIssue = async (id) => {
+    setDiagFixingId(id);
+    try {
+      const res = await fixDiagnosticIssue(id);
+      if (res.success) {
+        toast({ title: "Corregido ✓", description: res.detail?.slice(0, 120) });
+      } else {
+        toast({ title: "No se pudo corregir", description: res.detail?.slice(0, 200), variant: "destructive" });
+      }
+      await loadDiagnostic();
+    } catch (err) {
+      toast({ title: "Error al corregir", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setDiagFixingId("");
     }
   };
 
@@ -538,6 +700,56 @@ export default function DatabasePage() {
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
+
+        {/* ── ONBOARDING BANNER: sugerir Atlas de fábrica ── */}
+        {(() => {
+          const dismissed = (() => { try { return localStorage.getItem("cp_atlas_banner_dismissed") === "1"; } catch { return false; } })();
+          const isOnAtlas = dbStats?.is_atlas;
+          const factoryPreset = presets.find(p => p.factory);
+          if (dismissed || isOnAtlas || !factoryPreset) return null;
+          return (
+            <motion.div variants={fadeUp} data-testid="atlas-onboarding-banner"
+              className="relative overflow-hidden rounded-3xl p-5 border border-emerald-200/70"
+              style={{ background: "linear-gradient(120deg, rgba(236,253,245,0.95), rgba(219,234,254,0.85))" }}>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-white/70 flex items-center justify-center shrink-0 shadow-sm">
+                  <Sparkles size={22} className="text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-slate-800 flex items-center gap-2">
+                    Tu MongoDB Atlas ya está lista
+                    <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500 text-white">De fábrica</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Migra tus datos a la nube en 1 clic — accesibles desde cualquier dispositivo, con respaldo automático.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+                    data-testid="atlas-onboarding-connect"
+                    onClick={async () => {
+                      try {
+                        await switchDatabase(factoryPreset.url);
+                        toast({ title: "Conectado a MongoDB Atlas ✓ — Actualizando..." });
+                        try { localStorage.setItem("cp_atlas_banner_dismissed", "1"); } catch {}
+                        setTimeout(() => window.location.reload(), 1200);
+                      } catch (e) { toast({ title: e.response?.data?.detail || "Error al conectar", variant: "destructive" }); }
+                    }}
+                    className="px-4 py-2 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md flex items-center gap-1.5">
+                    <ArrowRight size={13} /> Conectar ahora
+                  </motion.button>
+                  <button
+                    data-testid="atlas-onboarding-dismiss"
+                    onClick={() => { try { localStorage.setItem("cp_atlas_banner_dismissed", "1"); } catch {} ; loadAll(); }}
+                    className="w-8 h-8 rounded-xl bg-white/60 hover:bg-white text-slate-400 hover:text-slate-600 flex items-center justify-center transition-colors"
+                    title="Recordarme más tarde">
+                    <XCircle size={14} />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })()}
 
         {/* ── RESPALDO AUTOMÁTICO EN PC ── */}
         <motion.div variants={fadeUp}>
@@ -1185,7 +1397,19 @@ export default function DatabasePage() {
                         <div key={p.url || p.name || i} className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${colors[p.color] || colors.indigo}`}>
                           <Database size={13} className="shrink-0" />
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-black truncate">{p.name}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-black truncate">{p.name}</p>
+                              {p.factory && (
+                                <span
+                                  data-testid={`preset-factory-badge-${i}`}
+                                  title="Conexión precargada con el proyecto"
+                                  className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/70 border border-current/20 text-[8px] font-black uppercase tracking-wider"
+                                >
+                                  <Star size={8} className="fill-current" />
+                                  De fábrica
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[10px] font-mono opacity-60 truncate">{p.url.replace(/:([^@]+)@/, ":***@")}</p>
                           </div>
                           <div className="flex gap-1.5">
@@ -1202,7 +1426,20 @@ export default function DatabasePage() {
                               className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-white/80 hover:bg-white transition-colors border border-white/60">
                               Conectar
                             </motion.button>
-                            <button onClick={() => savePresets(presets.filter((_, j) => j !== i))}
+                            <button onClick={() => {
+                                const target = presets[i];
+                                if (target?.factory) {
+                                  // Registrar dismiss para no volver a añadirla en el próximo load
+                                  try {
+                                    const d = JSON.parse(localStorage.getItem("cp_db_factory_dismissed")) || [];
+                                    if (!d.includes(target.url)) {
+                                      d.push(target.url);
+                                      localStorage.setItem("cp_db_factory_dismissed", JSON.stringify(d));
+                                    }
+                                  } catch { /* noop */ }
+                                }
+                                savePresets(presets.filter((_, j) => j !== i));
+                              }}
                               data-testid={`preset-delete-${i}`}
                               className="w-7 h-7 rounded-lg bg-white/60 hover:bg-red-50 flex items-center justify-center transition-colors">
                               <Trash2 size={10} className="text-red-400" />
@@ -1214,31 +1451,7 @@ export default function DatabasePage() {
                   </div>
                 )}
 
-                {/* MongoDB Atlas guide */}
-                <details className="rounded-2xl overflow-hidden border border-blue-200/60 bg-blue-50/30 group">
-                  <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer list-none select-none">
-                    <Database size={13} className="text-blue-500 shrink-0" />
-                    <span className="text-xs font-black text-blue-800 flex-1">MongoDB Atlas en la nube (gratis)</span>
-                    <ChevronRight size={12} className="text-blue-400 group-open:rotate-90 transition-transform" />
-                  </summary>
-                  <div className="px-4 pb-4 text-[10px] text-blue-700 space-y-2 border-t border-blue-100/60">
-                    <p className="font-black text-xs mt-3">4 pasos — 512 MB gratuitos:</p>
-                    {[
-                      <>Ve a <a href="https://www.mongodb.com/cloud/atlas/register" target="_blank" rel="noreferrer" className="underline font-bold">mongodb.com/cloud/atlas</a> → crea cuenta gratis</>,
-                      <>Crea un cluster → <b>Free Tier (M0 Sandbox)</b> → región más cercana</>,
-                      <>Database Access → crea usuario/contraseña → Network Access → agrega <b>0.0.0.0/0</b></>,
-                      <>Connect → "Connect your application" → copia la URI → pégala arriba en "Cambiar conexión"</>,
-                    ].map((step, idx) => (
-                      <div key={idx} className="flex items-start gap-2">
-                        <span className="w-4 h-4 rounded-full bg-blue-200 text-blue-700 font-black text-[9px] flex items-center justify-center shrink-0 mt-0.5">{idx + 1}</span>
-                        <p>{step}</p>
-                      </div>
-                    ))}
-                    <code className="block bg-white/70 px-3 py-2 rounded-xl text-[9px] font-mono break-all border border-blue-100">
-                      mongodb+srv://usuario:contraseña@cluster.mongodb.net/cinema
-                    </code>
-                  </div>
-                </details>
+                {/* MongoDB Atlas guide — removido por preferencia del proyecto */}
               </div>
 
             </div>
@@ -1461,6 +1674,56 @@ export default function DatabasePage() {
             <CollapseBody open={openBlocks.github}>
               <div className="p-5 space-y-5">
 
+                {/* ── Conectar con GitHub (1 clic) ── */}
+                <div className={`rounded-2xl border p-4 ${ghConfig.username ? "bg-emerald-50/70 border-emerald-200" : "bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 text-white"}`}>
+                  {ghConfig.username ? (
+                    <div className="flex items-center gap-3">
+                      {ghConfig.avatar_url ? (
+                        <img src={ghConfig.avatar_url} alt={ghConfig.username} className="w-10 h-10 rounded-full border-2 border-emerald-300 shadow-sm" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-black">
+                          {ghConfig.username[0]?.toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <UserCheck size={13} className="text-emerald-600" />
+                          <p className="text-sm font-black text-emerald-800 truncate">@{ghConfig.username}</p>
+                        </div>
+                        <p className="text-[10px] text-emerald-700/70">
+                          {ghConfig.connected_at ? `Conectado ${new Date(ghConfig.connected_at).toLocaleString("es-GT")}` : "Cuenta activa"}
+                        </p>
+                      </div>
+                      <motion.button
+                        whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleDisconnectGithub}
+                        data-testid="github-disconnect-btn"
+                        className="px-3 py-1.5 rounded-xl bg-white text-slate-700 text-xs font-bold flex items-center gap-1.5 border border-slate-200 hover:bg-slate-50"
+                      >
+                        <LogOut size={11} /> Desconectar
+                      </motion.button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <Github size={20} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black">Conecta tu cuenta de GitHub</p>
+                        <p className="text-[11px] text-white/60 mt-0.5">Sube cambios y guarda backups directo al repositorio</p>
+                      </div>
+                      <motion.button
+                        whileHover={{ scale: 1.04, y: -1 }} whileTap={{ scale: 0.96 }}
+                        onClick={() => setGhConnectOpen(true)}
+                        data-testid="github-connect-btn"
+                        className="px-4 py-2.5 rounded-2xl bg-white text-slate-900 text-xs font-black flex items-center gap-1.5 shadow-lg"
+                      >
+                        <LogIn size={12} /> Conectar
+                      </motion.button>
+                    </div>
+                  )}
+                </div>
+
                 {/* URL del repositorio */}
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
@@ -1530,16 +1793,41 @@ export default function DatabasePage() {
                   </div>
                 )}
 
-                {/* Botón Guardar */}
-                <motion.button
-                  whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                  onClick={handleSaveGithub} disabled={ghSaving}
-                  data-testid="github-save-config-btn"
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all disabled:opacity-60"
-                >
-                  {ghSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Guardar configuración
-                </motion.button>
+                {/* Botones: Guardar config + Push all */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                    onClick={handleSaveGithub} disabled={ghSaving}
+                    data-testid="github-save-config-btn"
+                    className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all disabled:opacity-60"
+                  >
+                    {ghSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                    Guardar configuración
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                    onClick={handlePushAllToGithub}
+                    disabled={ghPushing || !ghConfig.username}
+                    data-testid="github-push-all-btn"
+                    title={!ghConfig.username ? "Conecta tu cuenta de GitHub primero" : "Sube todos los cambios al repositorio"}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold transition-all disabled:opacity-60 ${
+                      ghConfig.username
+                        ? "text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-lg"
+                        : "text-slate-500 bg-slate-100 cursor-not-allowed"
+                    }`}
+                  >
+                    {ghPushing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {ghPushing ? "Subiendo..." : "Guardar todo al repositorio"}
+                  </motion.button>
+                </div>
+
+                {/* Estado del último push */}
+                {ghConfig.last_push_at && (
+                  <div className="text-[10px] text-slate-500 flex items-center justify-between bg-emerald-50/50 border border-emerald-100 rounded-xl px-3 py-2">
+                    <span>Último push: <b className="font-mono">{ghConfig.last_commit_sha?.slice(0, 7) || "—"}</b></span>
+                    <span>{new Date(ghConfig.last_push_at).toLocaleString("es-GT")}</span>
+                  </div>
+                )}
 
                 {/* Separador */}
                 <div className="border-t border-slate-200/60 pt-4">
@@ -1568,6 +1856,114 @@ export default function DatabasePage() {
                   </motion.button>
                 </div>
 
+              </div>
+            </CollapseBody>
+          </div>
+        </motion.div>
+
+        {/* ═══════════ DIAGNÓSTICO DE LA APP ═══════════ */}
+        <motion.div variants={fadeUp}>
+          <div className="rounded-3xl glass overflow-hidden">
+            <div onClick={() => { toggleBlock("diagnostic"); if (!diagnostic) loadDiagnostic(); }} data-testid="db-block-toggle-diagnostic"
+              className="flex items-center gap-3 px-5 py-4 border-b border-white/40 cursor-pointer select-none">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center">
+                <Stethoscope size={16} className="text-cyan-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                  Diagnóstico de la app
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {diagnostic
+                    ? `${diagnostic.summary.ok}/${diagnostic.summary.total} correctos · ${diagnostic.summary.errors} errores · ${diagnostic.summary.warnings} avisos`
+                    : "Chequeos de dependencias, MongoDB, GitHub, seguridad"}
+                </p>
+              </div>
+              {diagnostic && (
+                <div className={`px-3 py-1 rounded-full text-[10px] font-black ${
+                  diagnostic.summary.errors === 0 && diagnostic.summary.warnings === 0
+                    ? "bg-emerald-100 text-emerald-700"
+                    : diagnostic.summary.errors > 0
+                    ? "bg-red-100 text-red-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}>
+                  {diagnostic.summary.score}/100
+                </div>
+              )}
+              <BlockChevron open={openBlocks.diagnostic} />
+            </div>
+
+            <CollapseBody open={openBlocks.diagnostic}>
+              <div className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                    onClick={loadDiagnostic}
+                    disabled={diagLoading}
+                    data-testid="diagnostic-run-btn"
+                    className="px-4 py-2 rounded-2xl btn-primary text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60"
+                  >
+                    {diagLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    {diagLoading ? "Ejecutando..." : "Ejecutar diagnóstico"}
+                  </motion.button>
+                  {diagnostic && (
+                    <p className="text-[10px] text-slate-400 ml-2">
+                      Última ejecución: {new Date(diagnostic.generated_at).toLocaleTimeString("es-GT")}
+                    </p>
+                  )}
+                </div>
+
+                {diagnostic && (
+                  <div className="space-y-2">
+                    {diagnostic.checks.map((c) => {
+                      const isOk = c.ok;
+                      const isError = !isOk && c.severity === "error";
+                      const isWarning = !isOk && c.severity === "warning";
+                      return (
+                        <motion.div
+                          key={c.id}
+                          layout
+                          data-testid={`diagnostic-item-${c.id}`}
+                          className={`flex items-start gap-3 rounded-2xl p-3 border ${
+                            isOk ? "bg-emerald-50/40 border-emerald-100"
+                            : isError ? "bg-red-50/60 border-red-200"
+                            : "bg-amber-50/50 border-amber-200"
+                          }`}
+                        >
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                            isOk ? "bg-emerald-100" : isError ? "bg-red-100" : "bg-amber-100"
+                          }`}>
+                            {isOk ? <CheckCircle size={15} className="text-emerald-600" />
+                              : isError ? <XCircle size={15} className="text-red-600" />
+                              : <ShieldAlert size={15} className="text-amber-600" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-slate-800">{c.label}</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5 break-words">{c.detail}</p>
+                          </div>
+                          {!isOk && c.fixable && (
+                            <motion.button
+                              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                              onClick={() => handleFixIssue(c.id)}
+                              disabled={diagFixingId === c.id}
+                              data-testid={`diagnostic-fix-${c.id}`}
+                              className="shrink-0 px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[10px] font-black flex items-center gap-1"
+                            >
+                              {diagFixingId === c.id ? <Loader2 size={10} className="animate-spin" /> : <Wrench size={10} />}
+                              Corregir
+                            </motion.button>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {!diagnostic && !diagLoading && (
+                  <p className="text-[11px] text-slate-400 py-4 text-center">
+                    Presiona "Ejecutar diagnóstico" para ver el estado completo de la app.
+                  </p>
+                )}
               </div>
             </CollapseBody>
           </div>
@@ -1766,6 +2162,90 @@ export default function DatabasePage() {
                   transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
                   initial={{ width: "40%" }}
                 />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══════════ MODAL: Conectar con GitHub ═══════════ */}
+      <AnimatePresence>
+        {ghConnectOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setGhConnectOpen(false)}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 22 }}
+              className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              data-testid="github-connect-modal"
+            >
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center">
+                  <Github size={28} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-black">Conectar con GitHub</h3>
+                  <p className="text-xs text-white/60 mt-0.5">Un solo paso: pega tu Personal Access Token</p>
+                </div>
+                <button onClick={() => setGhConnectOpen(false)} className="text-white/60 hover:text-white">
+                  <XCircle size={22} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                <div className="rounded-2xl bg-blue-50/70 border border-blue-200 p-4 space-y-2">
+                  <p className="text-xs font-black text-blue-900 flex items-center gap-1.5">
+                    <BookOpen size={12} /> Cómo obtener el token en 30 segundos
+                  </p>
+                  <ol className="text-[11px] text-blue-800 space-y-1 pl-4 list-decimal">
+                    <li>Abre <a href="https://github.com/settings/tokens/new?scopes=repo&description=Cinema%20Productions" target="_blank" rel="noopener noreferrer" className="underline font-bold inline-flex items-center gap-1">github.com/settings/tokens/new <ExternalLink size={10} /></a></li>
+                    <li>Nombre: "Cinema Productions" · Scope: <b>repo</b></li>
+                    <li>Click "Generate token" → copia el token (empieza con <code>ghp_</code>)</li>
+                    <li>Pégalo abajo 👇</li>
+                  </ol>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+                    <Key size={12} /> Personal Access Token
+                  </label>
+                  <input
+                    type="password"
+                    value={ghConnectToken}
+                    onChange={(e) => setGhConnectToken(e.target.value)}
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    autoFocus
+                    onKeyDown={(e) => e.key === "Enter" && handleConnectGithub()}
+                    data-testid="github-connect-token-input"
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-900/20 focus:bg-white transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    🔒 El token se guarda cifrado en tu base de datos. Solo se usa para push/pull al repositorio.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setGhConnectOpen(false)}
+                    className="flex-1 px-4 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                    onClick={handleConnectGithub}
+                    disabled={ghConnectSaving || !ghConnectToken.trim()}
+                    data-testid="github-connect-submit-btn"
+                    className="flex-1 px-4 py-3 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white text-sm font-black flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg"
+                  >
+                    {ghConnectSaving ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                    {ghConnectSaving ? "Conectando..." : "Conectar cuenta"}
+                  </motion.button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
