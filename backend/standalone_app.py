@@ -1645,17 +1645,107 @@ async def get_latest_update_local():
 
 @api_router.get("/updates/history")
 async def get_update_history_local():
+    """Historial de versiones. Combina:
+      1. Registros locales en la BD (paquetes descargados)
+      2. Tags de GitHub (versiones publicadas remotamente)
+    Así en la app de escritorio SIEMPRE se ve todo el historial, aunque
+    la BD local esté vacía."""
+    import urllib.request, json as _json
+
+    # 1) Registros locales
     cursor = db.app_updates.find({}, sort=[("created_at", -1)])
     docs = await cursor.to_list(200)
-    return [{"id": str(d["_id"]), "version": d.get("version", "?"),
-             "filename": d.get("filename", ""),
-             "notes": d.get("notes", ""), "channel": d.get("channel", "stable"),
-             "file_size": d.get("file_size", 0), "created_at": d.get("created_at", ""),
-             "is_latest": d.get("is_latest", False),
-             "source": d.get("source", "package"),
-             "commit_short": d.get("commit_short", ""),
-             "author": d.get("author", ""),
-             "branch": d.get("branch", "")} for d in docs]
+    local_records = [{
+        "id": str(d["_id"]),
+        "version": d.get("version", "?"),
+        "filename": d.get("filename", ""),
+        "notes": d.get("notes", ""),
+        "channel": d.get("channel", "stable"),
+        "file_size": d.get("file_size", 0),
+        "created_at": d.get("created_at", ""),
+        "is_latest": d.get("is_latest", False),
+        "source": d.get("source", "package"),
+        "commit_short": d.get("commit_short", ""),
+        "author": d.get("author", ""),
+        "branch": d.get("branch", ""),
+    } for d in docs]
+
+    # 2) Tags de GitHub
+    cfg = await _get_github_cfg()
+    repo_url = cfg.get("repo_url", "")
+    token = cfg.get("token", "")
+    owner, repo = _parse_github_url(repo_url)
+    github_records = []
+    if owner and repo:
+        try:
+            headers = {
+                "User-Agent": "cinema-productions",
+                "Accept": "application/vnd.github+json",
+            }
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            # Obtenemos hasta 50 tags
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=50",
+                headers=headers,
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                tags_data = _json.loads(resp.read().decode())
+
+            for tag in tags_data:
+                tag_name = tag.get("name", "")
+                # Solo tags con formato vX.Y
+                version = tag_name.lstrip("v")
+                commit_sha = tag.get("commit", {}).get("sha", "")
+
+                # Obtener detalles del commit del tag (fecha, mensaje)
+                commit_url = tag.get("commit", {}).get("url", "")
+                created_at = ""
+                notes = ""
+                if commit_url:
+                    try:
+                        req2 = urllib.request.Request(commit_url, headers=headers)
+                        with urllib.request.urlopen(req2, timeout=5) as r2:
+                            cdata = _json.loads(r2.read().decode())
+                        created_at = cdata.get("commit", {}).get("author", {}).get("date", "")
+                        notes = cdata.get("commit", {}).get("message", "")[:200]
+                    except Exception:
+                        pass
+
+                github_records.append({
+                    "id": f"gh:{tag_name}",
+                    "version": version,
+                    "filename": "",
+                    "notes": notes,
+                    "channel": "github",
+                    "file_size": 0,
+                    "created_at": created_at,
+                    "is_latest": False,  # se calcula luego
+                    "source": "github_tag",
+                    "commit_short": commit_sha[:7],
+                    "author": "",
+                    "branch": "main",
+                })
+        except Exception as e:
+            logger.warning(f"No se pudo leer tags de GitHub: {e}")
+
+    # 3) Combinar deduplicando por version
+    seen_versions = {r["version"] for r in local_records}
+    for gr in github_records:
+        if gr["version"] not in seen_versions:
+            local_records.append(gr)
+            seen_versions.add(gr["version"])
+
+    # 4) Ordenar por created_at descendente
+    local_records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+
+    # 5) Marcar la primera como is_latest
+    if local_records:
+        for r in local_records:
+            r["is_latest"] = False
+        local_records[0]["is_latest"] = True
+
+    return local_records
 
 
 @api_router.get("/updates/download/{update_id}")

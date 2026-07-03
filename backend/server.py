@@ -2261,9 +2261,12 @@ async def get_latest_update():
 
 @api_router.get("/updates/history")
 async def get_update_history():
+    """Historial que combina registros locales + tags de GitHub."""
+    import urllib.request, json as _json
+
     cursor = db.app_updates.find({}, sort=[("created_at", -1)])
     docs = await cursor.to_list(200)
-    return [
+    records = [
         {
             "id": str(d["_id"]),
             "version": d.get("version", "?"),
@@ -2280,6 +2283,70 @@ async def get_update_history():
         }
         for d in docs
     ]
+
+    # Añadir tags de GitHub (para que aparezcan aunque nadie los descargue)
+    cfg = await _get_github_config()
+    repo_url = cfg.get("repo_url", "")
+    token = cfg.get("token", "")
+    owner, repo = _parse_github_url(repo_url)
+    if owner and repo:
+        try:
+            headers = {"User-Agent": "cinema-productions", "Accept": "application/vnd.github+json"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=50",
+                headers=headers,
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                tags_data = _json.loads(resp.read().decode())
+
+            seen_versions = {r["version"] for r in records}
+            for tag in tags_data:
+                tag_name = tag.get("name", "")
+                version = tag_name.lstrip("v")
+                if version in seen_versions:
+                    continue
+                commit_sha = tag.get("commit", {}).get("sha", "")
+                # Fecha del commit
+                created_at = ""
+                notes = ""
+                try:
+                    req2 = urllib.request.Request(
+                        f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}",
+                        headers=headers,
+                    )
+                    with urllib.request.urlopen(req2, timeout=5) as r2:
+                        cdata = _json.loads(r2.read().decode())
+                    created_at = cdata.get("commit", {}).get("author", {}).get("date", "")
+                    notes = cdata.get("commit", {}).get("message", "")[:200]
+                except Exception:
+                    pass
+                records.append({
+                    "id": f"gh:{tag_name}",
+                    "version": version,
+                    "filename": "",
+                    "notes": notes,
+                    "channel": "github",
+                    "file_size": 0,
+                    "created_at": created_at,
+                    "is_latest": False,
+                    "source": "github_tag",
+                    "commit_short": commit_sha[:7],
+                    "author": "",
+                    "branch": "main",
+                })
+        except Exception as e:
+            logger.warning(f"No se pudo leer tags de GitHub: {e}")
+
+    # Ordenar y marcar latest
+    records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    if records:
+        for r in records:
+            r["is_latest"] = False
+        records[0]["is_latest"] = True
+
+    return records
 
 
 @api_router.get("/updates/download")
@@ -3027,6 +3094,28 @@ async def github_push_all(payload: dict = Body(default={})):
                 "repo_url": repo_url,
             })
             registered_version = version_str
+
+            # ── 6b. Crear TAG en GitHub para versionar el historial ──
+            # Los tags v1.NN quedan como "releases" persistentes en GitHub que
+            # las apps de escritorio pueden consultar directamente sin necesitar
+            # una base de datos compartida.
+            try:
+                tag_name = f"v{version_str}"
+                # Crea tag anotado y lo pushea
+                rc_tag, out_tag = _run(
+                    ["git", "tag", "-a", tag_name, "-m", message], cwd=work_dir
+                )
+                if rc_tag == 0:
+                    rc_push_tag, out_push_tag = _run(
+                        ["git", "push", "origin", tag_name],
+                        cwd=work_dir, timeout=120, sensitive=True,
+                    )
+                    if rc_push_tag != 0:
+                        logger.warning(f"No se pudo pushear tag {tag_name}: {out_push_tag[-200:]}")
+                else:
+                    logger.warning(f"No se pudo crear tag {tag_name}: {out_tag[-200:]}")
+            except Exception as tag_err:
+                logger.warning(f"Error creando tag: {tag_err}")
         except Exception as reg_err:
             logger.warning(f"No se pudo registrar el push como update: {reg_err}")
             registered_version = None
