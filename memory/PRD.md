@@ -182,3 +182,16 @@ Contiene claves de apariencia + configuración de negocio:
   2. Dos jobs de scheduler (cron diario 08:00 + por-minuto) pueden enviar email duplicado si `reminder_time`=08:00.
   3. Inconsistencia `reminder_days` (cron diario) vs `reminder_periods` (por-minuto).
   4. Menor: export XLSX `row_idx+1-1` redundante; `new_commits_data` con guard `in locals()`.
+
+### Actualización 2026-07-03 (tarde) — Fixes + refactor COMPLETADOS (testeado 38/38)
+- **Fixes de lógica aplicados y validados**:
+  1. Recordatorio a cliente: `email` → `client_email` (proyección + get). Ahora sí envía.
+  2. Emails duplicados: eliminado el cron diario 08:00; queda 1 solo job por-minuto (`check_and_push_reminders`) que dispara todos los canales (admin + cliente).
+  3. Client-notify movido a `_dispatch_reminders`; proyecciones incluyen client_email/total/advance.
+  4. `/notifications/pending` usa `max(reminder_periods)` (no `reminder_days`).
+  5. Export XLSX: `row_idx + 1 - 1` → `row_idx`.
+  6. OAuth Gmail: URLs de dominio muerto → env `APP_PUBLIC_URL` (backend/.env).
+- **Refactor de estructura (comportamiento idéntico, sin regresiones)**:
+  - `server.py` 4148 → 2700 líneas. Extraídos `desktop_package.py` (plantillas instalador) y `ai_context_default.py` (DEFAULT_AI_CONTEXT).
+  - Añadido ÍNDICE de navegación en server.py + `/app/ARCHITECTURE.md` (mapa interno para la próxima IA).
+- **Pendiente P2**: replicar fixes 1–4 en `standalone_app.py` (desktop); opcional: dividir server.py en routers por dominio (<700 líneas/archivo).
