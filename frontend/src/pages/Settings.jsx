@@ -1133,25 +1133,6 @@ export default function Settings() {
 
           </div>
         </Section>
-        {/* Database — moved to dedicated page */}
-        <Link to="/base-de-datos"
-          className="flex items-center gap-4 glass rounded-3xl p-5 hover:bg-white/40 transition-all group no-underline">
-          <div className="w-10 h-10 rounded-xl btn-primary flex items-center justify-center text-white shrink-0">
-            <Database size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-              {language === "es" ? "Base de Datos y Exportar" : "Database & Export"}
-            </p>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
-              {language === "es" ? "Respaldos, exportar CSV/JSON/PDF, conexión MongoDB" : "Backups, export CSV/JSON/PDF, MongoDB connection"}
-            </p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </Link>
-
         {/* ── APP DE ESCRITORIO — REDISEÑADO ────────────────────── */}
         <Section icon={Monitor} title={s.desktopTitle} desc={s.desktopDesc}
           badge={
