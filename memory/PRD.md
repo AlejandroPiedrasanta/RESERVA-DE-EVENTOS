@@ -234,3 +234,13 @@ consulta GitHub real (5 commits), /api/* → JSON 404, ZIP con launcher.pyw/Inic
 - **Sin doble pestaña**: launcher pasa CP_NO_BROWSER=1 al server; standalone no auto-abre si está seteado.
 - README actualizado. version 100% independiente (sin Emergent). NOTA: el usuario debe RE-DESCARGAR el ZIP.
 - desktop_wheels/ es caché de build en /app/backend (acelera descargas).
+
+### Actualización 2026-07-03 (v4) — Actualizaciones UX + versión corta + launcher animado
+- **Versión corta**: los paquetes ahora usan v1.10, v1.11... (contador desktop_build en app_settings) en vez del timestamp largo. Verificado: version.txt = 1.10.
+- **Botón unificado**: "Buscar actualización" ahora ejecuta el check de GitHub (misma función que el botón GitHub). handleCheckGithub muestra banner prominente:
+  - Al día → banner verde grande "¡Ya tienes la versión más actual! ✓" + toast.
+  - Hay cambios → banner ámbar con botón "Aplicar".
+  - Tras aplicar (web/git) → banner verde "¡Versión nueva instalada! 🎉" + reload; (desktop) → banner azul "descarga de nuevo el paquete".
+- **Launcher (desktop)**: agregadas animaciones — fade-in de ventana (-alpha) y barra superior de acento pulsante. Win11 redondea la ventana nativamente (esquinas redondeadas verdaderas requieren ventana sin bordes → posible mejora futura).
+- Verificado: launcher.pyw con _fade_in/_pulse_bar, config.bat ausente, 39 wheels, version 1.10.
+- **Limitación honesta**: en escritorio (ZIP independiente sin git) "aplicar actualización" = re-descargar el paquete; el check de GitHub sí es real (commits). En web (con remote git) el apply hace git fetch+reset.

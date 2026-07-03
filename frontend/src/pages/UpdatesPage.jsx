@@ -79,29 +79,40 @@ export default function UpdatesPage() {
     }
     setGhChecking(true);
     setGhResult(null);
+    setCheckResult(null);
     try {
       const res = await checkGithubUpdates();
-      setGhResult(res);
       if (res.has_updates) {
-        toast({ title: `¡${res.commits_ahead} commit(s) nuevo(s)!`, description: `Rama: ${res.branch}` });
+        setGhResult(res);
+        toast({ title: `Nueva versión disponible`, description: `${res.commits_ahead} cambio(s) nuevo(s). Pulsa "Aplicar" para instalarla.` });
       } else {
-        toast({ title: "Todo al día ✓", description: "No hay cambios en el repositorio" });
+        // Banner prominente: ya estás al día
+        setCheckResult({ status: "latest", version: "" });
+        toast({ title: "Ya tienes la versión más actual ✓", description: "Tu app está al día con el repositorio de GitHub" });
       }
     } catch (err) {
-      toast({ title: "Error", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+      toast({ title: "Error al verificar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
     } finally {
       setGhChecking(false);
     }
   };
 
   const handleApplyGithub = async () => {
-    if (!window.confirm("¿Aplicar la actualización desde GitHub?\n\nSe sobrescribirán los cambios locales y se reiniciarán los servicios.")) return;
+    if (!window.confirm("¿Aplicar la actualización desde GitHub?\n\nSe traerá el código nuevo y se actualizará la app.")) return;
     setGhApplying(true);
     try {
       const res = await applyGithubUpdate(true);
-      toast({ title: "🎉 ¡Actualización aplicada!", description: `Nuevo commit: ${res.new_sha_short}. Reiniciando servicios…` });
-      celebrateUpdate();
-      setTimeout(() => window.location.reload(), 5000);
+      setGhResult(null);
+      if (res.is_desktop) {
+        // App de escritorio: no aplica por git, se re-descarga el paquete
+        setCheckResult({ status: "desktop_update", message: res.message });
+        toast({ title: "Hay una versión nueva en GitHub", description: "Descarga el paquete de nuevo para actualizar tu app de escritorio." });
+      } else {
+        setCheckResult({ status: "installed", version: res.new_sha_short });
+        celebrateUpdate();
+        toast({ title: "🎉 Versión nueva instalada", description: "La app se está actualizando y reiniciando…" });
+        setTimeout(() => window.location.reload(), 4500);
+      }
     } catch (err) {
       toast({ title: "Error al aplicar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
     } finally {
@@ -210,17 +221,17 @@ export default function UpdatesPage() {
             </div>
             <div>
               <p className="text-sm font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                Buscar actualización en línea
+                Buscar actualización
               </p>
-              <p className="text-xs text-slate-400">Consulta la base de datos compartida en busca de nuevas versiones</p>
+              <p className="text-xs text-slate-400">Consulta tu repositorio de GitHub en busca de una versión nueva</p>
             </div>
           </div>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => handleCheckOnline(false)}
-            disabled={checking}
+            onClick={handleCheckGithub}
+            disabled={ghChecking}
             data-testid="check-updates-btn"
             className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl btn-primary text-white text-xs font-bold disabled:opacity-60 flex-shrink-0">
-            {checking
+            {ghChecking
               ? <><RefreshCw size={14} className="animate-spin" /> Buscando…</>
               : <><RefreshCw size={14} /> Buscar actualización</>}
           </motion.button>
@@ -337,7 +348,7 @@ export default function UpdatesPage() {
 
         {/* Check result */}
         <AnimatePresence mode="wait">
-          {checkResult?.status === "latest" && (
+          {(checkResult?.status === "latest" || checkResult?.status === "installed") && (
             <motion.div key="latest"
               initial={{ opacity: 0, scale: 0.92, y: -8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -359,16 +370,42 @@ export default function UpdatesPage() {
                 </motion.div>
                 <div className="flex-1 min-w-0">
                   <p className="text-lg sm:text-xl font-black leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                    ¡Ya estás actualizado! 🎉
+                    {checkResult.status === "installed" ? "¡Versión nueva instalada! 🎉" : "¡Ya tienes la versión más actual! ✓"}
                   </p>
                   <p className="text-sm text-white/85">
-                    Tienes la versión más reciente{checkResult.version ? ` — v${checkResult.version}` : ""}
+                    {checkResult.status === "installed"
+                      ? "El código se actualizó. Reiniciando la app…"
+                      : `Tu app está al día con GitHub${checkResult.version ? ` — v${checkResult.version}` : ""}`}
                   </p>
                 </div>
                 <motion.div animate={{ y: [0, -5, 0], rotate: [0, 12, 0] }} transition={{ duration: 1.8, repeat: Infinity }}
                   className="hidden sm:block flex-shrink-0">
                   <Sparkles size={26} className="text-white/70" />
                 </motion.div>
+              </div>
+            </motion.div>
+          )}
+          {checkResult?.status === "desktop_update" && (
+            <motion.div key="desktop-update"
+              initial={{ opacity: 0, scale: 0.92, y: -8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20 }}
+              data-testid="desktop-update-banner"
+              className="relative overflow-hidden rounded-3xl p-5 mt-4 text-white"
+              style={{ background: "linear-gradient(135deg, #0ea5e9, #6366f1)" }}>
+              <div className="flex items-center gap-4 relative z-10">
+                <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                  <Download size={26} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg font-black leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                    Hay una versión nueva en GitHub
+                  </p>
+                  <p className="text-sm text-white/85">
+                    {checkResult.message || "Descarga el paquete de nuevo (Ajustes → App de escritorio) para actualizar."}
+                  </p>
+                </div>
               </div>
             </motion.div>
           )}

@@ -231,8 +231,15 @@ class App:
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         root.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, (sh - h) // 2))
         root.resizable(False, False)
+        try:
+            root.attributes("-alpha", 0.0)
+            self._fade_in()
+        except Exception:
+            pass
 
-        tk.Frame(root, bg=ACC, height=4).pack(fill="x")
+        self.topbar = tk.Frame(root, bg=ACC, height=4)
+        self.topbar.pack(fill="x")
+        self._pulse_bar()
         tk.Label(root, text="CINEMA PRODUCTIONS", bg=BG, fg=TXT,
                  font=("Segoe UI Semibold", 23)).pack(pady=(46, 2))
         tk.Label(root, text="Gestor de Reservas de Eventos", bg=BG, fg=DIM,
@@ -260,6 +267,24 @@ class App:
                                padx=22, pady=7, cursor="hand2",
                                font=("Segoe UI Semibold", 10))
         root.after(250, self.start)
+
+    def _fade_in(self, a=0.0):
+        a = min(1.0, a + 0.08)
+        try:
+            self.root.attributes("-alpha", a)
+        except Exception:
+            return
+        if a < 1.0:
+            self.root.after(16, lambda: self._fade_in(a))
+
+    _pulse_shades = ["#6d5efc", "#8b7dff", "#a99dff", "#8b7dff"]
+
+    def _pulse_bar(self, i=0):
+        try:
+            self.topbar.config(bg=self._pulse_shades[i % len(self._pulse_shades)])
+            self.root.after(520, lambda: self._pulse_bar(i + 1))
+        except Exception:
+            pass
 
     def set(self, pct=None, status=None, detail=None, color=None):
         def _do():

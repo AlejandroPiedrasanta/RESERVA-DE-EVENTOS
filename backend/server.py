@@ -1994,8 +1994,11 @@ async def download_package(request: Request):
     cloud_url = str(request.base_url).rstrip("/")
     standalone_py = (ROOT_DIR / 'standalone_app.py').read_text()
 
-    # Auto-version based on timestamp
-    auto_version = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
+    # Version corta incremental estilo v1.10 (v1.<build>). Se guarda un contador.
+    _cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
+    _build = int(_cdoc.get("desktop_build", 9)) + 1
+    await db.app_settings.update_one({}, {"$set": {"desktop_build": _build}}, upsert=True)
+    auto_version = f"1.{_build}"
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
