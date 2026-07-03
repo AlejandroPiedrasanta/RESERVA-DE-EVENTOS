@@ -1,0 +1,12 @@
+{
+  "_meta": {
+    "created_at": "2026-07-03T17:13:25.507987+00:00",
+    "label": "manual",
+    "collections": [
+      "socios",
+      "reservations"
+    ]
+  },
+  "socios": [],
+  "reservations": []
+}

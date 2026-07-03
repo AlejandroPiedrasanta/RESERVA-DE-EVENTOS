@@ -13,12 +13,13 @@ import {
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {
-  getDbStats, testDbConnection, switchDatabase, resetDatabase,
+  getDbStats, testDbConnection, switchDatabase, resetDatabase, optimizeDatabase,
   getReservations, getBackupHistory, createServerBackup,
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
+import { fireEpic } from "@/lib/celebrations";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 
 const BASE = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL;
@@ -134,6 +135,8 @@ export default function DatabasePage() {
   const [dbConnecting, setDbConnecting] = useState(false);
   const [dbTesting, setDbTesting]       = useState(false);
   const [dbResetting, setDbResetting]   = useState(false);
+  const [backupModal, setBackupModal]   = useState(false);
+  const [optimizing, setOptimizing]     = useState(false);
   const [showClear, setShowClear]       = useState(false);
   const [openBlocks, setOpenBlocks] = useState({ backup: true, conn: true, github: true, cleanup: false, updates: false, options: false, danger: false });
   const toggleBlock = (k) => setOpenBlocks(p => ({ ...p, [k]: !p[k] }));
@@ -397,13 +400,32 @@ export default function DatabasePage() {
 
   const handleCreateServerBackup = async () => {
     setBackupCreating(true);
+    setBackupModal(true);
+    const startedAt = Date.now();
     try {
       const r = await createServerBackup();
-      toast({ title: r.message || "Respaldo guardado ✓" });
+      // asegurar que el popup se vea al menos 1s
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 1000) await new Promise(res => setTimeout(res, 1000 - elapsed));
+      setBackupModal(false);
+      fireEpic("success");
+      toast({ title: "🎉 Copia de seguridad completa lista", description: r.message || "Se respaldó toda la información" });
       loadBackupHistory();
     } catch (e) {
-      toast({ title: e.response?.data?.detail || "Error", variant: "destructive" });
+      setBackupModal(false);
+      toast({ title: e.response?.data?.detail || "Error al crear la copia", variant: "destructive" });
     } finally { setBackupCreating(false); }
+  };
+
+  const handleOptimize = async () => {
+    setOptimizing(true);
+    try {
+      const r = await optimizeDatabase();
+      toast({ title: "Base de datos optimizada ✓", description: r.message || "Compactada y reordenada" });
+      loadDbStats?.();
+    } catch (e) {
+      toast({ title: e.response?.data?.detail || "Error al optimizar", variant: "destructive" });
+    } finally { setOptimizing(false); }
   };
 
   const handleRestoreFile = async (e) => {
@@ -725,7 +747,7 @@ export default function DatabasePage() {
               {/* ── Contenido del respaldo ── */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Incluye:</span>
-                {["Reservas", "Socios", "Apariencia"].map((tag) => (
+                {["Reservas", "Socios", "Apariencia", "Temas", "Config.", "Todo"].map((tag) => (
                   <span key={tag} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex items-center gap-1">
                     <CheckCircle size={8} /> {tag}
                   </span>
@@ -881,6 +903,47 @@ export default function DatabasePage() {
                       <p className="text-xs font-mono text-slate-600 truncate">{dbStats.current_url}</p>
                     </div>
                   </div>
+
+                  {/* ── Espacio disponible ── */}
+                  {dbStats.free_size && (
+                    <div data-testid="db-space-info" className="bg-slate-50/80 rounded-2xl px-4 py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Espacio {dbStats.is_atlas ? "(MongoDB Atlas)" : ""}
+                        </p>
+                        <p className="text-[11px] font-black text-slate-600">
+                          {dbStats.used_size} usado{dbStats.limit_size && dbStats.limit_size !== "—" ? ` / ${dbStats.limit_size}` : ""}
+                        </p>
+                      </div>
+                      {typeof dbStats.used_pct === "number" && dbStats.limit_size !== "—" ? (
+                        <>
+                          <div className="h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.max(2, dbStats.used_pct)}%` }}
+                              transition={{ duration: 0.8 }}
+                              className={`h-full rounded-full ${dbStats.used_pct > 85 ? "bg-red-500" : dbStats.used_pct > 60 ? "bg-amber-500" : "bg-emerald-500"}`}
+                            />
+                          </div>
+                          <p className="text-[11px] font-bold text-emerald-600 mt-1.5">
+                            Te queda {dbStats.free_size} libre ({(100 - dbStats.used_pct).toFixed(1)}%)
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] font-bold text-emerald-600">{dbStats.free_size}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Compactar y reordenar ── */}
+                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                    onClick={handleOptimize} disabled={optimizing}
+                    data-testid="optimize-db-btn"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 text-white text-xs font-bold disabled:opacity-60">
+                    {optimizing
+                      ? <><RefreshCw size={14} className="animate-spin" /> Optimizando…</>
+                      : <><RefreshCw size={14} /> Compactar y reordenar base de datos</>}
+                  </motion.button>
                 </div>
               ) : (
                 <div className="flex items-center justify-between py-4">
@@ -1665,6 +1728,44 @@ export default function DatabasePage() {
                     {ctxContent}
                   </pre>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Popup: haciendo copia de seguridad completa ── */}
+      <AnimatePresence>
+        {backupModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            data-testid="backup-modal"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 22 }}
+              className="bg-white rounded-3xl p-8 mx-4 max-w-sm w-full text-center shadow-2xl">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+                className="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
+                <Database size={30} className="text-white" />
+              </motion.div>
+              <p className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                Haciendo copia de seguridad completa…
+              </p>
+              <p className="text-sm text-slate-500 mt-2">
+                Respaldando todas tus reservas, socios, diseños y configuración. No cierres la ventana.
+              </p>
+              <div className="mt-5 h-2 rounded-full bg-slate-100 overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: "linear-gradient(90deg,#6366f1,#8b5cf6)" }}
+                  animate={{ x: ["-40%", "140%"] }}
+                  transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                  initial={{ width: "40%" }}
+                />
               </div>
             </motion.div>
           </motion.div>

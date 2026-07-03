@@ -997,10 +997,20 @@ async def export_reservations_xlsx():
 # ─── Backup helpers ───────────────────────────────────────────
 BACKUP_COLLECTIONS = ["reservations", "socios", "app_settings"]
 
+async def _all_collections() -> list:
+    """All non-system collections in the DB (full backup coverage)."""
+    try:
+        names = await db.list_collection_names()
+    except Exception:
+        names = list(BACKUP_COLLECTIONS)
+    return [n for n in names if not n.startswith("system.")]
+
+
 async def _create_backup(label: str = "manual") -> dict:
-    """Create a JSON backup of all main collections, store in BACKUP_DIR."""
-    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "label": label}}
-    for cname in BACKUP_COLLECTIONS:
+    """Create a COMPLETE JSON backup of every collection, store in BACKUP_DIR."""
+    names = await _all_collections()
+    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "label": label, "collections": names}}
+    for cname in names:
         cursor = db[cname].find({})
         docs = await cursor.to_list(100000)
         backup_data[cname] = [doc_to_dict(d) for d in docs]
@@ -1024,8 +1034,9 @@ async def _create_backup(label: str = "manual") -> dict:
 @api_router.get("/backup/download")
 async def download_full_backup():
     """Download a complete backup of all collections as JSON (for local PC)."""
-    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "app": "Cinema Productions"}}
-    for cname in BACKUP_COLLECTIONS:
+    names = await _all_collections()
+    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "app": "Cinema Productions", "collections": names}}
+    for cname in names:
         cursor = db[cname].find({})
         docs = await cursor.to_list(100000)
         backup_data[cname] = [doc_to_dict(d) for d in docs]
@@ -1116,9 +1127,8 @@ async def restore_backup(file: UploadFile = File(...)):
 
     restored: dict = {}
     errors: list = []
-    for cname in BACKUP_COLLECTIONS:
-        docs = backup_data.get(cname)
-        if docs is None or not isinstance(docs, list):
+    for cname, docs in backup_data.items():
+        if cname == "_meta" or not isinstance(docs, list):
             continue
         try:
             # Remove serialized ids so MongoDB assigns fresh _id
@@ -1518,6 +1528,13 @@ async def get_db_stats():
             at_pos = current_url.rfind("@")
             display_url = current_url[:proto_end] + "***:***@" + current_url[at_pos + 1:]
 
+        is_atlas = current_url.startswith("mongodb+srv")
+        used = storage_bytes + index_bytes
+        # Atlas Free (M0) tiene 512 MB; para conexiones normales estimamos 512 MB tambien.
+        limit_bytes = 512 * 1024 ** 2
+        free_bytes = max(0, limit_bytes - used)
+        used_pct = round(min(100, used / limit_bytes * 100), 1)
+
         return {
             "db_name": DB_NAME,
             "collections": collections,
@@ -1525,12 +1542,53 @@ async def get_db_stats():
             "data_size": fmt(data_bytes),
             "storage_size": fmt(storage_bytes),
             "index_size": fmt(index_bytes),
-            "total_size": fmt(storage_bytes + index_bytes),
+            "total_size": fmt(used),
+            "used_size": fmt(used),
+            "free_size": fmt(free_bytes),
+            "limit_size": fmt(limit_bytes),
+            "used_pct": used_pct,
+            "is_atlas": is_atlas,
             "current_url": display_url,
             "is_custom": is_custom,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {e}")
+
+
+@api_router.post("/settings/database/optimize")
+async def optimize_database():
+    """Compacta y reordena: asegura índices útiles e intenta compactar colecciones.
+    (En Atlas compartido 'compact' no está permitido; se omite sin error.)"""
+    result = {"indexed": [], "compacted": [], "skipped": []}
+    try:
+        # 1) Índices útiles (permitido en Atlas)
+        try:
+            await db.reservations.create_index("event_date")
+            await db.reservations.create_index("status")
+            await db.reservations.create_index("created_at")
+            result["indexed"].append("reservations")
+        except Exception as e:
+            result["skipped"].append(f"idx reservations: {str(e)[:60]}")
+        try:
+            await db.socios.create_index("name")
+            result["indexed"].append("socios")
+        except Exception as e:
+            result["skipped"].append(f"idx socios: {str(e)[:60]}")
+
+        # 2) Compactar cada colección (se omite en Atlas compartido)
+        for cname in await _all_collections():
+            try:
+                await db.command({"compact": cname})
+                result["compacted"].append(cname)
+            except Exception:
+                result["skipped"].append(f"compact {cname} (no permitido aquí)")
+
+        msg = f"Optimización lista. Índices: {len(result['indexed'])}"
+        if result["compacted"]:
+            msg += f", compactadas: {len(result['compacted'])}"
+        return {"success": True, "message": msg, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al optimizar: {e}")
 
 
 @api_router.post("/settings/database/test")

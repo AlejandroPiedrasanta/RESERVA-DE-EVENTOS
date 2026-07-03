@@ -244,3 +244,19 @@ consulta GitHub real (5 commits), /api/* → JSON 404, ZIP con launcher.pyw/Inic
 - **Launcher (desktop)**: agregadas animaciones — fade-in de ventana (-alpha) y barra superior de acento pulsante. Win11 redondea la ventana nativamente (esquinas redondeadas verdaderas requieren ventana sin bordes → posible mejora futura).
 - Verificado: launcher.pyw con _fade_in/_pulse_bar, config.bat ausente, 39 wheels, version 1.10.
 - **Limitación honesta**: en escritorio (ZIP independiente sin git) "aplicar actualización" = re-descargar el paquete; el check de GitHub sí es real (commits). En web (con remote git) el apply hace git fetch+reset.
+
+### Actualización 2026-07-03 (v5) — Base de Datos: Atlas por defecto, backups completos, espacio, compactar
+- **MongoDB Atlas por defecto (escritorio)**: _ENV_TEMPLATE ahora trae de fábrica
+  MONGO_URL=mongodb+srv://reu1:...@cluster0.ozg25wu... + DB_NAME=cinema_productions.
+  (Se removió .db_override del preview builder que venía del repo, para no escribir en el Atlas real.)
+- **Backups COMPLETOS**: _create_backup / download / restore ahora recorren TODAS las colecciones
+  dinámicamente (list_collection_names), no solo reservations/socios/app_settings. Restaurar carga todo.
+- **Espacio disponible**: /settings/database devuelve used_size/free_size/limit_size/used_pct/is_atlas.
+  Frontend muestra barra "Te queda X libre" (límite estimado 512MB para Atlas Free/M0).
+- **Compactar y reordenar**: nuevo POST /settings/database/optimize (asegura índices; intenta compact,
+  omitido sin error en Atlas compartido/embebido). Botón "Compactar y reordenar" en la página.
+- **Popup + confeti**: al crear respaldo aparece modal "Haciendo copia de seguridad completa…" y al
+  terminar dispara confeti (fireEpic). Etiqueta "Incluye" actualizada.
+- Aplicado en server.py (web) y standalone_app.py (escritorio). NOTA: re-descargar el ZIP.
+- Limitación honesta: 'compact' no está permitido en Atlas compartido → optimize crea índices;
+  el límite 512MB es estimación de Atlas Free (varía según el plan real del usuario).

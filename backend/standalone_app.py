@@ -674,6 +674,11 @@ async def get_db_stats():
             "storage_size": fmt(data_file_size),
             "index_size": "0 B",
             "total_size": fmt(data_file_size),
+            "used_size": fmt(data_file_size),
+            "free_size": "Ilimitado (disco local)",
+            "limit_size": "—",
+            "used_pct": 0,
+            "is_atlas": False,
             "current_url": "embedded (cinema_data.json)",
             "is_custom": False,
         }
@@ -697,6 +702,10 @@ async def get_db_stats():
             proto_end = current_url.find("://") + 3
             at_pos = current_url.rfind("@")
             display_url = current_url[:proto_end] + "***:***@" + current_url[at_pos + 1:]
+        is_atlas = current_url.startswith("mongodb+srv")
+        used = storage_bytes + index_bytes
+        limit_bytes = 512 * 1024 ** 2
+        free_bytes = max(0, limit_bytes - used)
         return {
             "db_name": DB_NAME,
             "collections": raw.get("collections", 0),
@@ -704,7 +713,12 @@ async def get_db_stats():
             "data_size": fmt(data_bytes),
             "storage_size": fmt(storage_bytes),
             "index_size": fmt(index_bytes),
-            "total_size": fmt(storage_bytes + index_bytes),
+            "total_size": fmt(used),
+            "used_size": fmt(used),
+            "free_size": fmt(free_bytes),
+            "limit_size": fmt(limit_bytes),
+            "used_pct": round(min(100, used / limit_bytes * 100), 1),
+            "is_atlas": is_atlas,
             "current_url": display_url,
             "is_custom": is_custom,
         }
@@ -856,9 +870,18 @@ async def cleanup_data(action: str = "cancelled", months_old: int = 6):
 
 # ─── Backup helper ─────────────────────────────────────────
 
+async def _all_collections() -> list:
+    try:
+        names = await db.list_collection_names()
+    except Exception:
+        names = list(BACKUP_COLLECTIONS)
+    return [n for n in names if not n.startswith("system.")] or list(BACKUP_COLLECTIONS)
+
+
 async def _create_backup(label: str = "manual") -> dict:
-    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "label": label}}
-    for cname in BACKUP_COLLECTIONS:
+    names = await _all_collections()
+    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "label": label, "collections": names}}
+    for cname in names:
         docs = await db[cname].find({}).to_list(100000)
         backup_data[cname] = [doc_to_dict(d) for d in docs]
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -877,8 +900,9 @@ async def _create_backup(label: str = "manual") -> dict:
 
 @api_router.get("/backup/download")
 async def download_full_backup():
-    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "app": "Cinema Productions"}}
-    for cname in BACKUP_COLLECTIONS:
+    names = await _all_collections()
+    backup_data: dict = {"_meta": {"created_at": datetime.now(timezone.utc).isoformat(), "app": "Cinema Productions", "collections": names}}
+    for cname in names:
         docs = await db[cname].find({}).to_list(100000)
         backup_data[cname] = [doc_to_dict(d) for d in docs]
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -958,9 +982,8 @@ async def restore_backup(file: UploadFile = File(...)):
         pass
     restored: dict = {}
     errors: list = []
-    for cname in BACKUP_COLLECTIONS:
-        docs = backup_data.get(cname)
-        if docs is None or not isinstance(docs, list):
+    for cname, docs in backup_data.items():
+        if cname == "_meta" or not isinstance(docs, list):
             continue
         try:
             clean_docs = []
@@ -981,6 +1004,40 @@ async def restore_backup(file: UploadFile = File(...)):
     total = sum(restored.values())
     return {"success": True, "restored": restored, "total": total,
             "message": f"Restaurado correctamente: {total} documentos en {len(restored)} colecciones"}
+
+
+@api_router.post("/settings/database/optimize")
+async def optimize_database():
+    """Compacta y reordena: asegura índices e intenta compactar (se omite en embebido/Atlas)."""
+    result = {"indexed": [], "compacted": [], "skipped": []}
+    if _using_embedded:
+        try:
+            await _save_embedded_data()
+        except Exception:
+            pass
+        return {"success": True, "message": "Base local reordenada y guardada.", **result}
+    try:
+        try:
+            await db.reservations.create_index("event_date")
+            await db.reservations.create_index("status")
+            await db.reservations.create_index("created_at")
+            result["indexed"].append("reservations")
+        except Exception as e:
+            result["skipped"].append(f"idx reservations: {str(e)[:60]}")
+        try:
+            await db.socios.create_index("name")
+            result["indexed"].append("socios")
+        except Exception as e:
+            result["skipped"].append(f"idx socios: {str(e)[:60]}")
+        for cname in await _all_collections():
+            try:
+                await db.command({"compact": cname})
+                result["compacted"].append(cname)
+            except Exception:
+                result["skipped"].append(f"compact {cname} (no permitido aquí)")
+        return {"success": True, "message": f"Optimización lista. Índices: {len(result['indexed'])}", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al optimizar: {e}")
 
 
 # ─── Import / Export adicionales ──────────────────────────

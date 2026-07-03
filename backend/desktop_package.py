@@ -23,10 +23,11 @@ _ENV_TEMPLATE = """# =======================================================
 #       Accesible desde cualquier dispositivo.
 #
 # Para cambiar: edita este archivo con el Bloc de Notas, guarda y reinicia la app.
-# O ejecuta config.bat para una ventana visual de configuracion.
 # O usa la interfaz: Ajustes > Base de Datos > Cambiar conexion MongoDB
 #
-MONGO_URL=embedded
+# Viene configurada de fabrica con tu MongoDB Atlas (nube). Para usar la base
+# local en su lugar, cambia la linea de abajo por:  MONGO_URL=embedded
+MONGO_URL=mongodb+srv://reu1:cinemaproductions@cluster0.ozg25wu.mongodb.net/?appName=Cluster0
 DB_NAME=cinema_productions
 """
 
