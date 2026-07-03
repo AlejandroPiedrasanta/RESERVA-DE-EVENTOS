@@ -1647,10 +1647,15 @@ async def get_latest_update_local():
 async def get_update_history_local():
     cursor = db.app_updates.find({}, sort=[("created_at", -1)])
     docs = await cursor.to_list(200)
-    return [{"id": str(d["_id"]), "version": d["version"], "filename": d["filename"],
+    return [{"id": str(d["_id"]), "version": d.get("version", "?"),
+             "filename": d.get("filename", ""),
              "notes": d.get("notes", ""), "channel": d.get("channel", "stable"),
-             "file_size": d["file_size"], "created_at": d["created_at"],
-             "is_latest": d.get("is_latest", False)} for d in docs]
+             "file_size": d.get("file_size", 0), "created_at": d.get("created_at", ""),
+             "is_latest": d.get("is_latest", False),
+             "source": d.get("source", "package"),
+             "commit_short": d.get("commit_short", ""),
+             "author": d.get("author", ""),
+             "branch": d.get("branch", "")} for d in docs]
 
 
 @api_router.get("/updates/download/{update_id}")

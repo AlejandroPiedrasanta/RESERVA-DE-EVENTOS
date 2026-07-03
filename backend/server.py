@@ -2266,13 +2266,17 @@ async def get_update_history():
     return [
         {
             "id": str(d["_id"]),
-            "version": d["version"],
-            "filename": d["filename"],
+            "version": d.get("version", "?"),
+            "filename": d.get("filename", ""),
             "notes": d.get("notes", ""),
             "channel": d.get("channel", "stable"),
-            "file_size": d["file_size"],
-            "created_at": d["created_at"],
+            "file_size": d.get("file_size", 0),
+            "created_at": d.get("created_at", ""),
             "is_latest": d.get("is_latest", False),
+            "source": d.get("source", "package"),
+            "commit_short": d.get("commit_short", ""),
+            "author": d.get("author", ""),
+            "branch": d.get("branch", ""),
         }
         for d in docs
     ]
