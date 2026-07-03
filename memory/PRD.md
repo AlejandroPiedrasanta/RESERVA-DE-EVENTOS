@@ -1,0 +1,184 @@
+# PRD — Cinema Productions: Gestión de Reservas de Eventos
+
+## Problema Original
+Crear un programa para gestionar reserva de eventos. Un cliente da un anticipo para una fecha. Búsqueda por mes/año en el calendario. Configuración de base de datos dinámica. Recordatorios (Email/WhatsApp). Paquete instalable/portable local. Notificaciones de sistema (Windows) y gráficos de barras en calendario/dashboard.
+
+## Usuario Objetivo
+Empresas de producción de eventos (ej. Cinema Productions) que gestionan reservas, pagos anticipados y comunicación con clientes.
+
+---
+
+## Arquitectura
+- **Frontend**: React + TailwindCSS + Framer Motion + Shadcn UI
+- **Backend**: FastAPI (Python)
+- **Base de Datos**: MongoDB (Motor async)
+- **Contexto Global**: SettingsContext.jsx (tema, idioma, apariencia, etc.)
+
+### Estructura de archivos clave:
+```
+/app/
+├── backend/
+│   ├── server.py             # FastAPI principal (web)
+│   └── standalone_app.py     # FastAPI embebido en el ZIP (app local de escritorio)
+├── frontend/src/
+│   ├── components/
+│   │   └── Layout.jsx     # Sidebar (Dashboard, Reservaciones, Calendario, Socios, Base de Datos, Apariencia, Ajustes)
+│   ├── context/
+│   │   └── SettingsContext.jsx   # Estado global de apariencia + 6 nuevos estados
+│   ├── pages/
+│   │   ├── Dashboard.jsx
+│   │   ├── Reservations.jsx
+│   │   ├── CalendarView.jsx
+│   │   ├── Socios.jsx
+│   │   ├── DatabasePage.jsx
+│   │   ├── AppearancePage.jsx   ← (9 secciones de apariencia)
+│   │   └── Settings.jsx         ← Solo: idioma, moneda, notif, negocio, escritorio, publicar
+│   ├── App.js             # Router con /apariencia route + pageTransition dinámico
+│   └── index.css          # Variables CSS dinámicas + nuevos data attributes
+```
+
+---
+
+## Funcionalidades Implementadas ✅
+
+### Core
+- Gestión de reservas (CRUD) con anticipo, balance, fecha de evento
+- Calendario mensual con filtros y visualización
+- Dashboard con estadísticas y gráficos
+- Gestión de Socios (equipo)
+
+### Apariencia (AppearancePage.jsx — 9 secciones)
+- **Paleta de Colores**: 6 temas de acento + color hex personalizado + presets de diseño (Glass Aurora, Crystal, Minimal) + saturación
+- **Tipografía e Iconos**: 8 familias de fuente + 3 tamaños de texto + tamaño de iconos
+- **Animaciones y Movimiento**: Toggle de animaciones + velocidad (lento/normal/rápido/instante) + transición de páginas (fade/slide/zoom/ninguna) + efecto hover
+- **Formas y Bordes**: 3 estilos de borde + 5 estilos de tarjeta + 3 estilos de botón + 4 sombras
+- **Fondo y Colores**: Modo oscuro + intensidad de fondo + intensidad del vidrio/blur + gradiente personalizado + imagen de fondo URL
+- **Interfaz y Espacio**: Densidad del contenido + estilo de barra lateral + barra lateral compacta + ancho del contenido + scrollbar + formato de fecha
+- **Tipos de Evento**: Personalizar icono y color de cada tipo
+- **Diseño de PDF**: 3 temas + exportar PDF
+- **Logo y Marca**: Logo sidebar + logo PDF separado
+
+### Notificaciones Multi-canal (Settings.jsx)
+- Email vía Resend
+- Telegram Bot
+- ntfy.sh
+- Web Push (browser notifications)
+- WhatsApp link automático
+
+### Base de Datos (DatabasePage.jsx)
+- JSON Backup/Restore
+- Auto-backup a PC local
+- CSV/Excel Import/Export
+- Limpieza de base de datos
+- Cambio dinámico de MongoDB URL
+
+### Ajustes (Settings.jsx — solo no-apariencia)
+- Idioma (ES/EN)
+- Moneda (Q/$/€/₡)
+- Config de negocio
+- App de escritorio (descarga)
+- Publicar en línea (guía de despliegue)
+
+### Reservaciones (Reservations.jsx)
+- Listado ordenado de fecha más cercana a más lejana
+- Máximo 8 filas visibles con botón "Mostrar más (N restantes)"
+- Filtro por Tipo de Evento, Estado, Paquete (Básico/Intermedio/Completo)
+- Filtro por rango de fechas (Desde/Hasta) mediante botón "Más filtros"
+- Botón "Limpiar" para resetear todos los filtros
+
+### Calendario (CalendarView.jsx)
+- Pastillas muestran siempre el Tipo de Evento (no el nombre del cliente)
+
+### Dashboard (Dashboard.jsx)
+- "Próximas Reservas" muestra eventos del mes actual ordenados de fecha más cercana a más lejana
+- 5 estilos visuales: Línea, Línea Paquete, Tarjeta, Compacto, Banda
+
+---
+
+## Schema DB Principal
+
+### `app_settings` (MongoDB)
+Contiene claves de apariencia + configuración de negocio:
+- `theme, preset, animations, radius, pdfTheme`
+- `darkMode, fontScale, bgIntensity, sidebarCompact, dateFormat`
+- `fontFamily, cardStyle, animSpeed, shadowDepth, pageWidth, btnCorner, scrollbar`
+- `customBgEnabled, bgColor1, bgColor2, customAccent, saturation, hoverEffect`
+- `glassBlur, layoutDensity, pageTransition, iconSize, sidebarStyle, bgImage` (NUEVOS)
+- `eventConfigs, logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo`
+- Notificaciones, config negocio, etc.
+
+---
+
+## Rutas API clave
+- `GET/POST /api/settings`
+- `GET/POST /api/reservations`
+- `GET/POST /api/socios`
+- `GET /api/db/stats`, `POST /api/db/switch`, `POST /api/db/reset`
+- `GET /api/db/export-json`, `POST /api/db/restore`
+- `GET /api/db/export-csv`, `POST /api/db/import-csv`
+- `GET /api/db/export-xlsx`
+- `POST /api/reminders/send-test`
+
+---
+
+## Integraciones de Terceros
+- **Resend** — Emails de recordatorio (requiere API key del usuario)
+- **Telegram Bot API** — Notificaciones Telegram (requiere token + chat ID)
+- **ntfy.sh** — Push notifications (requiere topic name)
+
+---
+
+## Roadmap / Backlog
+
+### P1 — Próximos
+- WhatsApp automático vía Twilio
+
+### P2 — Futuro
+- Portal para clientes con link único
+- Integración de pagos online Stripe/Wompi
+
+---
+
+## Changelog (resumido)
+- 2025: MVP inicial — Reservas, Calendario, Dashboard, Socios
+- 2025: Notificaciones multi-canal (Resend, Telegram, ntfy, Web Push)
+- 2025: Base de datos avanzada (backup, restore, import, export)
+- 2025: 13+ opciones de apariencia en Settings.jsx
+- 2026-04-15: **Migración a AppearancePage.jsx** + 6 nuevas funciones
+- 2026: **Limpieza de Settings.jsx** — Eliminadas secciones redundantes
+- 2026: **Títulos del Sitio** en Apariencia
+- 2026: **Campos de Formulario** en Apariencia — Toggles para activar/desactivar campos
+- 2026-04-20: **3 mejoras formulario/dashboard**
+- 2026-04-16: **Fix real_income=0 en app local**
+- 2026-04-21: **Fix Bug Crítico Backup/Restore**
+- 2026-04-21: **Limpieza y unificación de Base de Datos**; Socios drag-and-drop
+- 2026-04-21: **Widgets configurables del Dashboard**
+- 2026-04-21: **Dashboard Próximas Reservas mejorado**
+- 2026-04-22: **5 estilos visuales Dashboard** + campo Paquete (Básico/Intermedio/Completo)
+- 2026-04-22: **Socios: Panel asignar evento** con toggle Pendiente↔Pagado
+- 2026-04-22: **Reservaciones mejoradas**: paginación 8+mostrar más, filtros extra (paquete, rango fechas), orden fecha más cercana. **Calendario**: pastillas siempre muestran tipo de evento.
+- 2026-07-02: **Base de Datos mejorada**: (1) Sección "Actualizaciones guardadas" — lista de versiones almacenadas en la DB con versión, canal, tamaño, fecha y botón eliminar. (2) 3 modos de conexión: URL completa | Por IP/campos (host+puerto+user+pass+db auto-genera la URL) | NAS/Red local (igual con UI específica para NAS). (3) 4 opciones toggle: auto-probar antes de conectar, notificar al cambiar, mostrar URL completa, comprimir respaldos.
+- 2026-07-02: **Mega actualización de UX (6 features, testeadas 100%)**:
+  1. **Actualizaciones en línea**: botón "Buscar actualización en línea" (`GET /api/updates/check`), anuncio ANIMADO verde "¡Ya estás actualizado! 🎉" con anillos pulsantes, toggle de chequeo automático (`auto_check_updates`, respetado también por el banner del escritorio en Layout).
+  2. **Apariencia contraíble + buscador**: todas las secciones de Apariencia y Ajustes ahora son acordeones colapsables (`SectionShell.jsx` compartido) con buscador inteligente sin acentos que filtra secciones por su contenido interno (`sectionSearch.js`).
+  3. **Menú personalizable**: nueva sección "Menú de Navegación" — reordenar con flechas y renombrar los items del sidebar en tiempo real (`navConfig` en SettingsContext, consumido por Layout).
+  4. **Temas guardados + sync nube**: guardar apariencia con nombre ilimitados (`saved_themes` collection, GET/POST/DELETE `/api/themes`), aplicar/eliminar, restaurar por defecto. La apariencia activa se sube sola a MongoDB (`PUT /api/settings/appearance`, debounce 2s) y todos los dispositivos (web + escritorio, misma BD) la aplican al arrancar (pull en mount + reload si difiere; snapshot vacío = local gana). Mirroreado en `standalone_app.py` + persistencia embebida.
+  5. **Modo DaVinci Resolve**: sección "Modo de Diseño Global" — transforma TODA la app a paneles oscuros tipo collage con bordes, esquinas rectas y acento naranja (`html[data-ui-mode="davinci"]` en index.css).
+  6. **Tutorial de bienvenida (18 pasos)**: `WelcomeTour.jsx` aparece la primera vez (localStorage `tour_done`), navega automáticamente por todas las páginas con spotlight sobre elementos, Anterior/Siguiente/Saltar; desactivable y relanzable desde Apariencia → Tutorial de Bienvenida.
+- 2026-07-02 (tarde): **Seguridad + animaciones + limpieza (testeado 100% — backend 11/11, frontend todos los flujos)**:
+  1. **Modo DaVinci Resolve ELIMINADO** a petición del usuario (sección, CSS y estado removidos; paso del tour reemplazado por Seguridad).
+  2. **Apartado Seguridad en Ajustes** (`SecuritySection.jsx`): (a) Protección de página — bloquea clic derecho, copiar/pegar/cortar y selección de texto en toda la app EXCEPTO inputs/textareas (listeners en SettingsContext + clase `body.page-protected`); (b) Contraseña para toda la app — pantalla de bloqueo animada (`LockScreen.jsx`) al abrir, se pide una vez por sesión (sessionStorage `cp_app_unlocked`), con pista de seguridad recuperable ("¿Olvidaste tu contraseña?"). Hash PBKDF2-SHA256 (260k iteraciones, stdlib para paridad con desktop) en `app_settings`. Endpoints `/api/security/status|set-password|verify|remove-password|protection` espejados en `standalone_app.py`. `GET /api/settings` nunca expone el hash.
+  3. **Base de Datos contraíble**: los 6 bloques (respaldo auto, conexión, limpieza, actualizaciones, opciones, zona de peligro) ahora colapsan con chevron animado (backup y conexión abiertos por defecto); botones internos de los headers usan stopPropagation.
+  4. **Animaciones sutiles en toda la app**: iconos del sidebar con wiggle al hover y pulso en el activo, StatCards del Dashboard con icono flotante + anillo pulsante + entrada spring, títulos `gradient-text` con gradiente animado, brillo (shine sweep) al hover en botones primarios, iconos flotantes en estados vacíos, iconos de secciones con hover animado. Todo respeta el toggle de animaciones (`data-animations="false"`).
+  - Deuda técnica anotada por QA (no bloqueante): extraer los 6 bloques de `DatabasePage.jsx` (1325 líneas) a componentes; `AppearancePage.jsx` sigue >2000 líneas; los headers colapsables de BD podrían usar `<button>` con aria-expanded.
+
+---
+## Sesión 2026-07-03 — Re-clonado y puesta en marcha
+- Repo clonado desde GitHub e instalado en /app (deps backend+frontend OK).
+- Servicios corriendo: backend :8001 (scheduler OK), frontend :3000 (dashboard carga).
+- MongoDB local vacío (DB_NAME=test_database) → 0 reservas iniciales.
+- **Errores de lógica detectados (backend/server.py, pendientes de aprobación para fix):**
+  1. `check_and_send_reminders`: proyecta `email` pero las reservas usan `client_email` → recordatorio a cliente nunca se envía.
+  2. Dos jobs de scheduler (cron diario 08:00 + por-minuto) pueden enviar email duplicado si `reminder_time`=08:00.
+  3. Inconsistencia `reminder_days` (cron diario) vs `reminder_periods` (por-minuto).
+  4. Menor: export XLSX `row_idx+1-1` redundante; `new_commits_data` con guard `in locals()`.
