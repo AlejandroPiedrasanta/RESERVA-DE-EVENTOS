@@ -620,6 +620,8 @@ resend>=2.0.0
 httpx>=0.24.0
 openpyxl>=3.1.0
 pyzipper>=0.3.0
+apscheduler>=3.10.0
+bcrypt>=4.0.0
 tzdata>=2023.3
 """
 
