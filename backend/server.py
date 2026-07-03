@@ -82,10 +82,11 @@ DESKTOP_WHEELS_DIR = ROOT_DIR / "desktop_wheels"
 
 
 def _ensure_desktop_wheels():
-    """Descarga (una vez, cacheado) wheels win_amd64 para instalacion offline del escritorio."""
-    import sys as _sys, subprocess as _sp
+    """Descarga (cacheado por hash de requirements) wheels win_amd64 para instalacion offline del escritorio."""
+    import sys as _sys, subprocess as _sp, hashlib as _hl
+    req_hash = _hl.md5(_REQUIREMENTS.encode("utf-8")).hexdigest()
     marker = DESKTOP_WHEELS_DIR / ".ok"
-    if marker.exists() and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
+    if marker.exists() and marker.read_text().strip() == req_hash and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
         return DESKTOP_WHEELS_DIR
     DESKTOP_WHEELS_DIR.mkdir(exist_ok=True)
     req = DESKTOP_WHEELS_DIR / "req.txt"
@@ -96,12 +97,12 @@ def _ensure_desktop_wheels():
             _sp.run([_sys.executable, "-m", "pip", "download", "-r", str(req),
                      "--dest", str(DESKTOP_WHEELS_DIR), "--platform", "win_amd64",
                      "--python-version", ver, "--only-binary=:all:", "--implementation", "cp"],
-                    check=True, timeout=240, stdout=_sp.PIPE, stderr=_sp.STDOUT)
+                    check=True, timeout=300, stdout=_sp.PIPE, stderr=_sp.STDOUT)
             got = True
         except Exception as e:
             logger.warning(f"[desktop] wheel download py{ver} fallo: {e}")
     if got and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
-        marker.write_text("ok", encoding="utf-8")
+        marker.write_text(req_hash, encoding="utf-8")
     return DESKTOP_WHEELS_DIR
 
 # ── Google / VAPID config ─────────────────────────────────────

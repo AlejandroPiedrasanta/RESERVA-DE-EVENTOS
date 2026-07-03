@@ -619,6 +619,7 @@ mongomock-motor>=0.0.36
 resend>=2.0.0
 httpx>=0.24.0
 openpyxl>=3.1.0
+pyzipper>=0.3.0
 tzdata>=2023.3
 """
 

@@ -2336,9 +2336,9 @@ async def run_diagnostic():
             "fixable": bool(fixable),
         })
 
-    # 1) Dependencias Python críticas
-    critical_py = ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt"]
-    # pyzipper y requests son opcionales en desktop embedded
+    # 1) Dependencias Python críticas (SOLO las que la app de escritorio usa)
+    critical_py = ["fastapi", "motor", "pymongo", "pydantic", "pyzipper"]
+    # nota: apscheduler/bcrypt NO se usan en desktop (contraseñas via hashlib.pbkdf2)
     missing_py = [p for p in critical_py if importlib.util.find_spec(p) is None]
     add("python_deps",
         f"Dependencias Python ({len(critical_py)} críticas)",
@@ -2457,21 +2457,48 @@ async def diagnostic_fix(payload: dict = Body(...)):
     detail = ""
 
     if check_id == "python_deps":
-        # En desktop no hay requirements.txt centralizado, pero podemos intentar
-        # instalar el paquete faltante conocido
-        import importlib.util
-        missing = [p for p in ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt"]
-                   if importlib.util.find_spec(p) is None]
+        # Instalación robusta: usa el intérprete actual (pip como módulo, no del PATH),
+        # prioriza las wheels OFFLINE de libs/ (-r requirements.txt) y cae a online.
+        import importlib.util, sys as _sys
+        crit = ["fastapi", "motor", "pymongo", "pydantic", "pyzipper"]
+        req = ROOT_DIR / "requirements.txt"
+        libs = ROOT_DIR / "libs"
+        has_libs = libs.exists() and any(libs.glob("*.whl"))
+        base = [_sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-q"]
+
+        attempts = []
+        if req.exists() and has_libs:
+            attempts.append(base + ["--no-index", "--find-links", str(libs), "-r", str(req)])
+        if req.exists():
+            attempts.append(base + ["-r", str(req)])
+        missing = [p for p in crit if importlib.util.find_spec(p) is None]
+        if missing and has_libs:
+            attempts.append(base + ["--no-index", "--find-links", str(libs)] + missing)
         if missing:
-            result = subprocess.run(
-                ["pip", "install", "--quiet"] + missing,
-                capture_output=True, text=True, timeout=180,
-            )
-            fixed = result.returncode == 0
-            detail = f"Instalados: {', '.join(missing)}"
-        else:
+            attempts.append(base + missing)
+
+        out = ""
+        for cmd in attempts:
+            try:
+                r = subprocess.run(cmd, cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=300)
+                out = ((r.stdout or "") + (r.stderr or ""))[-600:]
+                if r.returncode == 0:
+                    break
+            except Exception as e:
+                out += f"\n{e}"
+
+        importlib.invalidate_caches()
+        still = [p for p in crit if importlib.util.find_spec(p) is None]
+        if not still:
             fixed = True
-            detail = "Todas las dependencias ya están instaladas"
+            try:
+                (ROOT_DIR / ".deps_ok").write_text("ok", encoding="utf-8")
+            except Exception:
+                pass
+            detail = "Dependencias instaladas correctamente" + (" (offline desde libs/)" if has_libs else " (descarga online)")
+        else:
+            fixed = False
+            detail = f"Aún faltan: {', '.join(still)}. Detalle: {out[-300:]}"
     elif check_id == "github_default_repo":
         await db.app_settings.update_one(
             {},
