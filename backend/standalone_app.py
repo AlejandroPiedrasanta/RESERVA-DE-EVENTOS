@@ -2008,62 +2008,56 @@ async def apply_github_update(payload: dict = Body(default={})):
             raise HTTPException(status_code=500, detail="Tarball vacío o corrupto")
         src_root = subdirs[0]
 
-        # 4) Copiar archivos sobre la instalación
-        # Archivos que NUNCA se sobreescriben (datos del usuario)
+        # 4) Aplicar sobre la instalación.
+        # IMPORTANTE: la instalación de escritorio tiene layout PLANO:
+        #   install_dir/app.py   (= backend/standalone_app.py del repo)
+        #   install_dir/build/   (= frontend/build/ del repo — UI que se sirve)
+        #   install_dir/<archivos raíz>
+        # El repo es ANIDADO (backend/, frontend/), así que hay que REMAPEAR,
+        # no copiar tal cual (ese era el bug: caía en frontend/build y backend/).
         preserve = {".env", "cinema_data.json", "cinema_data.json.bak", "backups", "uploads", ".db_override"}
-        # Directorios del repo que interesa copiar
-        # (backend/, frontend/build/ si existe, y archivos raíz)
         copied = 0
         skipped_preserve = 0
 
-        def _copy_tree(src, dst_base):
-            nonlocal copied, skipped_preserve
-            for item in src.rglob("*"):
-                if not item.is_file():
-                    continue
-                rel = item.relative_to(src.parent)
-                # Ignorar archivos preservados
-                if any(part in preserve for part in rel.parts):
-                    skipped_preserve += 1
-                    continue
-                # Ignorar directorios de dev que no queremos
-                if any(part in {"node_modules", "__pycache__", ".pytest_cache", ".git", ".cache"}
-                       for part in rel.parts):
-                    continue
-                dest = dst_base / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(item), str(dest))
-                copied += 1
+        def _copy_file(src_file, dst_file):
+            nonlocal copied
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_file), str(dst_file))
+            copied += 1
 
-        # Copiar TODO el repo (backend/, frontend/, root files)
-        # sobre install_dir
+        # 4a) UI compilada: repo/frontend/build/*  ->  install_dir/build/*
+        repo_build = src_root / "frontend" / "build"
+        if repo_build.exists() and (repo_build / "index.html").exists():
+            dst_build = install_dir / "build"
+            if dst_build.exists():
+                shutil.rmtree(str(dst_build), ignore_errors=True)
+            shutil.copytree(str(repo_build), str(dst_build))
+            copied += sum(1 for f in dst_build.rglob("*") if f.is_file())
+
+        # 4b) Backend: repo/backend/standalone_app.py  ->  install_dir/app.py
+        repo_app = src_root / "backend" / "standalone_app.py"
+        if repo_app.exists():
+            _copy_file(repo_app, install_dir / "app.py")
+        # Otros módulos .py del backend (por si app.py los importa) -> raíz
+        repo_backend = src_root / "backend"
+        if repo_backend.exists():
+            for pyf in repo_backend.glob("*.py"):
+                if pyf.name in {"standalone_app.py", "server.py"}:
+                    continue
+                _copy_file(pyf, install_dir / pyf.name)
+
+        # 4c) Archivos raíz del repo (version.txt, README, etc.) -> install_dir
+        _skip_root = {".git", "node_modules", "__pycache__", ".cache", "backend",
+                      "frontend", "memory", "tests", "test_reports", ".emergent"}
         for item in src_root.iterdir():
             if item.name in preserve:
                 skipped_preserve += 1
                 continue
-            if item.name in {".git", "node_modules", "__pycache__", ".cache"}:
+            if item.name in _skip_root:
                 continue
-
-            dest = install_dir / item.name
             if item.is_file():
-                shutil.copy2(str(item), str(dest))
-                copied += 1
-            elif item.is_dir():
-                # Merge directories preserving user data inside
-                for sub in item.rglob("*"):
-                    if not sub.is_file():
-                        continue
-                    rel = sub.relative_to(src_root)
-                    if any(part in preserve for part in rel.parts):
-                        skipped_preserve += 1
-                        continue
-                    if any(part in {"node_modules", "__pycache__", ".pytest_cache", ".git", ".cache"}
-                           for part in rel.parts):
-                        continue
-                    dest_file = install_dir / rel
-                    dest_file.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(sub), str(dest_file))
-                    copied += 1
+                _copy_file(item, install_dir / item.name)
+
 
         # 5) Guardar SHA aplicado
         remote_sha = cfg.get("last_remote_sha", "")
