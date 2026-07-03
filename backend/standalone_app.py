@@ -1846,21 +1846,182 @@ async def check_github_updates():
 
 @api_router.post("/github/apply-update")
 async def apply_github_update(payload: dict = Body(default={})):
-    """En escritorio no se aplica con git: se instruye re-descargar el ZIP."""
+    """AUTO-UPDATE desde GitHub: descarga los archivos actualizados del repositorio
+    y los aplica sobre la instalación actual, sin intervención manual.
+
+    Funcionamiento:
+    1. Localiza la carpeta del ejecutable actual.
+    2. Descarga el tarball del repositorio desde GitHub API.
+    3. Descomprime en temp dir.
+    4. Copia backend/*, frontend/build/*, y archivos raíz sobre la instalación,
+       PRESERVANDO .env, cinema_data.json, backups/ y uploads/.
+    5. Actualiza last_commit_sha en la BD.
+    6. Programa reinicio del proceso (o solo copia si dry_run=true).
+    """
+    import sys, subprocess, tarfile, shutil, tempfile, threading, time
+    import urllib.request
+
+    dry_run = bool(payload.get("dry_run", False))
+
     cfg = await _get_github_cfg()
-    last = cfg.get("last_remote_sha", "")
-    if last:
-        await db.app_settings.update_one(
-            {}, {"$set": {"github_config.last_commit_sha": last}}, upsert=True)
-        if _using_embedded:
-            asyncio.create_task(_save_embedded_data())
-    return {
-        "success": True,
-        "is_desktop": True,
-        "message": ("Esta es la app de escritorio. Para aplicar la última versión, "
-                    "descarga de nuevo el paquete desde tu repositorio de GitHub "
-                    "y reemplaza los archivos. Tus datos (cinema_data.json) se conservan."),
-    }
+    repo_url = cfg.get("repo_url", "")
+    branch = cfg.get("branch", "main")
+    token = cfg.get("token", "")
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="Sin repositorio de GitHub configurado")
+
+    owner, repo = _parse_github_url(repo_url)
+    if not owner:
+        raise HTTPException(status_code=400, detail=f"URL de GitHub inválida: {repo_url}")
+
+    # 1) Detectar carpeta de instalación
+    if getattr(sys, 'frozen', False):
+        install_dir = Path(sys.executable).resolve().parent
+    else:
+        install_dir = Path(__file__).resolve().parent
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cp_gh_update_"))
+
+    try:
+        # 2) Descargar tarball desde GitHub API (respeta rama)
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/tarball/{branch}"
+        req = urllib.request.Request(api_url, headers={
+            "User-Agent": "cinema-productions-updater",
+            "Accept": "application/vnd.github+json",
+        })
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+
+        tar_path = tmp_dir / "repo.tar.gz"
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                tar_path.write_bytes(resp.read())
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Descarga desde GitHub falló: {e}")
+
+        # 3) Extraer
+        extract_dir = tmp_dir / "extracted"
+        extract_dir.mkdir()
+        with tarfile.open(str(tar_path), "r:gz") as tar:
+            tar.extractall(str(extract_dir))
+
+        # GitHub tarball crea una única carpeta owner-repo-sha/
+        subdirs = [d for d in extract_dir.iterdir() if d.is_dir()]
+        if not subdirs:
+            raise HTTPException(status_code=500, detail="Tarball vacío o corrupto")
+        src_root = subdirs[0]
+
+        # 4) Copiar archivos sobre la instalación
+        # Archivos que NUNCA se sobreescriben (datos del usuario)
+        preserve = {".env", "cinema_data.json", "cinema_data.json.bak", "backups", "uploads", ".db_override"}
+        # Directorios del repo que interesa copiar
+        # (backend/, frontend/build/ si existe, y archivos raíz)
+        copied = 0
+        skipped_preserve = 0
+
+        def _copy_tree(src, dst_base):
+            nonlocal copied, skipped_preserve
+            for item in src.rglob("*"):
+                if not item.is_file():
+                    continue
+                rel = item.relative_to(src.parent)
+                # Ignorar archivos preservados
+                if any(part in preserve for part in rel.parts):
+                    skipped_preserve += 1
+                    continue
+                # Ignorar directorios de dev que no queremos
+                if any(part in {"node_modules", "__pycache__", ".pytest_cache", ".git", ".cache"}
+                       for part in rel.parts):
+                    continue
+                dest = dst_base / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(item), str(dest))
+                copied += 1
+
+        # Copiar TODO el repo (backend/, frontend/, root files)
+        # sobre install_dir
+        for item in src_root.iterdir():
+            if item.name in preserve:
+                skipped_preserve += 1
+                continue
+            if item.name in {".git", "node_modules", "__pycache__", ".cache"}:
+                continue
+
+            dest = install_dir / item.name
+            if item.is_file():
+                shutil.copy2(str(item), str(dest))
+                copied += 1
+            elif item.is_dir():
+                # Merge directories preserving user data inside
+                for sub in item.rglob("*"):
+                    if not sub.is_file():
+                        continue
+                    rel = sub.relative_to(src_root)
+                    if any(part in preserve for part in rel.parts):
+                        skipped_preserve += 1
+                        continue
+                    if any(part in {"node_modules", "__pycache__", ".pytest_cache", ".git", ".cache"}
+                           for part in rel.parts):
+                        continue
+                    dest_file = install_dir / rel
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(sub), str(dest_file))
+                    copied += 1
+
+        # 5) Guardar SHA aplicado
+        remote_sha = cfg.get("last_remote_sha", "")
+        if remote_sha:
+            await db.app_settings.update_one(
+                {}, {"$set": {"github_config.last_commit_sha": remote_sha}}, upsert=True)
+            if _using_embedded:
+                await _save_embedded_data()
+
+        # 6) Reiniciar (o no, si dry_run)
+        if dry_run:
+            shutil.rmtree(str(tmp_dir), ignore_errors=True)
+            return {
+                "success": True, "is_desktop": True, "restarted": False, "dry_run": True,
+                "files_updated": copied, "files_preserved": skipped_preserve,
+                "install_dir": str(install_dir),
+                "message": f"DRY RUN — {copied} archivos actualizados, {skipped_preserve} preservados",
+            }
+
+        def _restart_process():
+            time.sleep(2)
+            try:
+                shutil.rmtree(str(tmp_dir), ignore_errors=True)
+            except Exception:
+                pass
+            try:
+                if getattr(sys, 'frozen', False):
+                    subprocess.Popen([str(sys.executable)], cwd=str(install_dir))
+                else:
+                    launcher = install_dir / "launcher.pyw"
+                    if launcher.exists():
+                        subprocess.Popen([sys.executable, str(launcher)], cwd=str(install_dir))
+                    else:
+                        subprocess.Popen([sys.executable, str(install_dir / "app.py")], cwd=str(install_dir))
+                os._exit(0)
+            except Exception as e:
+                logger.error(f"Restart failed: {e}")
+
+        threading.Thread(target=_restart_process, daemon=True).start()
+
+        return {
+            "success": True, "is_desktop": True, "restarted": True,
+            "files_updated": copied, "files_preserved": skipped_preserve,
+            "install_dir": str(install_dir),
+            "message": f"✓ Actualización aplicada — {copied} archivos actualizados. La app se reiniciará en 2 segundos.",
+        }
+    except HTTPException:
+        try: shutil.rmtree(str(tmp_dir), ignore_errors=True)
+        except Exception: pass
+        raise
+    except Exception as e:
+        try: shutil.rmtree(str(tmp_dir), ignore_errors=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"Error inesperado al aplicar update: {type(e).__name__}: {e}")
 
 
 # ─── Contexto para IA (local) ────────────────────────────────────────────────

@@ -2073,6 +2073,41 @@ async def download_package(request: Request):
     import pyzipper
 
     build_dir = ROOT_DIR.parent / "frontend" / "build"
+    frontend_dir = ROOT_DIR.parent / "frontend"
+    src_dir = frontend_dir / "src"
+
+    # ── AUTO-REBUILD si el build está desactualizado ─────────────────────
+    # Si algún archivo del src es más nuevo que el build/index.html, recompila
+    # automáticamente antes de empaquetar. Esto garantiza que el ejecutable
+    # siempre contenga la última versión del código.
+    needs_rebuild = False
+    if not build_dir.exists() or not (build_dir / "index.html").exists():
+        needs_rebuild = True
+    else:
+        try:
+            build_mtime = (build_dir / "index.html").stat().st_mtime
+            for src_file in src_dir.rglob("*"):
+                if src_file.is_file() and src_file.stat().st_mtime > build_mtime:
+                    needs_rebuild = True
+                    logger.info(f"Auto-rebuild: {src_file.name} más nuevo que build/")
+                    break
+        except Exception as e:
+            logger.warning(f"No se pudo comprobar mtimes del build: {e}")
+
+    if needs_rebuild:
+        logger.warning("Frontend build desactualizado — recompilando (esto tarda 1-2 min)...")
+        rebuild = await asyncio.to_thread(
+            subprocess.run,
+            ["yarn", "build"],
+            capture_output=True, text=True, timeout=600, cwd=str(frontend_dir),
+        )
+        if rebuild.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Auto-rebuild del frontend falló: {(rebuild.stderr or rebuild.stdout)[-500:]}"
+            )
+        logger.info("✓ Frontend recompilado exitosamente")
+
     if not build_dir.exists() or not (build_dir / "index.html").exists():
         raise HTTPException(
             status_code=503,
@@ -2906,15 +2941,31 @@ async def github_push_all(payload: dict = Body(default={})):
                     shutil.rmtree(str(dst))
                 shutil.copytree(str(src), str(dst), ignore=ignore_patterns)
 
-        # Archivos raíz del repo (README, bootstrap, ARCHITECTURE, etc.)
-        root_files = [
-            "README.md", "bootstrap.sh", "INSTRUCCIONES_PARA_LA_IA.md",
-            "ARCHITECTURE.md", "design_guidelines.json",
-        ]
-        for f in root_files:
-            src = ROOT_DIR.parent / f
-            if src.exists() and src.is_file():
-                shutil.copy2(str(src), str(work_dir / f))
+        # Archivos raíz del repo — copiar TODOS los archivos individuales
+        # (no directorios; excepto los ya cubiertos arriba)
+        excluded_root_dirs = {"backend", "frontend", ".git", "node_modules",
+                              "backups", "uploads", "memory", "test_reports",
+                              "tests", "repo", "__pycache__", ".cache",
+                              "desktop_wheels"}
+        root_dir = ROOT_DIR.parent
+        for item in root_dir.iterdir():
+            if item.name in excluded_root_dirs:
+                continue
+            if item.name.startswith(".env"):
+                continue  # nunca subir .env
+            if item.is_file():
+                # Copiar cualquier archivo raíz (README.md, bootstrap.sh, yarn.lock, etc.)
+                try:
+                    shutil.copy2(str(item), str(work_dir / item.name))
+                except Exception as e:
+                    logger.warning(f"No se pudo copiar {item.name}: {e}")
+            elif item.is_dir():
+                # Copiar carpetas pequeñas de config si existen (scripts, docs, .github, etc.)
+                if item.name in {"scripts", "docs", ".github", "public"}:
+                    dst_sub = work_dir / item.name
+                    if dst_sub.exists():
+                        shutil.rmtree(str(dst_sub))
+                    shutil.copytree(str(item), str(dst_sub), ignore=ignore_patterns)
 
         # ── 4. Add + Commit + Push ───────────────────────────────────
         _run(["git", "add", "-A"], cwd=work_dir)

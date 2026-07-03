@@ -98,15 +98,27 @@ export default function UpdatesPage() {
   };
 
   const handleApplyGithub = async () => {
-    if (!window.confirm("¿Aplicar la actualización desde GitHub?\n\nSe traerá el código nuevo y se actualizará la app.")) return;
+    if (!window.confirm("¿Aplicar la actualización desde GitHub?\n\nSe descargará el código nuevo, se aplicará automáticamente y la app se reiniciará. Tus datos (reservas, socios, .env) se conservan.")) return;
     setGhApplying(true);
     try {
       const res = await applyGithubUpdate(true);
       setGhResult(null);
-      if (res.is_desktop) {
-        // App de escritorio: no aplica por git, se re-descarga el paquete
+      if (res.restarted) {
+        // App de escritorio: aplicado automáticamente y reiniciando
+        setCheckResult({ status: "installed", message: res.message });
+        celebrateUpdate();
+        toast({
+          title: `✓ Actualización aplicada (${res.files_updated} archivos)`,
+          description: "La app se reiniciará en 2 segundos con la nueva versión.",
+        });
+        setTimeout(() => window.location.reload(), 5000);
+      } else if (res.is_desktop) {
+        // Fallback (versión antigua): solo indica descargar el paquete
         setCheckResult({ status: "desktop_update", message: res.message });
-        toast({ title: "Hay una versión nueva en GitHub", description: "Descarga el paquete de nuevo para actualizar tu app de escritorio." });
+        toast({
+          title: "Hay una versión nueva en GitHub",
+          description: res.message || "Descarga el paquete de nuevo para actualizar.",
+        });
       } else {
         setCheckResult({ status: "installed", version: res.new_sha_short });
         celebrateUpdate();
