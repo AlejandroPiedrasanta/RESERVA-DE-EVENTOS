@@ -1,0 +1,25 @@
+{
+  "summary": "Post-refactor backend regression: 38 passed / 1 skipped (destructive clear-all skipped by design). All endpoints listed in the review request respond correctly. No unhandled 500 errors after extracting desktop_package.py and ai_context_default.py from server.py. Reminder endpoints degrade gracefully without external API keys (400 controlled). xlsx export produces a valid PK/zip file (row_idx fix verified). AI context reset restores DEFAULT_AI_CONTEXT from the new module (content >500 chars). /api/settings does NOT expose app_password_hash.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/refactor_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is still ~2700 lines — consider further splitting routers (reservations, socios, security, backup, updates, themes, ai_context, deployment) into APIRouter modules to stay under 700 lines per file.",
+    "POST /api/security/remove-password expects the JSON key `current_password` (not `password`). Documenting/aligning parameter naming across security endpoints would reduce confusion (set-password uses `password` for new and `current_password` for current, verify uses `password`, remove uses `current_password`).",
+    "GET /api/settings still returns `has_resend_key` and `has_telegram_token` boolean flags — good, but ensure any future secret field additions are excluded via a whitelist model rather than blacklist to avoid regressions."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_refactor_regression.py (new comprehensive regression suite)"
+  ],
+  "success_rate": { "backend": "100% (38/38 executed, 1 skipped destructive)", "frontend": "N/A - skipped per request" },
+  "test_credentials": "N/A - no auth. Test password 'test1234' was set and REMOVED at end (verified security/status password_enabled=false).",
+  "seed_data_creation": "TEST_Regress_Client reservation, TEST_Socio, TEST_Theme_Regr — all created and DELETED via fixture teardown. AI context custom string set then reset. Password set then removed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Comprehensive regression file at /app/backend/tests/test_refactor_regression.py covers: health, reservations CRUD (POST/GET/PUT/DELETE), stats, financials, calendar, socios CRUD, settings (masking), settings/database + test invalid, notifications/pending, reminders/send + test-email (no-keys → 400/200 controlled), backup create/history/download + restore invalid, data/cleanup preview (clear-all skipped destructive), export csv/json/xlsx (xlsx PK signature validated), security status/set/verify/advanced-config/protection/remove (remove-password uses current_password), themes CRUD + missing-name 422, appearance get/put, ai-context get/save/reset (verifies DEFAULT_AI_CONTEXT >500 chars from ai_context_default.py), github/config get/invalid-url 400, updates history/latest/check, push/vapid-key, deployment env-template + docker-compose. All PASS.",
+  "rca_of_the_issue": "N/A — refactor did not introduce regressions. Initial test failures were test-script issues: (1) json substring match caught 'app_password_hash' inside 'app_password_hint' — fixed by checking key membership. (2) remove-password field is `current_password` not `password` — fixed."
+}

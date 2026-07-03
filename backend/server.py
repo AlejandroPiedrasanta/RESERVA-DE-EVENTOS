@@ -1,3 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Cinema Productions — API (FastAPI)   ·   ÍNDICE / MAPA DE NAVEGACIÓN
+# ═══════════════════════════════════════════════════════════════════════════
+#  Consulta /app/ARCHITECTURE.md para el mapa completo del proyecto.
+#  Busca los marcadores "# ───" para saltar entre secciones:
+#
+#   1.  Config & entorno .......... imports, env vars, Mongo client, scheduler
+#   2.  Lifespan ................... arranque/paro del scheduler de recordatorios
+#   3.  Pydantic Models ........... Reservation/Socio/NotificationSettings/DB
+#   4.  Reminder Logic ............ HTML + envío (Gmail/Push/Telegram/ntfy)
+#   5.  Routes ....................  root · deployment · data · import/export
+#   6.  Backup .................... download/create/history/restore
+#   7.  Stats / Reservations / Socios / Financials
+#   8.  App Settings / Database Settings
+#   9.  Reminders (trigger manual)
+#  10.  Gmail OAuth2 / Web Push / Telegram / ntfy (endpoints de prueba)
+#  11.  Desktop Package Download (plantillas en desktop_package.py)
+#  12.  App Updates / Appearance sync / Saved Themes
+#  13.  App Security (password lock + page protection)
+#  14.  GitHub Integration & AI Context (DEFAULT_AI_CONTEXT en ai_context_default.py)
+#
+#  Módulos externos:
+#   · desktop_package.py    → plantillas del instalador de escritorio (ZIP)
+#   · ai_context_default.py → texto de contexto para la próxima IA
+#   · standalone_app.py     → app de escritorio embebida (independiente)
+# ═══════════════════════════════════════════════════════════════════════════
+
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Request, Body
 from fastapi.responses import JSONResponse, Response, RedirectResponse, StreamingResponse
 from contextlib import asynccontextmanager
@@ -53,9 +80,14 @@ UPDATES_DIR = ROOT_DIR / "uploads" / "updates"
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Google / VAPID config ─────────────────────────────────────
+# Public URL of this deployment (used for OAuth redirects). Configurable via env
+# so it is never hardcoded to a specific preview domain.
+APP_PUBLIC_URL       = os.environ.get('APP_PUBLIC_URL', '').rstrip('/')
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-GOOGLE_REDIRECT_URI  = 'https://event-reserve-pro-5.preview.emergentagent.com/api/oauth/gmail/callback'
+GOOGLE_REDIRECT_URI  = os.environ.get('GOOGLE_REDIRECT_URI') or (
+    f"{APP_PUBLIC_URL}/api/oauth/gmail/callback" if APP_PUBLIC_URL else ''
+)
 GMAIL_SCOPES         = ['https://www.googleapis.com/auth/gmail.send', 'openid', 'https://www.googleapis.com/auth/userinfo.email']
 VAPID_PUBLIC_KEY     = os.environ.get('VAPID_PUBLIC_KEY', '')
 VAPID_PRIVATE_KEY    = os.environ.get('VAPID_PRIVATE_KEY', '')
@@ -78,13 +110,9 @@ scheduler = AsyncIOScheduler()
 # ─── Lifespan ────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    scheduler.add_job(
-        check_and_send_reminders,
-        CronTrigger(hour=8, minute=0),
-        id="daily_reminders",
-        replace_existing=True
-    )
-    # Per-minute push + Gmail reminders
+    # Single per-minute job handles ALL reminder channels (admin + client) and
+    # fires at each configured `reminder_time`. (A previous daily 08:00 cron was
+    # removed because it duplicated the admin email sent by this job.)
     scheduler.add_job(
         check_and_push_reminders,
         IntervalTrigger(minutes=1),
@@ -283,7 +311,7 @@ async def check_and_send_reminders():
 
         cursor = db.reservations.find(
             {"event_date": target_date, "status": {"$nin": ["Cancelado", "Completado"]}},
-            {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "total_amount": 1, "advance_paid": 1, "email": 1, "_id": 0}
+            {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "total_amount": 1, "advance_paid": 1, "client_email": 1, "_id": 0}
         )
         upcoming = await cursor.to_list(100)
 
@@ -317,7 +345,7 @@ async def check_and_send_reminders():
                 # Also notify each client if they have email
                 if notify_client:
                     for ev in upcoming:
-                        client_email = ev.get("email")
+                        client_email = ev.get("client_email")
                         if client_email:
                             client_params = {
                                 "from": f"{sender_name} <onboarding@resend.dev>",
@@ -485,6 +513,27 @@ async def _dispatch_reminders(events: list, days_label: str, settings: dict):
     # ── Browser Push ────────────────────────────
     await _send_push_to_all(title, body, "/dashboard")
 
+    # ── Client emails (optional, if notify_client is enabled) ──
+    if settings.get("notify_client") and channel in ("email", "both"):
+        api_key = settings.get("resend_api_key")
+        if api_key:
+            resend_lib.api_key = api_key
+            days_int = int(days_label.split()[0]) if days_label and days_label[0].isdigit() else 0
+            sender_name = settings.get("sender_name") or "Cinema Productions"
+            for ev in events:
+                client_email = ev.get("client_email")
+                if not client_email:
+                    continue
+                try:
+                    await asyncio.to_thread(resend_lib.Emails.send, {
+                        "from": f"{sender_name} <onboarding@resend.dev>",
+                        "to": [client_email],
+                        "subject": f"Recordatorio de tu evento — {ev.get('event_type','')} el {ev.get('event_date','')}",
+                        "html": _build_client_reminder_html(ev, days_int, sender_name),
+                    })
+                except Exception as e:
+                    logger.warning(f"[Reminders] Client email failed: {e}")
+
 
 async def check_and_push_reminders():
     """Per-minute job: fires reminders for each configured period and hours-before."""
@@ -512,7 +561,7 @@ async def check_and_push_reminders():
 
                 cursor = db.reservations.find(
                     {"event_date": target_date, "status": {"$nin": ["Cancelado", "Completado"]}},
-                    {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "_id": 0}
+                    {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "client_email": 1, "total_amount": 1, "advance_paid": 1, "_id": 0}
                 )
                 upcoming = await cursor.to_list(100)
                 label = f"{days} día(s)" if days > 0 else "hoy"
@@ -522,7 +571,7 @@ async def check_and_push_reminders():
         if hours_before > 0:
             cursor = db.reservations.find(
                 {"event_date": today_str, "status": {"$nin": ["Cancelado", "Completado"]}},
-                {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "_id": 0}
+                {"client_name": 1, "event_date": 1, "event_time": 1, "event_type": 1, "venue": 1, "client_email": 1, "total_amount": 1, "advance_paid": 1, "_id": 0}
             )
             today_events = await cursor.to_list(100)
             for ev in today_events:
@@ -895,7 +944,7 @@ async def export_reservations_xlsx():
                     value = doc.get(key, "")
                     if isinstance(value, float) and value == int(value):
                         value = int(value)
-                cell = ws.cell(row=row_idx + 1 - 1, column=col_idx, value=value)
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 if fill:
                     cell.fill = fill
 
@@ -1513,7 +1562,10 @@ async def reset_database():
 @api_router.get("/notifications/pending")
 async def get_pending_notifications():
     settings_doc = await db.app_settings.find_one({}, {"_id": 0})
-    days = int(settings_doc.get("reminder_days", 3)) if settings_doc else 3
+    periods = (settings_doc.get("reminder_periods") if settings_doc else None) or [
+        (settings_doc.get("reminder_days", 3) if settings_doc else 3)
+    ]
+    days = max(periods) if periods else 3
     today = datetime.now(timezone.utc).date()
     end = (today + timedelta(days=days)).isoformat()
     today_str = today.isoformat()
@@ -1626,926 +1678,10 @@ async def trigger_reminders_manual():
 
 # ─── Desktop Package Download ─────────────────────────────
 
-_ENV_TEMPLATE = """# =======================================================
-#  CINEMA PRODUCTIONS - Configuracion de Base de Datos
-# =======================================================
-#
-# Opciones para MONGO_URL:
-#
-#   embedded
-#       Base de datos LOCAL sin internet.
-#       Los datos se guardan en cinema_data.json (mismo directorio).
-#       Recomendado para uso personal en un solo PC.
-#
-#   mongodb://localhost:27017
-#       MongoDB instalado en tu computadora.
-#
-#   mongodb+srv://usuario:contrasena@cluster.mongodb.net
-#       MongoDB Atlas (nube gratuita en mongodb.com/atlas)
-#       Accesible desde cualquier dispositivo.
-#
-# Para cambiar: edita este archivo con el Bloc de Notas, guarda y reinicia la app.
-# O ejecuta config.bat para una ventana visual de configuracion.
-# O usa la interfaz: Ajustes > Base de Datos > Cambiar conexion MongoDB
-#
-MONGO_URL=embedded
-DB_NAME=cinema_productions
-"""
-
-_CONFIG_PY = r'''"""Cinema Productions — Configurador Visual de Base de Datos
-Ejecutar: python config.py  (o doble clic en config.bat)
-"""
-import tkinter as tk
-from tkinter import messagebox
-from pathlib import Path
-
-ROOT_DIR = Path(__file__).parent
-ENV_FILE = ROOT_DIR / ".env"
-
-
-def _read_env():
-    config = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                config[k.strip()] = v.strip()
-    return config
-
-
-def _write_env(mongo_url: str, db_name: str):
-    content = (
-        "# Cinema Productions - Configuracion de Base de Datos\n"
-        "#\n"
-        "# Opciones:\n"
-        "#   embedded                              Base de datos local (cinema_data.json)\n"
-        "#   mongodb://localhost:27017             MongoDB en tu PC\n"
-        "#   mongodb+srv://user:pass@cluster       MongoDB Atlas (nube gratuita)\n"
-        "#\n"
-        "# Edita este archivo con el Bloc de Notas y guarda.\n"
-        f"MONGO_URL={mongo_url}\n"
-        f"DB_NAME={db_name}\n"
-    )
-    ENV_FILE.write_text(content, encoding="utf-8")
-
-
-def main():
-    cfg = _read_env()
-    current_url = cfg.get("MONGO_URL", "embedded")
-    db_name = cfg.get("DB_NAME", "cinema_productions")
-
-    root = tk.Tk()
-    root.title("Cinema Productions — Configurar Base de Datos")
-    root.resizable(False, False)
-    root.configure(bg="#0f0e17")
-
-    W, H = 560, 420
-    root.update_idletasks()
-    x = (root.winfo_screenwidth() - W) // 2
-    y = (root.winfo_screenheight() - H) // 2
-    root.geometry(f"{W}x{H}+{x}+{y}")
-
-    # ── Header ──────────────────────────────────────────
-    hdr = tk.Frame(root, bg="#4f46e5", height=72)
-    hdr.pack(fill="x")
-    hdr.pack_propagate(False)
-    tk.Label(hdr, text="CINEMA PRODUCTIONS", font=("Segoe UI", 15, "bold"),
-             bg="#4f46e5", fg="white").pack(pady=(14, 0))
-    tk.Label(hdr, text="Configuracion de Base de Datos", font=("Segoe UI", 9),
-             bg="#4f46e5", fg="#c7d2fe").pack()
-
-    # ── Body ─────────────────────────────────────────────
-    body = tk.Frame(root, bg="#0f0e17", padx=28, pady=18)
-    body.pack(fill="both", expand=True)
-
-    tk.Label(body, text="URL de conexion MongoDB:", font=("Segoe UI", 10, "bold"),
-             bg="#0f0e17", fg="white", anchor="w").pack(fill="x")
-    tk.Label(body,
-             text='embedded  |  mongodb://localhost:27017  |  mongodb+srv://user:pass@cluster',
-             font=("Courier New", 8), bg="#0f0e17", fg="#6b7280", anchor="w").pack(fill="x", pady=(3, 8))
-
-    url_var = tk.StringVar(value=current_url)
-    entry = tk.Entry(body, textvariable=url_var, font=("Courier New", 10),
-                     bg="#1e1b4b", fg="#c7d2fe", insertbackground="white",
-                     relief="flat", bd=8)
-    entry.pack(fill="x")
-    entry.focus_set()
-
-    # ── Quick buttons ────────────────────────────────────
-    qf = tk.Frame(body, bg="#0f0e17")
-    qf.pack(fill="x", pady=(10, 0))
-    tk.Label(qf, text="Opciones rapidas:", font=("Segoe UI", 9),
-             bg="#0f0e17", fg="#9ca3af").pack(side="left", padx=(0, 8))
-
-    for label, val in [
-        ("Embebida (local)", "embedded"),
-        ("MongoDB local", "mongodb://localhost:27017"),
-    ]:
-        tk.Button(qf, text=label, command=lambda v=val: url_var.set(v),
-                  bg="#1e1b4b", fg="#a5b4fc", font=("Segoe UI", 9),
-                  relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left", padx=4)
-
-    # ── Info box ─────────────────────────────────────────
-    ib = tk.Frame(body, bg="#1c1917")
-    ib.pack(fill="x", pady=(16, 0))
-    tk.Label(ib,
-             text="Consejo: tambien puedes abrir el archivo  .env  directamente con el Bloc de Notas y editar MONGO_URL.",
-             font=("Segoe UI", 8), bg="#1c1917", fg="#78716c",
-             wraplength=480, justify="left", padx=10, pady=8).pack(fill="x")
-
-    # ── Buttons ──────────────────────────────────────────
-    bf = tk.Frame(root, bg="#111827", pady=14)
-    bf.pack(fill="x")
-
-    def open_notepad():
-        import subprocess
-        subprocess.Popen(["notepad.exe", str(ENV_FILE)])
-
-    def save():
-        url = url_var.get().strip()
-        if not url:
-            messagebox.showerror("Error", "Por favor ingresa una URL de MongoDB.", parent=root)
-            return
-        _write_env(url, db_name)
-        messagebox.showinfo(
-            "Guardado",
-            f"Configuracion guardada exitosamente.\n\nMONGO_URL = {url}\n\nReinicia la app para aplicar el cambio.",
-            parent=root,
-        )
-        root.destroy()
-
-    tk.Button(bf, text="  Abrir .env en Bloc de Notas  ", command=open_notepad,
-              bg="#374151", fg="#d1d5db", font=("Segoe UI", 9),
-              relief="flat", padx=12, pady=7, cursor="hand2").pack(side="left", padx=(24, 8))
-
-    tk.Button(bf, text="  Guardar Configuracion  ", command=save,
-              bg="#4f46e5", fg="white", font=("Segoe UI", 10, "bold"),
-              relief="flat", padx=16, pady=7, cursor="hand2").pack(side="right", padx=(8, 24))
-
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
-'''
-
-_CONFIG_BAT = r"""@echo off
-title Cinema Productions - Configuracion
-echo.
-echo  Abriendo configuracion de Cinema Productions...
-echo.
-python --version >nul 2>&1
-if not errorlevel 1 ( python config.py & goto FIN )
-py --version >nul 2>&1
-if not errorlevel 1 ( py config.py & goto FIN )
-echo  Python no encontrado. Abriendo .env en el Bloc de Notas...
-notepad .env
-:FIN
-"""
-
-
-# =====================================================================
-# _LAUNCHER_PYW  -  Ventana grafica moderna con Tkinter (Windows/Linux/Mac)
-# Se lanza desde start.bat con doble clic. Boton central animado + barra
-# de progreso minimalista. Instala dependencias en background y abre el
-# servidor + navegador al terminar.
-# =====================================================================
-_LAUNCHER_PYW = r'''"""Cinema Productions - Launcher Grafico
-Se ejecuta con pythonw / py -w para ocultar la consola.
-"""
-import os
-import sys
-import time
-import threading
-import subprocess
-import webbrowser
-import urllib.request
-from pathlib import Path
-import tkinter as tk
-from tkinter import font as tkfont
-
-# Paleta de colores (dark mode moderno)
-BG        = "#0f172a"   # slate-900
-CARD      = "#1e293b"   # slate-800
-BORDER    = "#334155"   # slate-700
-TEXT      = "#f1f5f9"   # slate-100
-TEXT_DIM  = "#94a3b8"   # slate-400
-ACCENT    = "#7c3aed"   # violet-600
-ACCENT_2  = "#a855f7"   # purple-500
-SUCCESS   = "#10b981"   # emerald-500
-ERROR     = "#ef4444"   # red-500
-
-APP_DIR = Path(__file__).resolve().parent
-os.chdir(APP_DIR)
-
-
-class Launcher:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Cinema Productions")
-        self.root.configure(bg=BG)
-        self.root.resizable(False, False)
-
-        # Centrar ventana
-        w, h = 620, 480
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        x, y = (sw - w) // 2, (sh - h) // 2
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
-
-        # Icono (si existe)
-        try:
-            self.root.iconbitmap(default="")
-        except Exception:
-            pass
-
-        self.state = "idle"          # idle | running | ready | error
-        self.progress = 0.0
-        self.pulse_dir = 1
-        self.pulse_val = 0
-
-        self._build_ui()
-        self._animate_pulse()
-
-    def _build_ui(self):
-        # Header
-        header = tk.Frame(self.root, bg=BG, height=110)
-        header.pack(fill="x", pady=(30, 0))
-        header.pack_propagate(False)
-
-        title_font = tkfont.Font(family="Segoe UI", size=26, weight="bold")
-        subtitle_font = tkfont.Font(family="Segoe UI", size=11)
-
-        tk.Label(header, text="CINEMA PRODUCTIONS", font=title_font,
-                 bg=BG, fg=TEXT).pack()
-        tk.Label(header, text="Gestor de Reservas de Eventos",
-                 font=subtitle_font, bg=BG, fg=TEXT_DIM).pack(pady=(4, 0))
-
-        # Boton central en tarjeta
-        btn_frame = tk.Frame(self.root, bg=BG)
-        btn_frame.pack(pady=(30, 20))
-
-        self.btn_canvas = tk.Canvas(btn_frame, width=200, height=200,
-                                    bg=BG, highlightthickness=0)
-        self.btn_canvas.pack()
-        self.btn_canvas.bind("<Button-1>", lambda e: self.on_start())
-        self.btn_canvas.bind("<Enter>", lambda e: self._draw_button(hover=True))
-        self.btn_canvas.bind("<Leave>", lambda e: self._draw_button(hover=False))
-        self._draw_button(hover=False)
-
-        # Barra de progreso minimalista
-        prog_frame = tk.Frame(self.root, bg=BG)
-        prog_frame.pack(pady=(0, 10), padx=60, fill="x")
-
-        self.prog_bg = tk.Canvas(prog_frame, height=4, bg=BORDER,
-                                 highlightthickness=0)
-        self.prog_bg.pack(fill="x")
-        self.prog_bar = self.prog_bg.create_rectangle(
-            0, 0, 0, 4, fill=ACCENT, outline="")
-
-        # Status text
-        self.status_font = tkfont.Font(family="Segoe UI", size=10)
-        self.status = tk.Label(self.root, text="Pulsa el boton para iniciar",
-                               font=self.status_font, bg=BG, fg=TEXT_DIM)
-        self.status.pack(pady=(8, 0))
-
-        # Log discreto (2 lineas)
-        self.log_font = tkfont.Font(family="Consolas", size=9)
-        self.log = tk.Label(self.root, text="", font=self.log_font,
-                            bg=BG, fg=TEXT_DIM, justify="center")
-        self.log.pack(pady=(4, 0))
-
-        # Footer
-        footer = tk.Frame(self.root, bg=BG)
-        footer.pack(side="bottom", pady=15)
-        footer_font = tkfont.Font(family="Segoe UI", size=8)
-        tk.Label(footer, text="Version local  |  localhost:8001",
-                 font=footer_font, bg=BG, fg=TEXT_DIM).pack()
-
-    # ----- Boton animado (canvas) -----
-    def _draw_button(self, hover=False):
-        c = self.btn_canvas
-        c.delete("all")
-        r = 90
-
-        # Halo pulsante cuando idle
-        if self.state == "idle":
-            halo = 10 + int(self.pulse_val * 8)
-            c.create_oval(100 - r - halo, 100 - r - halo,
-                          100 + r + halo, 100 + r + halo,
-                          fill="", outline=ACCENT_2, width=1)
-
-        # Fondo circulo (con leve gradiente simulado)
-        color = ACCENT
-        if self.state == "ready":
-            color = SUCCESS
-        elif self.state == "error":
-            color = ERROR
-        elif self.state == "running":
-            color = ACCENT_2
-        if hover and self.state == "idle":
-            color = ACCENT_2
-
-        # Sombra
-        c.create_oval(100 - r + 3, 100 - r + 5, 100 + r + 3, 100 + r + 5,
-                      fill="#000000", outline="", stipple="gray50")
-        # Circulo principal
-        c.create_oval(100 - r, 100 - r, 100 + r, 100 + r,
-                      fill=color, outline="")
-
-        # Icono / texto central
-        icon_font = tkfont.Font(family="Segoe UI", size=42, weight="bold")
-        label_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
-
-        if self.state == "idle":
-            # Triangulo play
-            c.create_polygon(82, 70, 82, 130, 130, 100,
-                             fill="white", outline="")
-            c.create_text(100, 155, text="INICIAR", fill="white",
-                          font=label_font)
-        elif self.state == "running":
-            # Puntos animados
-            for i in range(3):
-                offset = (self.pulse_val + i * 0.3) % 1
-                dot_size = 6 + int(offset * 6)
-                c.create_oval(70 + i * 30 - dot_size // 2,
-                              100 - dot_size // 2,
-                              70 + i * 30 + dot_size // 2,
-                              100 + dot_size // 2,
-                              fill="white", outline="")
-            c.create_text(100, 155, text="CARGANDO...", fill="white",
-                          font=label_font)
-        elif self.state == "ready":
-            # Check mark
-            c.create_line(70, 105, 92, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_line(92, 125, 132, 78, fill="white", width=6,
-                          capstyle="round")
-            c.create_text(100, 155, text="LISTO", fill="white",
-                          font=label_font)
-        elif self.state == "error":
-            c.create_line(75, 75, 125, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_line(125, 75, 75, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_text(100, 155, text="ERROR", fill="white",
-                          font=label_font)
-
-    def _animate_pulse(self):
-        self.pulse_val += 0.05 * self.pulse_dir
-        if self.pulse_val >= 1:
-            self.pulse_val = 1
-            self.pulse_dir = -1
-        elif self.pulse_val <= 0:
-            self.pulse_val = 0
-            self.pulse_dir = 1
-        if self.state in ("idle", "running"):
-            self._draw_button(hover=False)
-        self.root.after(60, self._animate_pulse)
-
-    def set_progress(self, pct, msg=None, log_line=None):
-        pct = max(0, min(100, pct))
-        self.progress = pct
-        w = self.prog_bg.winfo_width() or 400
-        target_w = int(w * pct / 100)
-        self.prog_bg.coords(self.prog_bar, 0, 0, target_w, 4)
-        if msg:
-            self.status.config(text=msg)
-        if log_line is not None:
-            self.log.config(text=log_line[:80])
-        self.root.update_idletasks()
-
-    def on_start(self):
-        if self.state == "running":
-            return
-        if self.state == "ready":
-            # Reabrir navegador
-            webbrowser.open("http://localhost:8001")
-            return
-        self.state = "running"
-        self._draw_button()
-        self.set_progress(2, "Preparando...", "")
-        threading.Thread(target=self._run_pipeline, daemon=True).start()
-
-    # ----- Pipeline en background -----
-    def _run_pipeline(self):
-        try:
-            pyexe = sys.executable  # ya estamos ejecutando desde pythonw
-
-            # PASO 1: verificar python
-            self.set_progress(8, "Verificando Python...",
-                              f"Usando {sys.version.split()[0]}")
-            time.sleep(0.3)
-
-            # PASO 2: actualizar pip
-            self.set_progress(15, "Actualizando pip y wheel...",
-                              "pip install --upgrade pip wheel")
-            self._run([pyexe, "-m", "pip", "install", "--upgrade",
-                       "pip", "wheel", "setuptools",
-                       "--quiet", "--no-warn-script-location"],
-                      ignore_errors=True)
-
-            # PASO 3: instalar dependencias con progreso simulado
-            self.set_progress(25, "Instalando dependencias...",
-                              "Primera vez tarda 1-3 minutos")
-
-            deps_thread = threading.Thread(
-                target=self._install_deps_with_progress, daemon=True)
-            deps_thread.start()
-            deps_thread.join()
-
-            if self.state == "error":
-                return
-
-            # PASO 4: iniciar servidor
-            self.set_progress(85, "Iniciando servidor local...",
-                              "puerto 8001")
-
-            # Liberar puerto si esta ocupado (best-effort)
-            self._free_port_8001()
-
-            # Lanzar app.py en background
-            creationflags = 0
-            if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NEW_CONSOLE
-            self.server_proc = subprocess.Popen(
-                [pyexe, "app.py"],
-                cwd=str(APP_DIR),
-                creationflags=creationflags,
-            )
-
-            # PASO 5: esperar que responda
-            self.set_progress(92, "Esperando al servidor...", "GET /api/")
-            for i in range(30):
-                if self._check_server():
-                    break
-                time.sleep(1)
-                self.set_progress(92 + (i * 0.2), None, f"intento {i+1}/30")
-            else:
-                raise RuntimeError("El servidor no respondio en 30 segundos")
-
-            # PASO 6: listo
-            self.set_progress(100, "App lista - abriendo navegador",
-                              "http://localhost:8001")
-            time.sleep(0.4)
-            webbrowser.open("http://localhost:8001")
-            self.state = "ready"
-            self._draw_button()
-            self.status.config(text="App corriendo en localhost:8001", fg=SUCCESS)
-            self.log.config(text="Pulsa el circulo para reabrir el navegador")
-
-        except Exception as e:
-            self.state = "error"
-            self._draw_button()
-            self.set_progress(0, f"Error: {str(e)[:60]}",
-                              "Revisa la consola o reintenta")
-            self.status.config(fg=ERROR)
-
-    def _install_deps_with_progress(self):
-        pyexe = sys.executable
-        req_file = APP_DIR / "requirements.txt"
-        if not req_file.exists():
-            return
-
-        # Contar dependencias para simular progreso
-        try:
-            with open(req_file, "r", encoding="utf-8") as f:
-                deps = [ln.strip() for ln in f
-                        if ln.strip() and not ln.strip().startswith("#")]
-        except Exception:
-            deps = []
-
-        total = max(len(deps), 1)
-
-        # Ejecutar pip install con retry
-        for attempt in range(3):
-            self.set_progress(25 + attempt * 5,
-                              f"Instalando dependencias (intento {attempt+1}/3)...",
-                              f"{total} paquetes")
-
-            # Simulacion visual del progreso mientras pip instala
-            stop_sim = threading.Event()
-
-            def simulate():
-                p = 25
-                while not stop_sim.is_set() and p < 80:
-                    time.sleep(0.7)
-                    p += 1.5
-                    self.set_progress(min(p, 80), None,
-                                      f"instalando... ({int(p-25)}%)")
-
-            sim_thread = threading.Thread(target=simulate, daemon=True)
-            sim_thread.start()
-
-            ret = self._run([pyexe, "-m", "pip", "install",
-                             "-r", "requirements.txt",
-                             "--quiet", "--no-warn-script-location",
-                             "--disable-pip-version-check"],
-                            ignore_errors=True)
-
-            stop_sim.set()
-            sim_thread.join(timeout=1)
-
-            if ret == 0:
-                self.set_progress(80, "Dependencias listas",
-                                  f"{total} paquetes instalados")
-                return
-
-            self.set_progress(25 + attempt * 5,
-                              f"Reintentando en 3 seg...",
-                              f"intento fallido {attempt+1}")
-            time.sleep(3)
-
-        self.state = "error"
-        raise RuntimeError("No se pudieron instalar las dependencias")
-
-    def _run(self, cmd, ignore_errors=False):
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = subprocess.CREATE_NO_WINDOW
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(APP_DIR),
-                capture_output=True,
-                timeout=300,
-                creationflags=creationflags,
-            )
-            return result.returncode
-        except Exception:
-            if not ignore_errors:
-                raise
-            return 1
-
-    def _free_port_8001(self):
-        if sys.platform != "win32":
-            try:
-                subprocess.run(["fuser", "-k", "8001/tcp"],
-                               capture_output=True, timeout=5)
-            except Exception:
-                pass
-            return
-        try:
-            result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True,
-                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
-            for line in result.stdout.splitlines():
-                if ":8001" in line and "LISTENING" in line:
-                    pid = line.split()[-1]
-                    subprocess.run(["taskkill", "/F", "/PID", pid],
-                                   capture_output=True, timeout=5,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
-        except Exception:
-            pass
-
-    def _check_server(self):
-        try:
-            urllib.request.urlopen("http://localhost:8001/api/", timeout=2)
-            return True
-        except Exception:
-            return False
-
-
-def main():
-    root = tk.Tk()
-    Launcher(root)
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
-'''
-
-
-_START_BAT = """@echo off
-title Cinema Productions - Gestor de Reservas
-color 0A
-cls
-echo.
-echo  ==========================================================
-echo    CINEMA PRODUCTIONS  ^|  Gestor de Reservas de Eventos
-echo  ==========================================================
-echo.
-echo   Iniciando... Este script hara:
-echo     1) Verificar Python 3.8+
-echo     2) Actualizar pip
-echo     3) Instalar dependencias
-echo     4) Iniciar el servidor local
-echo     5) Abrir el navegador
-echo.
-echo  ==========================================================
-echo.
-
-REM --- Configuracion opcional (opcional, puede saltarse) ---
-choice /C CN /T 3 /D N /M "  Pulsa C para configurar la BD, N para continuar (auto en 3s)"
-if errorlevel 2 goto SKIP_CONFIG
-if errorlevel 1 (
-    echo.
-    echo   Abriendo configuracion...
-    python config.py 2>nul
-    if errorlevel 1 py config.py 2>nul
-    if errorlevel 1 notepad .env
-    echo   Configuracion aplicada.
-    echo.
+from desktop_package import (
+    _ENV_TEMPLATE, _CONFIG_PY, _CONFIG_BAT, _LAUNCHER_PYW, _START_BAT,
+    _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README,
 )
-:SKIP_CONFIG
-
-REM --- PASO 1: Verificar Python ---------------------------
-echo.
-echo  [1/5] Verificando Python...
-where python >nul 2>&1
-if not errorlevel 1 (
-    set PYTHON=python
-    goto PYTHON_OK
-)
-where py >nul 2>&1
-if not errorlevel 1 (
-    set PYTHON=py
-    goto PYTHON_OK
-)
-echo.
-echo  ==========================================================
-echo   ERROR: Python no esta instalado o no esta en el PATH.
-echo.
-echo   Descargalo desde: https://www.python.org/downloads/
-echo   IMPORTANTE: Al instalar marca "Add Python to PATH".
-echo  ==========================================================
-echo.
-pause
-exit /b 1
-
-:PYTHON_OK
-%PYTHON% --version
-echo   OK: Python detectado.
-
-REM --- PASO 2: Actualizar pip -----------------------------
-echo.
-echo  [2/5] Actualizando pip y herramientas...
-%PYTHON% -m pip install --upgrade pip wheel setuptools --quiet --no-warn-script-location
-if errorlevel 1 (
-    echo   AVISO: no se pudo actualizar pip. Continuando de todas formas...
-) else (
-    echo   OK: pip actualizado.
-)
-
-REM --- PASO 3: Instalar dependencias con reintento -------
-echo.
-echo  [3/5] Instalando dependencias del proyecto...
-echo         Primera vez tarda 1-3 minutos. Despues es casi instantaneo.
-echo.
-
-set INSTALL_TRY=0
-
-:INSTALL_LOOP
-set /a INSTALL_TRY+=1
-echo   Intento %INSTALL_TRY% de 3...
-%PYTHON% -m pip install -r requirements.txt --no-warn-script-location --disable-pip-version-check
-if not errorlevel 1 goto INSTALL_OK
-
-if %INSTALL_TRY% GEQ 3 goto INSTALL_FAILED
-echo   Fallo el intento %INSTALL_TRY%. Reintentando en 3 segundos...
-timeout /t 3 /nobreak >nul
-goto INSTALL_LOOP
-
-:INSTALL_FAILED
-echo.
-echo  ==========================================================
-echo   ERROR: Fallo la instalacion tras 3 intentos.
-echo.
-echo   Prueba manualmente en esta ventana:
-echo     %PYTHON% -m pip install -r requirements.txt
-echo.
-echo   Verifica tu conexion a internet o revisa el error arriba.
-echo  ==========================================================
-pause
-exit /b 1
-
-:INSTALL_OK
-echo   OK: Dependencias instaladas correctamente.
-
-REM --- PASO 4: Iniciar servidor ---------------------------
-echo.
-echo  [4/5] Iniciando servidor local en http://localhost:8001 ...
-
-REM Liberar el puerto 8001 si esta ocupado
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do (
-    echo   Puerto 8001 ocupado por PID %%p. Liberando...
-    taskkill /F /PID %%p >nul 2>&1
-)
-
-start "Cinema Productions [servidor - NO CERRAR]" /min %PYTHON% app.py
-
-echo   Esperando que el servidor este listo (max 30 seg)...
-set /a TRIES=0
-
-:WAIT_LOOP
-    timeout /t 1 /nobreak >nul
-    %PYTHON% -c "import urllib.request,sys; urllib.request.urlopen('http://localhost:8001/api/', timeout=2); sys.exit(0)" >nul 2>&1
-    if not errorlevel 1 goto SERVER_READY
-    set /a TRIES+=1
-    if %TRIES% GEQ 30 goto SERVER_FAILED
-    goto WAIT_LOOP
-
-:SERVER_FAILED
-echo.
-echo  ==========================================================
-echo   ERROR: El servidor no respondio en 30 segundos.
-echo.
-echo   Posibles causas:
-echo     - Puerto 8001 ocupado por otro programa
-echo     - Error en .env (MONGO_URL invalida)
-echo     - Alguna dependencia no se instalo
-echo.
-echo   Solucion:
-echo     1) Cierra otras copias de Cinema Productions
-echo     2) Revisa la ventana del servidor para ver el error
-echo     3) Ejecuta config.bat para verificar la base de datos
-echo  ==========================================================
-pause
-exit /b 1
-
-:SERVER_READY
-echo   OK: Servidor arriba y funcionando.
-
-REM --- PASO 5: Abrir navegador ----------------------------
-echo.
-echo  [5/5] Abriendo Cinema Productions en tu navegador...
-timeout /t 1 /nobreak >nul
-start http://localhost:8001
-
-echo.
-echo  ==========================================================
-echo    Cinema Productions esta corriendo
-echo.
-echo    URL:     http://localhost:8001
-echo    Datos:   cinema_data.json (auto-guardado cada 60 seg)
-echo    Config:  ejecuta config.bat para cambiar la BD
-echo    Cerrar:  cierra la ventana "Cinema Productions [servidor]"
-echo  ==========================================================
-echo.
-echo   Deja esta ventana abierta o cierrala; la app sigue en la otra ventana.
-echo.
-pause
-"""
-
-
-_START_BAT_LEGACY = _START_BAT  # alias por compatibilidad
-
-
-_START_SH = """#!/bin/bash
-clear
-echo ""
-echo "  =========================================================="
-echo "   CINEMA PRODUCTIONS - Gestor de Reservas de Eventos"
-echo "  =========================================================="
-echo ""
-
-echo "  [1/5] Verificando Python..."
-if command -v python3 &>/dev/null; then
-  PYTHON=python3
-elif command -v python &>/dev/null; then
-  PYTHON=python
-else
-  echo "  ERROR: Python3 no instalado. Ver https://www.python.org/downloads/"
-  exit 1
-fi
-echo "  OK  $($PYTHON --version) (comando: $PYTHON)"
-
-echo ""
-echo "  [2/5] Actualizando pip..."
-$PYTHON -m pip install --upgrade pip wheel setuptools --quiet --no-warn-script-location 2>/dev/null || echo "  AVISO: no se pudo actualizar pip"
-
-echo ""
-echo "  [3/5] Instalando dependencias (primera vez tarda 1-3 min)..."
-TRIES=0
-while true; do
-  TRIES=$((TRIES + 1))
-  echo "  Intento $TRIES de 3..."
-  if $PYTHON -m pip install -r requirements.txt --no-warn-script-location --disable-pip-version-check; then
-    break
-  fi
-  if [ $TRIES -ge 3 ]; then
-    echo "  ERROR: No se pudieron instalar las dependencias tras 3 intentos"
-    exit 1
-  fi
-  echo "  Reintentando en 3 seg..."
-  sleep 3
-done
-echo "  OK  Dependencias instaladas."
-
-echo ""
-echo "  [4/5] Iniciando servidor local en puerto 8001..."
-# Matar cualquier proceso previo en el puerto 8001
-lsof -ti:8001 | xargs -r kill -9 2>/dev/null || true
-
-$PYTHON app.py &
-SERVER_PID=$!
-
-echo "  Verificando servidor (max 30 seg)..."
-TRIES=0
-while true; do
-    sleep 1
-    if $PYTHON -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/', timeout=2)" 2>/dev/null; then
-      break
-    fi
-    TRIES=$((TRIES + 1))
-    if [ $TRIES -ge 30 ]; then
-      echo ""
-      echo "  ERROR: El servidor no respondio en 30 segundos."
-      kill $SERVER_PID 2>/dev/null || true
-      exit 1
-    fi
-    printf "."
-done
-echo ""
-echo "  OK  Servidor arriba en http://localhost:8001"
-
-echo ""
-echo "  [5/5] Abriendo Cinema Productions..."
-command -v xdg-open &>/dev/null && xdg-open http://localhost:8001 2>/dev/null &
-command -v open &>/dev/null && open http://localhost:8001 2>/dev/null &
-
-echo ""
-echo "  =========================================================="
-echo "   Cinema Productions esta corriendo"
-echo "   URL:     http://localhost:8001"
-echo "   Datos:   cinema_data.json"
-echo "   Cerrar:  Ctrl+C aqui"
-echo "  =========================================================="
-wait $SERVER_PID
-"""
-
-_REQUIREMENTS = """# Cinema Productions - Dependencias del Servidor Desktop
-# Instalado automaticamente por start.bat / start.sh
-fastapi>=0.100.0
-uvicorn[standard]>=0.20.0
-motor>=3.0.0
-pymongo>=4.0.0
-dnspython>=2.3.0
-python-dotenv>=1.0.0
-pydantic>=2.0.0
-python-multipart>=0.0.9
-
-# Base de datos embebida (modo local sin internet)
-mongomock-motor>=0.0.36
-
-# Notificaciones y emails
-resend>=2.0.0
-httpx>=0.24.0
-
-# HTTP y utilidades
-requests>=2.28.0
-aiofiles>=23.0.0
-
-# Compatibilidad de tiempo
-tzdata>=2023.3
-python-dateutil>=2.8.0
-
-# Seguridad
-cryptography>=41.0.0
-
-# Reportes PDF/Excel (opcional)
-openpyxl>=3.1.0
-pandas>=2.0.0
-"""
-
-_README = """CINEMA PRODUCTIONS - Gestor de Reservas
-=========================================
-
-INICIO RAPIDO (Windows):
-  1. Doble clic en  start.bat
-  2. Presiona ENTER (o espera 3 seg) para iniciar
-  3. La app se abre automaticamente en el navegador
-
-REQUISITO: Python 3.8+
-  https://www.python.org/downloads/
-  IMPORTANTE: marcar "Add Python to PATH"
-
-BASE DE DATOS:
-  El archivo  .env  controla donde se guardan tus datos.
-
-  OPCIONES:
-    MONGO_URL=embedded
-      -> Base de datos local, SIN internet, datos en cinema_data.json
-        Recomendado para uso personal en un solo PC.
-
-    MONGO_URL=mongodb://localhost:27017
-      -> MongoDB instalado en tu computadora.
-
-    MONGO_URL=mongodb+srv://user:pass@cluster.mongodb.net
-      -> MongoDB Atlas (nube GRATUITA en mongodb.com/atlas)
-        Accesible desde cualquier dispositivo.
-
-CAMBIAR BASE DE DATOS (2 formas):
-  A) Doble clic en  config.bat  -> Ventana visual de configuracion
-  B) Abrir  .env  con el Bloc de Notas -> Edita MONGO_URL -> Guarda
-
-DATOS AUTOMATICOS:
-  En modo embebido, los datos se guardan en  cinema_data.json
-  Auto-guardado cada 60 segundos y al cerrar la app.
-
-Cinema Productions - Sistema de Gestion de Reservas
-"""
 
 
 # ─── Gmail OAuth2 Endpoints ───────────────────────────────────
@@ -2577,7 +1713,7 @@ async def gmail_oauth_start():
 async def gmail_oauth_callback(code: str = None, error: str = None):
     """Exchange auth code for tokens and store refresh_token."""
     if error or not code:
-        return RedirectResponse(url=f"https://event-reserve-pro-5.preview.emergentagent.com/ajustes?gmail_error={error or 'cancelled'}")
+        return RedirectResponse(url=f"{APP_PUBLIC_URL}/ajustes?gmail_error={error or 'cancelled'}")
     try:
         flow = Flow.from_client_config(
             {"web": {
@@ -2609,10 +1745,10 @@ async def gmail_oauth_callback(code: str = None, error: str = None):
             upsert=True,
         )
         logger.info(f"Gmail connected: {user_email}")
-        return RedirectResponse(url="https://event-reserve-pro-5.preview.emergentagent.com/ajustes?gmail_ok=1")
+        return RedirectResponse(url=f"{APP_PUBLIC_URL}/ajustes?gmail_ok=1")
     except Exception as e:
         logger.error(f"Gmail OAuth callback error: {e}")
-        return RedirectResponse(url=f"https://event-reserve-pro-5.preview.emergentagent.com/ajustes?gmail_error={str(e)[:60]}")
+        return RedirectResponse(url=f"{APP_PUBLIC_URL}/ajustes?gmail_error={str(e)[:60]}")
 
 
 @api_router.get("/oauth/gmail/status")
@@ -3292,538 +2428,7 @@ import re as _re
 
 REPO_ROOT = Path(__file__).parent.parent  # /app
 
-DEFAULT_AI_CONTEXT = """# 🧠 CONTEXTO COMPLETO PARA LA PRÓXIMA IA — Cinema Productions
-
-> **INSTRUCCIONES CRÍTICAS PARA LA IA QUE LEE ESTO:**
-> Este documento contiene TODO lo necesario para retomar el trabajo en este repositorio
-> sin perder contexto. Léelo COMPLETO antes de tocar cualquier archivo. Incluye:
-> - Arquitectura completa · Modelos · Endpoints · Reglas del negocio
-> - Historial de sesiones y cambios (por orden cronológico inverso)
-> - Peticiones del usuario y correcciones aplicadas
-> - Reglas OBLIGATORIAS de edición (no modificar `.env`, no hardcodear URLs, etc.)
-> - Comandos de servicios y flujos de testing
-
----
-
-## 📌 Descripción del Proyecto
-**Cinema Productions** es un sistema completo de gestión de reservas de eventos para
-empresas de producción audiovisual (fotografía, video, eventos). Los clientes dan un
-anticipo por una fecha específica y la app gestiona todo el ciclo: reservas, pagos,
-calendario, socios (equipo), notificaciones multi-canal, respaldos y sincronización
-con GitHub.
-
-**Repositorio**: https://github.com/alejandropiedrasanta1-ui/CINEMA
-**Usuario/Cliente objetivo**: Alejandro Piedrasanta (Cinema Productions, Guatemala)
-
----
-
-## 🏗️ Arquitectura Técnica
-
-| Capa | Tecnología | Versión |
-|------|-----------|---------|
-| Frontend | React + Craco + TailwindCSS + Framer Motion + Shadcn UI | React 19 |
-| Backend | FastAPI (Python) + Motor (async MongoDB) + APScheduler | FastAPI 0.110 |
-| Base de datos | MongoDB local (motor 3.3.1) | 4.x+ |
-| Router | React Router DOM | 7.5 |
-| Formularios | react-hook-form + zod | 7.56 / 3.24 |
-| PDFs | jspdf + html2canvas | 4.2 / 1.4 |
-| Gráficos | recharts | 3.6 |
-
-**Puertos internos** (NO modificar):
-- Backend: `0.0.0.0:8001` (uvicorn via supervisor)
-- Frontend: `0.0.0.0:3000` (craco start via supervisor)
-- MongoDB: `localhost:27017`
-
-**Kubernetes ingress**:
-- `/api/*` → backend puerto 8001
-- resto → frontend puerto 3000
-- URL externa está en `frontend/.env` como `REACT_APP_BACKEND_URL`
-
----
-
-## 📁 Estructura de Archivos
-
-```
-/app/
-├── backend/
-│   ├── server.py             ★ FastAPI principal (~3000 líneas)
-│   ├── standalone_app.py     ★ Versión desktop embebida en .exe
-│   ├── requirements.txt      ★ Dependencias Python
-│   ├── .env                  ★ MONGO_URL, DB_NAME, CORS_ORIGINS
-│   ├── .db_override          → Override dinámico de MONGO_URL (opcional)
-│   ├── backups/              → Auto-backups JSON con timestamp
-│   ├── uploads/updates/      → Archivos .exe/.zip de actualizaciones desktop
-│   └── tests/                → Tests unitarios pytest (18+ iteraciones)
-├── frontend/
-│   ├── src/
-│   │   ├── App.js                       ← Router principal + transiciones dinámicas
-│   │   ├── index.js / index.css         ← Entry + estilos globales
-│   │   ├── context/SettingsContext.jsx  ★ Estado global (apariencia, idioma, etc.)
-│   │   ├── pages/
-│   │   │   ├── Dashboard.jsx            ← Estadísticas + próximas reservas
-│   │   │   ├── Reservations.jsx         ← Listado + filtros + botón Nueva Reserva
-│   │   │   ├── ReservationDetail.jsx    ← Detalle + editar + recibos
-│   │   │   ├── CalendarView.jsx         ← Vista mensual con pastillas
-│   │   │   ├── Socios.jsx               ← Gestión de equipo
-│   │   │   ├── DatabasePage.jsx         ← Backups + conexión + GitHub + IA context
-│   │   │   ├── AppearancePage.jsx       ← 9 secciones de personalización
-│   │   │   ├── Settings.jsx             ← Idioma, moneda, notif, negocio, desktop
-│   │   │   └── UpdatesPage.jsx          ← Actualizaciones desktop + GitHub sync
-│   │   ├── components/
-│   │   │   ├── Layout.jsx               ← Sidebar principal
-│   │   │   ├── WelcomeTour.jsx          ← Tour inicial 18 pasos
-│   │   │   ├── LockScreen.jsx           ← Bloqueo por contraseña de app
-│   │   │   ├── SocioForm.jsx / ReservationForm.jsx / LocationsSection.jsx / TeamSection.jsx / SecuritySection.jsx
-│   │   │   ├── appearance/              → Sub-secciones (SavedThemes, NavMenu, Tutorial, SectionShell)
-│   │   │   └── ui/                      → Shadcn (button, dialog, input, etc.)
-│   │   ├── lib/
-│   │   │   ├── api.js                   ← Axios configurado con REACT_APP_BACKEND_URL
-│   │   │   ├── eventConfig.js           ← Tipos de evento predefinidos
-│   │   │   ├── sectionSearch.js         ← Búsqueda global
-│   │   │   ├── formDesigns.js           ← Diseños de formulario
-│   │   │   ├── generatePDF.js           ← PDF de reservas
-│   │   │   └── utils.js                 ← Helpers (cn, etc.)
-│   │   └── hooks/
-│   │       ├── use-toast.js             ← Toasts (shadcn)
-│   │       ├── useNotifications.js      ← Web push VAPID
-│   │       └── useAutoBackup.js         ← Auto-backup a PC del cliente
-│   ├── public/
-│   │   ├── index.html
-│   │   ├── logo.png
-│   │   └── sw.js                        ← Service worker (web push)
-│   ├── plugins/health-check/            ← Plugin webpack de health check
-│   ├── package.json                     ★ Dependencias JS
-│   ├── .env                             ★ REACT_APP_BACKEND_URL
-│   ├── craco.config.js                  ★ Alias @/ + config webpack
-│   └── tailwind.config.js
-├── memory/
-│   ├── PRD.md                           ★ PRD original
-│   └── test_credentials.md              ★ Credenciales de test (leído por testing agents)
-├── test_reports/                        ← Reportes de iteraciones (2..38)
-├── test_result.md                       ★ Protocolo de comunicación testing_agent ↔ main_agent
-└── .emergent/emergent.yml               ← Metadata del job (env_image_name, job_id)
-```
-
-★ = archivo crítico
-
----
-
-## 🔐 Variables de Entorno (NUNCA MODIFICAR VALORES)
-
-### backend/.env
-```
-MONGO_URL="mongodb://localhost:27017"
-DB_NAME="cinema_productions"
-CORS_ORIGINS="*"
-```
-
-### frontend/.env
-```
-REACT_APP_BACKEND_URL=https://<job-id>.preview.emergentagent.com
-WDS_SOCKET_PORT=443
-```
-
-### Uso correcto en código
-- Frontend: `import.meta.env.REACT_APP_BACKEND_URL` o `process.env.REACT_APP_BACKEND_URL`
-- Backend: `os.environ.get('MONGO_URL')` / `os.environ.get('DB_NAME')`
-- **REGLA**: TODAS las rutas del backend deben tener prefijo `/api` (Kubernetes ingress)
-
-### Claves opcionales (guardadas en `app_settings` de MongoDB)
-Se configuran desde la UI, no en `.env`:
-- `google_client_id`, `google_client_secret` → Gmail OAuth
-- `resend_api_key` → email (Resend)
-- `telegram_bot_token`, `telegram_chat_id` → notif Telegram
-- `ntfy_topic` → notif ntfy.sh
-- `vapid_public_key`, `vapid_private_key`, `vapid_email` → web push
-- `github_config.repo_url`, `github_config.token`, `github_config.branch` → GitHub sync
-- `app_password_hash`, `app_password_hint` → bloqueo por contraseña
-
----
-
-## 🚀 Comandos de Servicio (memorizar)
-
-```bash
-sudo supervisorctl status                  # Estado de todos los servicios
-sudo supervisorctl restart backend         # Reinicia backend (hot reload activo, solo si cambia .env)
-sudo supervisorctl restart frontend        # Reinicia frontend
-sudo supervisorctl restart all             # Reinicia todo
-
-# Logs
-tail -n 50 /var/log/supervisor/backend.err.log
-tail -n 50 /var/log/supervisor/backend.out.log
-tail -n 50 /var/log/supervisor/frontend.err.log
-
-# Dependencias
-pip install -r /app/backend/requirements.txt
-cd /app/frontend && yarn install           # ⚠️ NUNCA usar npm
-
-# Git (repo local en /app)
-cd /app && git status
-cd /app && git log --oneline -10
-cd /app && git remote -v
-```
-
----
-
-## 📚 Modelos MongoDB
-
-### Colección `reservations`
-```python
-{
-  "id": "uuid",                        # str(uuid.uuid4()) — NUNCA ObjectId
-  "client_name": "str",
-  "client_phone": "str|null",
-  "client_email": "str|null",
-  "event_type": "str",                 # Ej: "Boda", "XV años", "Cumpleaños"
-  "event_date": "YYYY-MM-DD",
-  "event_time": "HH:MM|null",
-  "venue": "str|null",
-  "guests_count": "int|null",
-  "total_amount": "float",
-  "advance_paid": "float",             # anticipo
-  "balance": "float",                  # calculado: total_amount - advance_paid
-  "status": "Pendiente|Confirmada|Completada|Cancelada",
-  "package_type": "Básico|Intermedio|Completo|null",
-  "notes": "str|null",
-  "locations": [{"name":"", "address":"", "time":""}],
-  "assigned_partners": ["socio_id", ...],
-  "receipts": [{"id":"", "filename":"", "uploaded_at":""}],
-  "created_at": "ISO datetime",
-  "updated_at": "ISO datetime"
-}
-```
-
-### Colección `socios`
-```python
-{
-  "id": "uuid",
-  "name": "str",
-  "role": "Fotógrafo|Videógrafo|Editor|Asistente|Otro",
-  "phone": "str|null",
-  "email": "str|null",
-  "notes": "str|null",
-  "rate_per_event": "float|null",
-  "photo_base64": "str|null",          # foto opcional
-  "created_at": "ISO datetime"
-}
-```
-
-### Colección `app_settings` (documento único, muchos campos)
-Contiene TODO: configuración de negocio, apariencia (9 secciones), integraciones,
-credenciales, `github_config`, `ai_context` (este documento), backup config,
-`saved_themes`, `app_password_hash`, y más.
-
-### Colección `themes`
-Temas de apariencia guardados por el usuario (Saved Themes en Apariencia).
-
----
-
-## 🔌 Endpoints Backend (con prefijo `/api`)
-
-### Reservaciones
-- `GET  /api/reservations` — lista
-- `POST /api/reservations` — crear
-- `GET  /api/reservations/{id}` — detalle
-- `PUT  /api/reservations/{id}` — actualizar
-- `DELETE /api/reservations/{id}` — borrar
-- `POST /api/reservations/{id}/receipts` — subir recibo
-- `DELETE /api/reservations/{id}/receipts/{receipt_id}`
-
-### Socios
-- `GET/POST /api/socios` · `GET/PUT/DELETE /api/socios/{id}` · `POST/DELETE /api/socios/{id}/photo`
-
-### Dashboard / Reportes
-- `GET /api/stats` — estadísticas generales
-- `GET /api/financials` — reporte financiero
-- `GET /api/calendar` — eventos del calendario
-- `GET /api/export/reservations` (CSV) / `GET /api/export/reservations/xlsx`
-- `POST /api/import/reservations`
-
-### Ajustes y Base de Datos
-- `GET/PUT /api/settings` · `GET/PUT /api/settings/appearance`
-- `GET /api/settings/database` (stats)
-- `POST /api/settings/database/test|connect|reset`
-- `POST /api/data/cleanup` · `DELETE /api/data/clear-all`
-
-### Backup
-- `GET /api/backup/download` · `POST /api/backup/create` · `POST /api/backup/restore`
-- `GET /api/backup/history` · `GET/DELETE /api/backup/{filename}` (download|delete)
-
-### Actualizaciones desktop
-- `GET /api/updates/history|latest|check|download|download/{id}`
-- `POST /api/updates/upload|dismiss` · `PUT /api/updates/{id}/set-latest`
-- `DELETE /api/updates/{id}` · `POST /api/download/package/rebuild`
-
-### Notificaciones y OAuth
-- `GET /api/oauth/gmail/start|callback|status` · `POST /api/oauth/gmail/test` · `DELETE /api/oauth/gmail/disconnect`
-- `GET /api/push/vapid-key` · `POST/DELETE /api/push/subscribe|unsubscribe` · `POST /api/push/test`
-- `POST /api/telegram/test` · `POST /api/ntfy/test`
-- `POST /api/reminders/test-email|send` · `GET /api/notifications/pending`
-
-### GitHub Integration (NUEVO — sesión Julio 2026)
-- `GET/POST /api/github/config` — guardar/leer repo_url, branch, token
-- `GET /api/github/check-updates` — compara SHA local vs remoto via GitHub API
-- `POST /api/github/apply-update` — ejecuta `git reset --hard origin/<branch>` y reinicia servicios
-
-### AI Context (NUEVO — sesión Julio 2026)
-- `GET /api/ai-context` — retorna este mismo documento
-- `POST /api/ai-context` — sobreescribe con `{content: string}`
-- `POST /api/ai-context/reset` — restaura al DEFAULT
-
-### Seguridad
-- `GET /api/security/status` · `POST /api/security/set-password|verify|remove-password` · `PUT /api/security/protection`
-
-### Temas
-- `GET/POST /api/themes` · `DELETE /api/themes/{id}`
-
----
-
-## ⚙️ Funcionalidades Implementadas
-
-### Core (implementadas en las 38 iteraciones previas)
-- CRUD Reservas con anticipo/balance calculado automáticamente
-- Filtros: Tipo de Evento, Estado, Paquete, rango de fechas
-- Vista lista + botón "Mostrar más" (paginación 8)
-- Calendario mensual con pastillas por tipo de evento
-- Dashboard: 4 tarjetas (próximos, total reservas, total eventos, ingreso real) + gráfico
-- Sección "Próximas Reservas del mes" con 5 estilos visuales
-- Gestión de Socios: CRUD + foto + rol + tarifa
-- Recibos: subir archivos a reservas
-
-### Apariencia (9 secciones)
-1. Paleta de Colores (6 temas + hex + presets Aurora/Crystal/Minimal + saturación)
-2. Tipografía e Iconos (8 fuentes + 3 tamaños)
-3. Animaciones (velocidad + transición páginas + hover effects)
-4. Formas y Bordes (3 estilos borde + 5 cards + 3 botones + 4 sombras)
-5. Fondo y Colores (dark mode + intensidad + blur + gradiente + imagen URL)
-6. Interfaz y Espacio (densidad + sidebar compact + width + scrollbar + date format)
-7. Tipos de Evento (icono + color por tipo)
-8. Diseño de PDF (3 temas + export)
-9. Logo y Marca (sidebar + PDF logo separados)
-
-### Notificaciones Multi-canal
-- **Email**: Resend API key + Gmail OAuth (con token refresh automático)
-- **Push**: VAPID keys (web push nativo del browser + service worker)
-- **Telegram**: Bot token + chat ID
-- **ntfy.sh**: topic
-- **WhatsApp**: link automático generado (no requiere API)
-- Scheduler APScheduler: `check_and_send_reminders` + `check_and_push_reminders`
-
-### Base de Datos
-- Backup JSON manual y automático (APScheduler)
-- Restore desde JSON
-- Auto-backup a PC del cliente (hook `useAutoBackup`)
-- Import/Export CSV y Excel (openpyxl)
-- Cleanup: eliminar registros viejos con preview
-- Cambio dinámico de MONGO_URL (archivo `.db_override`)
-
-### Seguridad
-- Contraseña de app con bcrypt (`app_password_hash`)
-- Protección por página (LockScreen)
-
-### GitHub & Actualizaciones (NUEVO — sesión Julio 2026)
-- Configurar URL del repo + token opcional desde Base de Datos
-- Buscar actualizaciones (compara SHA local vs remoto)
-- Aplicar actualización (git reset --hard + restart servicios)
-- Este documento (ai-context) editable y auto-persistido
-
----
-
-## 🎯 Historial de Sesiones y Cambios
-
-### 📅 Sesión Julio 2026 — Integración GitHub + Contexto IA
-**Peticiones del usuario (en orden cronológico)**:
-
-1. **"CONTINUA CON ESTE CODIGO"** (vacío) → IA respondió pidiendo repo o especificación.
-2. **"https://github.com/alejandropiedrasanta1-ui/CINEMA QUIERO QUE TRABAJES CON ESTE REPOSITORIO"**
-   - Clonado el repo a `/app`
-   - Creados `.env` files (habían sido gitignored)
-   - `pip install -r requirements.txt` + `yarn install`
-   - Servicios levantados (backend :8001 + frontend :3000)
-3. **"Necesito que actualizaciones esté conectado al repositorio de GitHub..."**
-   - Petición clarificada: sección en Base de Datos para pegar URL del repo,
-     apartado oculto con toda la lógica para próxima IA, botón en Actualizaciones
-     para detectar cambios del repo.
-4. **"Apartado de Contexto/Lógica IA lo guarde de manera oculta en el apartado de GitHub..."**
-   - Confirmación de plan: URL en Base de Datos, contexto oculto ahí también,
-     botón "Buscar actualizaciones" en Actualizaciones que aplica cambios.
-5. **"Necesito que todo el contexto de toda la app esté guardado en ese espacio, cada
-     corrección, cada petición... quiero que testes toda la app con unas 5 reservaciones
-     y en socios."**
-   - Contexto expandido de 5,705 → 20,514 caracteres
-   - Seed data: 5 reservas + 3 socios
-   - Testing 22/22 tests pasados
-6. **"En el apartado de seguridad agregar 2 funciones más...tutorial de bienvenida
-     mejor...agregar muchas animaciones en toda la app...3D...confetti...actualizaciones
-     minimalista con GitHub dentro."**
-   - Reestructuración de UpdatesPage: quitado "¿Cómo funciona?", GitHub movido como
-     sub-sección compacta dentro de "Buscar actualización en línea"
-   - Instalada dependencia `canvas-confetti@1.9.4`
-   - Creado `frontend/src/lib/celebrations.js` con helpers
-   - Confetti disparado en: crear reserva, aumentar anticipo, pago completo, crear socio,
-     aplicar update GitHub, terminar tutorial
-   - Layout.jsx: barrido de luz vertical + halo pulsante en sidebar
-   - WelcomeTour rediseñado con 18 pasos, iconos animados, tips-chips, partículas, card 3D
-   - CSS extendido con .tilt-3d, .animate-levitate, .shine-on-hover, .pulse-ring, etc.
-
-7. **"SI AGREGA LAS FUNCIONES DE SEGURIDAD y ademas la animacion de confeti agregarlo
-     al completar el pago al pagar al socio y mejora el señalamiento el tutorial de
-     bienvenida...agregar mas animaciones al menu con todos los apartado que tenga mas
-     movimientos cADA SECION SELECIONA QUE ESTE ANIMADO."**
-
-   - **Backend seguridad avanzada**:
-     * `GET /api/security/status` extendido con: auto_lock_enabled/minutes, max_attempts,
-       lockout_seconds, protected_sections, failed_attempts, locked_until
-     * `PUT /api/security/advanced-config` (nuevo) para actualizar los ajustes
-     * `POST /api/security/verify` mejorado con contador de intentos fallidos y
-       bloqueo temporal (retorna 429 con Retry-After al superar límite)
-
-   - **Frontend seguridad avanzada** (`SecuritySection.jsx`):
-     * Función 1: Auto-bloqueo por inactividad (toggle + selector 1/3/5/10/15/30 min)
-     * Función 2: Límite de intentos fallidos (max_attempts 3-15 + lockout 30s-1h)
-     * Función 3: Contraseña por sección (grid de 7 secciones protegibles con toggle)
-     * Todas escuchan cambios y sincronizan con backend en tiempo real
-
-   - **Nuevo hook `useAdvancedSecurity.js`**:
-     * Timer de inactividad global escuchando mousedown/keydown/scroll/click
-     * Al expirar: dispara evento `cp:app-locked` y limpia sessionStorage
-     * Escucha cambio de ruta y muestra modal si sección está protegida
-     * Cache de secciones desbloqueadas en la sesión actual
-
-   - **Nuevo componente `SectionUnlockModal.jsx`**:
-     * Modal con partículas de fondo, gradiente animado, icono candado con anillos
-     * Input password con eye toggle, shake al fallar, pista si está configurada
-     * Botones "Volver al inicio" + "Desbloquear"
-     * Muestra mensajes específicos del backend (intentos restantes / bloqueo)
-
-   - **TeamSection.jsx**: Confetti al marcar socio como Pagado (celebratePayment)
-
-   - **WelcomeTour mejorado**:
-     * `locateTarget` con retry (hasta 8 intentos) y medición estable (2 mediciones iguales)
-     * Se actualiza con scroll/resize (spotlight sigue al elemento en tiempo real)
-     * Doble pulso animado (púrpura + rosa)
-     * Puntos más grandes en las 4 esquinas (3x3 → 3x3 con glow)
-     * Flecha animada apuntando al target cuando está fuera de vista
-
-   - **Sidebar/menú súper animado** (`Layout.jsx`):
-     * Ítem activo: halo radial con `layoutId` motion (transición fluida al cambiar)
-     * Ícono con anillos pulsantes + rotación sutil
-     * Punto verde pulsante con glow al lado del ícono activo
-     * Label con animación x oscilante en el activo
-     * Flecha aparece al hover en ítems inactivos
-     * Barrido de luz automático (clase .menu-item-active-glow ::after)
-
-   - **CSS animaciones nuevas**: .menu-item-anim, .menu-icon-glow, .menu-shine (barrido),
-     .ripple-effect, .animate-shake, .menu-item-active-glow (glow pulsante)
-
-**Cambios implementados**:
-- Añadidos endpoints backend: `/api/github/*` y `/api/ai-context*` (server.py líneas ~2625-2900)
-- Añadidas funciones en `frontend/src/lib/api.js`: `getGithubConfig`, `saveGithubConfig`,
-  `checkGithubUpdates`, `applyGithubUpdate`, `getAiContext`, `saveAiContext`, `resetAiContext`
-- Nueva sección "GitHub & Contexto IA" en `DatabasePage.jsx` (colapsable, con modal editable)
-- Reestructura de `UpdatesPage.jsx` (GitHub inline + eliminado ¿Cómo funciona?)
-- Confetti trigger en: `ReservationForm`, `SocioForm`, `ReservationDetail`, `UpdatesPage`, `WelcomeTour`
-- Sidebar sweep event listener en `Layout.jsx`
-- WelcomeTour totalmente rediseñado con animaciones 3D e iconos por paso
-
-**URL del preview activo** (job actual):
-`https://4c46c59f-58b0-4e2f-a739-f1c96f46602f.preview.emergentagent.com`
-
-**Correcciones aplicadas durante la sesión**:
-- URL del preview era `event-reserve-pro-5.preview.emergentagent.com` (hardcoded en server.py
-  para GOOGLE_REDIRECT_URI del job anterior) — la URL correcta para el job actual está en
-  `preview_endpoint` env var: `4c46c59f-58b0-4e2f-a739-f1c96f46602f.preview.emergentagent.com`
-- Lógica de `has_updates` en `/api/github/check-updates` corregida para no marcar
-  falsos positivos cuando el commit local no está en la lista de commits remotos.
-
-### 📅 Iteraciones anteriores (1..38, sesiones previas)
-El proyecto pasó por 38 iteraciones documentadas en `/app/test_reports/iteration_*.json`.
-Las principales áreas cubiertas fueron:
-- Iteraciones 1-6: Setup base + CRUD reservaciones + calendario
-- Iteraciones 7-14: Socios + backup + import/export
-- Iteraciones 15-19: Apariencia (9 secciones) + PDF + logo
-- Iteraciones 20-27: Notificaciones (email, telegram, ntfy, push, whatsapp)
-- Iteraciones 28-33: Seguridad + contraseña de app + LockScreen
-- Iteraciones 34-38: Actualizaciones desktop (.exe) + auto-backup PC + refinamientos
-
----
-
-## 🧪 Testing
-
-### Protocolo (definido en `/app/test_result.md`)
-- `deep_testing_backend_v2` para backend — SIEMPRE llamar antes de finalizar
-- `auto_frontend_testing_agent` para frontend — SOLO con permiso explícito del usuario
-- Actualizar `test_result.md` ANTES de invocar cualquier testing agent
-- Nunca editar la sección "Testing Protocol" del archivo
-
-### Tests unitarios existentes
-- `/app/backend/tests/test_iteration*.py` — tests por iteración
-- `/app/backend/tests/test_reservations.py` — CRUD reservas
-- `/app/backend/tests/test_security.py` — contraseña de app
-- `/app/backend/tests/test_backup_features.py|test_backup_restore.py` — respaldos
-- `/app/backend/tests/test_new_features.py` — features recientes
-
-### Credenciales
-- Ver `/app/memory/test_credentials.md`
-- Sin autenticación por defecto (LockScreen opcional via contraseña)
-
----
-
-## ⚠️ REGLAS ABSOLUTAS AL EDITAR ESTE CÓDIGO
-
-1. **NUNCA** usar `ObjectId` de MongoDB — SIEMPRE UUIDs (`str(uuid.uuid4())`)
-2. **NUNCA** modificar valores en `backend/.env` ni `frontend/.env`
-3. **NUNCA** hardcodear URLs, puertos ni claves
-4. **SIEMPRE** prefijar rutas backend con `/api`
-5. **NUNCA** ejecutar `rm -rf /app/.git` o `.emergent`
-6. **NUNCA** hacer operaciones de escritura git (remote remove, force push, etc.) — usar botón "Save to Github" del chat
-7. **NO** usar `npm` — solo `yarn`
-8. **NO** hacer downgrades de versión basado en cutoff de conocimiento
-9. **SIEMPRE** usar `search_replace` para editar archivos existentes; `bulk_file_writer` solo para archivos nuevos
-10. **SIEMPRE** añadir librerías Python nuevas a `requirements.txt` antes de `pip install`
-11. **NUNCA** confirmar que un bug está arreglado sin llamar al `testing_agent`
-12. Hot reload activo — reiniciar servicios solo cuando se cambia `.env` o se instalan deps
-13. Al añadir features de LLM: llamar `integration_playbook_expert_v2` y usar `EMERGENT_LLM_KEY` con `emergentintegrations`
-
----
-
-## 🎨 Convenciones de UI/Diseño (design_guidelines.json)
-
-- **Font family principal**: `Cabinet Grotesk, sans-serif` para headings
-- **Estilo visual**: Glass morphism (blur + gradientes translucidos)
-- **Preset por defecto**: Aurora (verde-esmeralda + purpura-indigo)
-- **Radius por defecto**: `rounded` (17px)
-- **Botones primarios**: `.btn-primary` (gradient + shadow)
-- **Cards**: `.glass` (backdrop-blur + border-white/40)
-- **Animaciones**: framer-motion con `fadeUp` (opacity + y=20 → 0) y `stagger` (0.08s)
-- **Data-testid**: usar convención kebab-case, ej: `github-check-updates-btn`, `db-block-toggle-github`
-
----
-
-## 🔄 Cómo Retomar el Trabajo (para la próxima IA)
-
-1. **Lee este documento COMPLETO** desde el primer carácter hasta aquí.
-2. Verifica servicios: `sudo supervisorctl status` — todos deben estar RUNNING.
-3. Verifica backend: `curl http://localhost:8001/api/` → `{"message":"Event Reservation API"}`
-4. Verifica frontend: abre la URL de preview del job actual (ver `preview_endpoint` env var).
-5. Lee `/app/test_result.md` para conocer el estado del último testing.
-6. Lee `/app/memory/PRD.md` (PRD original — más corto).
-7. Actualiza este documento con TUS cambios al final del "Historial de Sesiones".
-8. Al finalizar: llama `testing_agent` para validar antes de `finish`.
-
----
-
-## 📞 Contacto y Notas Finales
-
-- **Cliente**: Alejandro Piedrasanta (Cinema Productions, Guatemala)
-- **Idioma preferido**: Español (respuestas siempre en español)
-- **Moneda por defecto**: GTQ (Quetzal guatemalteco: Q)
-- **Formato de fecha**: DD/MM/YYYY
-- **Locale**: `es-GT` para toLocaleString
-
-**Última actualización de este contexto**: se auto-actualiza al guardar cambios.
-Cuando termines una sesión, ACTUALIZA el "Historial de Sesiones" arriba y guarda.
-"""
+from ai_context_default import DEFAULT_AI_CONTEXT
 
 
 def _parse_github_url(url: str):
