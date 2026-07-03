@@ -2995,6 +2995,38 @@ async def github_push_all(payload: dict = Body(default={})):
         rc_sha, sha = _run(["git", "rev-parse", "HEAD"], cwd=work_dir)
         new_sha = sha.strip() if rc_sha == 0 else ""
 
+        # ── 6. Crear registro en app_updates (para que aparezca en el historial
+        #    y sea detectado por la app de escritorio como nueva versión) ──
+        try:
+            # Versión estilo v1.NN incremental
+            cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
+            new_build = int(cdoc.get("desktop_build", 9)) + 1
+            await db.app_settings.update_one(
+                {}, {"$set": {"desktop_build": new_build}}, upsert=True
+            )
+            version_str = f"1.{new_build}"
+
+            # Marcar todos los anteriores como no-latest
+            await db.app_updates.update_many({}, {"$set": {"is_latest": False}})
+            await db.app_updates.insert_one({
+                "version": version_str,
+                "commit_sha": new_sha,
+                "commit_short": new_sha[:7],
+                "source": "github_push",
+                "branch": branch,
+                "notes": message,
+                "channel": "github",
+                "files_count": changed,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_latest": True,
+                "author": username,
+                "repo_url": repo_url,
+            })
+            registered_version = version_str
+        except Exception as reg_err:
+            logger.warning(f"No se pudo registrar el push como update: {reg_err}")
+            registered_version = None
+
         # Guardar en la BD
         await db.app_settings.update_one(
             {},
@@ -3016,6 +3048,7 @@ async def github_push_all(payload: dict = Body(default={})):
             "message": message,
             "files_changed": changed,
             "repo_url": repo_url,
+            "version": registered_version,
         }
     except HTTPException:
         raise
