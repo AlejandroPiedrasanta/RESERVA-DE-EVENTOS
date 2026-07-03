@@ -46,6 +46,17 @@ UPDATES_DIR = ROOT_DIR / 'uploads' / 'updates'
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 BACKUP_COLLECTIONS = ['reservations', 'socios', 'app_settings']
 
+# ── Repo de GitHub de fábrica (pre-cargado, independiente de Emergent) ────────
+DEFAULT_GITHUB_REPO = "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
+DEFAULT_GITHUB_BRANCH = "main"
+_DEFAULT_AI_CONTEXT = (
+    "# Contexto — Cinema Productions (App de escritorio independiente)\n\n"
+    "Esta es la versión de escritorio: 100% local e independiente. Base de datos\n"
+    "embebida (cinema_data.json) por defecto; puedes conectar tu propio MongoDB o\n"
+    "MongoDB Atlas desde Ajustes → Base de Datos.\n\n"
+    f"Repositorio oficial: {DEFAULT_GITHUB_REPO}\n"
+)
+
 # ── Auto-update config ────────────────────────────────────────────────────────
 _UPDATE_SERVER_FILE = ROOT_DIR / 'update_server_url.txt'
 _VERSION_FILE = ROOT_DIR / 'version.txt'
@@ -1244,11 +1255,19 @@ def _verify_app_password(password: str, stored: str) -> bool:
 
 @api_router.get("/security/status")
 async def get_security_status():
-    doc = await db.app_settings.find_one({}, {"_id": 0, "app_password_hash": 1, "app_password_hint": 1, "page_protection_enabled": 1}) or {}
+    doc = await db.app_settings.find_one({}, {"_id": 0, "app_password_hash": 1, "app_password_hint": 1, "page_protection_enabled": 1, "security_config": 1}) or {}
+    cfg = doc.get("security_config") or {}
     return {
         "password_enabled": bool(doc.get("app_password_hash")),
         "hint": doc.get("app_password_hint") or "",
         "protection_enabled": bool(doc.get("page_protection_enabled")),
+        "auto_lock_enabled": bool(cfg.get("auto_lock_enabled", False)),
+        "auto_lock_minutes": int(cfg.get("auto_lock_minutes", 5)),
+        "max_attempts": int(cfg.get("max_attempts", 5)),
+        "lockout_seconds": int(cfg.get("lockout_seconds", 60)),
+        "protected_sections": cfg.get("protected_sections", []),
+        "failed_attempts": int(cfg.get("failed_attempts", 0)),
+        "locked_until": cfg.get("locked_until", ""),
     }
 
 
@@ -1445,6 +1464,331 @@ async def check_remote_update(url: str, current_version: str = "0.0.0"):
         raise HTTPException(status_code=502, detail=f"No se pudo conectar al servidor: {str(e)}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Endpoints extra para paridad con la web (evitan pantallas en blanco por 404).
+#  La app de escritorio es INDEPENDIENTE: GitHub es solo informativo, las
+#  integraciones que requieren nube devuelven respuestas controladas.
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _get_github_cfg() -> dict:
+    doc = await db.app_settings.find_one({}, {"github_config": 1}) or {}
+    cfg = doc.get("github_config") or {}
+    if not cfg.get("repo_url"):
+        cfg = {"repo_url": DEFAULT_GITHUB_REPO, "branch": DEFAULT_GITHUB_BRANCH}
+    return cfg
+
+
+def _parse_github_url(url: str):
+    if not url:
+        return None, None
+    m = re.match(r"^https?://github\.com/([^/]+)/([^/.]+?)(?:\.git)?/?$", url.strip())
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
+@api_router.get("/github/config")
+async def get_github_config():
+    cfg = await _get_github_cfg()
+    repo_url = cfg.get("repo_url") or DEFAULT_GITHUB_REPO
+    return {
+        "repo_url": repo_url,
+        "has_token": bool(cfg.get("token")),
+        "last_commit_sha": cfg.get("last_commit_sha", ""),
+        "last_check_at": cfg.get("last_check_at", ""),
+        "branch": cfg.get("branch", DEFAULT_GITHUB_BRANCH),
+        "is_configured": True,
+        "is_desktop": True,
+        "suggested_repo": DEFAULT_GITHUB_REPO,
+    }
+
+
+@api_router.post("/github/config")
+async def save_github_config(payload: dict = Body(...)):
+    repo_url = (payload.get("repo_url") or "").strip() or DEFAULT_GITHUB_REPO
+    branch = (payload.get("branch") or DEFAULT_GITHUB_BRANCH).strip()
+    owner, _ = _parse_github_url(repo_url)
+    if not owner:
+        raise HTTPException(status_code=400, detail="URL de GitHub inválida. Formato: https://github.com/usuario/repo")
+    update = {"github_config.repo_url": repo_url, "github_config.branch": branch}
+    token = (payload.get("token") or "").strip()
+    if token:
+        update["github_config.token"] = token
+    elif payload.get("clear_token"):
+        update["github_config.token"] = ""
+    await db.app_settings.update_one({}, {"$set": update}, upsert=True)
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "repo_url": repo_url, "branch": branch}
+
+
+@api_router.get("/github/check-updates")
+async def check_github_updates():
+    """Solo informativo en escritorio: revisa si hay commits nuevos en el repo."""
+    import httpx
+    cfg = await _get_github_cfg()
+    repo_url = cfg.get("repo_url") or DEFAULT_GITHUB_REPO
+    branch = cfg.get("branch") or DEFAULT_GITHUB_BRANCH
+    owner, repo = _parse_github_url(repo_url)
+    if not owner:
+        raise HTTPException(status_code=400, detail="URL de GitHub inválida")
+    headers = {"Accept": "application/vnd.github+json"}
+    if cfg.get("token"):
+        headers["Authorization"] = f"Bearer {cfg['token']}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits",
+                headers=headers, params={"sha": branch, "per_page": 10},
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sin conexión a GitHub: {e}")
+    if r.status_code == 404:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado (¿privado y sin token?)")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"GitHub respondió {r.status_code}")
+    commits = r.json() or []
+    remote_sha = commits[0]["sha"] if commits else ""
+    last_seen = cfg.get("last_commit_sha", "")
+    has_updates = bool(remote_sha) and remote_sha != last_seen
+    new_commits = [{
+        "sha": c["sha"][:7],
+        "full_sha": c["sha"],
+        "message": (c.get("commit", {}).get("message") or "").split("\n")[0][:200],
+        "author": c.get("commit", {}).get("author", {}).get("name", "?"),
+        "date": c.get("commit", {}).get("author", {}).get("date", ""),
+        "url": c.get("html_url", ""),
+    } for c in commits[:5]]
+    await db.app_settings.update_one(
+        {}, {"$set": {"github_config.last_check_at": datetime.now(timezone.utc).isoformat(),
+                      "github_config.last_remote_sha": remote_sha}}, upsert=True)
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {
+        "has_updates": has_updates,
+        "is_desktop": True,
+        "remote_sha": remote_sha,
+        "remote_sha_short": remote_sha[:7],
+        "local_sha": last_seen,
+        "local_sha_short": last_seen[:7] if last_seen else "",
+        "branch": branch,
+        "commits_ahead": len(new_commits) if has_updates else 0,
+        "commits": new_commits,
+        "repo_url": repo_url,
+    }
+
+
+@api_router.post("/github/apply-update")
+async def apply_github_update(payload: dict = Body(default={})):
+    """En escritorio no se aplica con git: se instruye re-descargar el ZIP."""
+    cfg = await _get_github_cfg()
+    last = cfg.get("last_remote_sha", "")
+    if last:
+        await db.app_settings.update_one(
+            {}, {"$set": {"github_config.last_commit_sha": last}}, upsert=True)
+        if _using_embedded:
+            asyncio.create_task(_save_embedded_data())
+    return {
+        "success": True,
+        "is_desktop": True,
+        "message": ("Esta es la app de escritorio. Para aplicar la última versión, "
+                    "descarga de nuevo el paquete desde tu repositorio de GitHub "
+                    "y reemplaza los archivos. Tus datos (cinema_data.json) se conservan."),
+    }
+
+
+# ─── Contexto para IA (local) ────────────────────────────────────────────────
+@api_router.get("/ai-context")
+async def get_ai_context():
+    doc = await db.app_settings.find_one({}, {"ai_context": 1}) or {}
+    ctx = doc.get("ai_context") or {}
+    if not ctx.get("content"):
+        return {"content": _DEFAULT_AI_CONTEXT, "updated_at": "", "is_default": True}
+    return {"content": ctx.get("content", ""), "updated_at": ctx.get("updated_at", ""), "is_default": False}
+
+
+@api_router.post("/ai-context")
+async def save_ai_context(payload: dict = Body(...)):
+    content = payload.get("content", "")
+    if not isinstance(content, str):
+        raise HTTPException(status_code=400, detail="content debe ser string")
+    await db.app_settings.update_one(
+        {}, {"$set": {"ai_context": {"content": content,
+                                     "updated_at": datetime.now(timezone.utc).isoformat()}}}, upsert=True)
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "updated_at": datetime.now(timezone.utc).isoformat()}
+
+
+@api_router.post("/ai-context/reset")
+async def reset_ai_context():
+    await db.app_settings.update_one(
+        {}, {"$set": {"ai_context": {"content": _DEFAULT_AI_CONTEXT,
+                                     "updated_at": datetime.now(timezone.utc).isoformat()}}}, upsert=True)
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "content": _DEFAULT_AI_CONTEXT}
+
+
+# ─── Seguridad avanzada (config) ──────────────────────────────────────────────
+@api_router.put("/security/advanced-config")
+async def set_advanced_security_config(payload: dict = Body(...)):
+    update = {}
+    if "auto_lock_enabled" in payload:
+        update["security_config.auto_lock_enabled"] = bool(payload["auto_lock_enabled"])
+    if "auto_lock_minutes" in payload:
+        m = int(payload["auto_lock_minutes"])
+        if 1 <= m <= 120:
+            update["security_config.auto_lock_minutes"] = m
+    if "max_attempts" in payload:
+        n = int(payload["max_attempts"])
+        if 3 <= n <= 20:
+            update["security_config.max_attempts"] = n
+    if "lockout_seconds" in payload:
+        s = int(payload["lockout_seconds"])
+        if 10 <= s <= 3600:
+            update["security_config.lockout_seconds"] = s
+    if "protected_sections" in payload and isinstance(payload["protected_sections"], list):
+        update["security_config.protected_sections"] = payload["protected_sections"]
+    if update:
+        await db.app_settings.update_one({}, {"$set": update}, upsert=True)
+        if _using_embedded:
+            asyncio.create_task(_save_embedded_data())
+    return {"success": True, "updated_keys": list(update.keys())}
+
+
+# ─── Notificaciones (endpoints de prueba / pendientes) ────────────────────────
+@api_router.get("/notifications/pending")
+async def get_pending_notifications():
+    settings_doc = await db.app_settings.find_one({}, {"_id": 0})
+    periods = (settings_doc.get("reminder_periods") if settings_doc else None) or [3]
+    days = max(periods) if periods else 3
+    today = datetime.now(timezone.utc).date()
+    end = (today + timedelta(days=days)).isoformat()
+    cursor = db.reservations.find(
+        {"event_date": {"$gte": today.isoformat(), "$lte": end}, "status": {"$nin": ["Cancelado", "Completado"]}},
+        {"client_name": 1, "event_date": 1, "event_type": 1, "venue": 1, "_id": 1})
+    docs = await cursor.to_list(100)
+    return [doc_to_dict(d) for d in docs]
+
+
+@api_router.post("/reminders/test-email")
+async def test_email_connection():
+    settings_doc = await db.app_settings.find_one({}, {"_id": 0})
+    if not settings_doc or not settings_doc.get("resend_api_key"):
+        raise HTTPException(status_code=400, detail="Ingresa tu API Key de Resend primero")
+    if not settings_doc.get("admin_email"):
+        raise HTTPException(status_code=400, detail="Ingresa un Email Destino primero")
+    try:
+        import resend as _resend
+        _resend.api_key = settings_doc["resend_api_key"]
+        sender = settings_doc.get("sender_name") or "Cinema Productions"
+        await asyncio.to_thread(_resend.Emails.send, {
+            "from": f"{sender} <onboarding@resend.dev>",
+            "to": [settings_doc["admin_email"]],
+            "subject": f"Prueba de email — {sender}",
+            "html": "<p>Conexion de email correcta.</p>",
+        })
+        return {"success": True, "message": f"Email de prueba enviado a {settings_doc['admin_email']}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al enviar: {e}")
+
+
+@api_router.post("/telegram/test")
+async def telegram_test():
+    import httpx
+    doc = await db.app_settings.find_one({}, {"_id": 0})
+    if not doc or not doc.get("telegram_bot_token") or not doc.get("telegram_chat_id"):
+        return {"ok": False, "error": "Configura el token y chat_id de Telegram primero"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.post(
+                f"https://api.telegram.org/bot{doc['telegram_bot_token']}/sendMessage",
+                json={"chat_id": doc["telegram_chat_id"],
+                      "text": "<b>Cinema Productions</b> — Prueba ✓", "parse_mode": "HTML"})
+            r.raise_for_status()
+        return {"ok": True, "message": "Mensaje enviado a Telegram"}
+    except Exception as e:
+        return {"ok": False, "error": f"Error de Telegram: {e}"}
+
+
+@api_router.post("/ntfy/test")
+async def ntfy_test():
+    import httpx
+    doc = await db.app_settings.find_one({}, {"_id": 0})
+    if not doc or not doc.get("ntfy_topic"):
+        return {"ok": False, "error": "Configura el tema de ntfy primero"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.post(f"https://ntfy.sh/{doc['ntfy_topic']}",
+                             content="ntfy conectado correctamente.".encode("utf-8"),
+                             headers={"Title": "Cinema Productions — Prueba", "Priority": "high"})
+            r.raise_for_status()
+        return {"ok": True, "message": f"Notificación enviada al tema: {doc['ntfy_topic']}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Error de ntfy: {e}"}
+
+
+# ─── Web Push / Gmail (no disponibles offline → respuestas controladas) ───────
+@api_router.get("/push/vapid-key")
+async def get_vapid_key():
+    return {"publicKey": ""}
+
+
+@api_router.post("/push/subscribe")
+async def push_subscribe(payload: dict = Body(default={})):
+    return {"ok": True, "desktop": True}
+
+
+@api_router.delete("/push/unsubscribe")
+async def push_unsubscribe(endpoint: str = ""):
+    return {"ok": True}
+
+
+@api_router.post("/push/test")
+async def push_test():
+    return {"ok": False, "error": "Las notificaciones push del navegador no están disponibles en la app de escritorio local."}
+
+
+@api_router.get("/oauth/gmail/status")
+async def gmail_status():
+    return {"connected": False, "email": "", "connected_at": None, "desktop": True}
+
+
+@api_router.get("/oauth/gmail/start")
+async def gmail_oauth_start():
+    raise HTTPException(status_code=400, detail="El inicio de sesión con Gmail no está disponible en la app de escritorio. Usa Resend, Telegram o ntfy.")
+
+
+@api_router.delete("/oauth/gmail/disconnect")
+async def gmail_disconnect():
+    return {"ok": True}
+
+
+@api_router.post("/oauth/gmail/test")
+async def gmail_test():
+    raise HTTPException(status_code=400, detail="Gmail no disponible en la app de escritorio.")
+
+
+# ─── Deployment helpers (informativo) ─────────────────────────────────────────
+@api_router.get("/deployment/env-template")
+async def get_env_template():
+    tpl = ("# Cinema Productions — Config\nMONGO_URL=embedded\nDB_NAME=cinema_productions\n")
+    return Response(content=tpl.encode(), media_type="text/plain",
+                    headers={"Content-Disposition": 'attachment; filename=".env.template"'})
+
+
+@api_router.post("/deployment/health-check")
+async def health_check_url(url: str):
+    import httpx
+    if not url.startswith(("http://", "https://")):
+        return {"ok": False, "error": "URL inválida"}
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as c:
+            r = await c.get(url)
+            return {"ok": r.status_code < 400, "status": r.status_code}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:100]}
+
+
 # ─── App config ───────────────────────────────────────────
 
 app.include_router(api_router)
@@ -1511,6 +1855,10 @@ if BUILD_DIR.exists():
 
     @app.get("/{path:path}")
     async def serve_spa(path: str):
+        # Nunca devolver HTML para rutas de API desconocidas (causaría que el
+        # frontend interprete HTML como JSON → pantalla en blanco).
+        if path.startswith("api/") or path == "api":
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         f = BUILD_DIR / path
         if f.exists() and f.is_file():
             return FileResponse(str(f))

@@ -244,6 +244,8 @@ class Launcher:
 
         self._build_ui()
         self._animate_pulse()
+        # Arranque automatico: no requiere clic (doble clic y listo).
+        self.root.after(500, self.on_start)
 
     def _build_ui(self):
         # Header
@@ -442,12 +444,15 @@ class Launcher:
             # Liberar puerto si esta ocupado (best-effort)
             self._free_port_8001()
 
-            # Lanzar app.py en background
-            creationflags = 0
+            # Lanzar app.py en background SIN ventana de consola (pythonw)
+            server_exe = pyexe
             if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NEW_CONSOLE
+                _pyw = Path(pyexe).with_name("pythonw.exe")
+                if _pyw.exists():
+                    server_exe = str(_pyw)
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.server_proc = subprocess.Popen(
-                [pyexe, "app.py"],
+                [server_exe, "app.py"],
                 cwd=str(APP_DIR),
                 creationflags=creationflags,
             )
@@ -462,7 +467,7 @@ class Launcher:
             else:
                 raise RuntimeError("El servidor no respondio en 30 segundos")
 
-            # PASO 6: listo
+            # PASO 6: listo — abrir navegador y cerrar el launcher (el servidor sigue)
             self.set_progress(100, "App lista - abriendo navegador",
                               "http://localhost:8001")
             time.sleep(0.4)
@@ -470,7 +475,8 @@ class Launcher:
             self.state = "ready"
             self._draw_button()
             self.status.config(text="App corriendo en localhost:8001", fg=SUCCESS)
-            self.log.config(text="Pulsa el circulo para reabrir el navegador")
+            self.log.config(text="Puedes cerrar esta ventana. La app sigue corriendo.")
+            self.root.after(2500, self.root.destroy)
 
         except Exception as e:
             self.state = "error"
@@ -483,6 +489,12 @@ class Launcher:
         pyexe = sys.executable
         req_file = APP_DIR / "requirements.txt"
         if not req_file.exists():
+            return
+
+        # Arranque rapido: si ya se instalaron antes, no reinstalar.
+        marker = APP_DIR / ".deps_ok"
+        if marker.exists():
+            self.set_progress(80, "Dependencias ya instaladas", "arranque rapido")
             return
 
         # Contar dependencias para simular progreso
@@ -525,6 +537,10 @@ class Launcher:
             sim_thread.join(timeout=1)
 
             if ret == 0:
+                try:
+                    (APP_DIR / ".deps_ok").write_text("ok", encoding="utf-8")
+                except Exception:
+                    pass
                 self.set_progress(80, "Dependencias listas",
                                   f"{total} paquetes instalados")
                 return
@@ -595,173 +611,61 @@ if __name__ == "__main__":
 '''
 
 
+_INICIAR_VBS = r"""' Cinema Productions - Iniciar SIN ventana de consola (recomendado)
+Set sh = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+d = fso.GetParentFolderName(WScript.ScriptFullName)
+sh.CurrentDirectory = d
+q = Chr(34)
+target = q & d & "\launcher.pyw" & q
+On Error Resume Next
+sh.Run "pythonw " & target, 0, False
+If Err.Number <> 0 Then
+  Err.Clear
+  sh.Run "py -w " & target, 0, False
+End If
+If Err.Number <> 0 Then
+  Err.Clear
+  sh.Run "python " & target, 0, False
+End If
+"""
+
+
 _START_BAT = """@echo off
-title Cinema Productions - Gestor de Reservas
-color 0A
-cls
-echo.
-echo  ==========================================================
-echo    CINEMA PRODUCTIONS  ^|  Gestor de Reservas de Eventos
-echo  ==========================================================
-echo.
-echo   Iniciando... Este script hara:
-echo     1) Verificar Python 3.8+
-echo     2) Actualizar pip
-echo     3) Instalar dependencias
-echo     4) Iniciar el servidor local
-echo     5) Abrir el navegador
-echo.
-echo  ==========================================================
-echo.
+title Cinema Productions
+cd /d "%~dp0"
 
-REM --- Configuracion opcional (opcional, puede saltarse) ---
-choice /C CN /T 3 /D N /M "  Pulsa C para configurar la BD, N para continuar (auto en 3s)"
-if errorlevel 2 goto SKIP_CONFIG
-if errorlevel 1 (
-    echo.
-    echo   Abriendo configuracion...
-    python config.py 2>nul
-    if errorlevel 1 py config.py 2>nul
-    if errorlevel 1 notepad .env
-    echo   Configuracion aplicada.
-    echo.
-)
-:SKIP_CONFIG
+REM =============================================================
+REM  Arranque rapido SIN consola: lanza el launcher grafico
+REM  (ventana con barra de progreso, sin ventana negra).
+REM  La primera vez instala dependencias (1-3 min); despues
+REM  arranca en segundos.
+REM =============================================================
 
-REM --- PASO 1: Verificar Python ---------------------------
-echo.
-echo  [1/5] Verificando Python...
-where python >nul 2>&1
+where pythonw >nul 2>&1
 if not errorlevel 1 (
-    set PYTHON=python
-    goto PYTHON_OK
+    start "" pythonw launcher.pyw
+    exit /b
 )
+
 where py >nul 2>&1
 if not errorlevel 1 (
-    set PYTHON=py
-    goto PYTHON_OK
+    start "" py -w launcher.pyw
+    exit /b
 )
+
+where python >nul 2>&1
+if not errorlevel 1 (
+    start "" python launcher.pyw
+    exit /b
+)
+
 echo.
 echo  ==========================================================
-echo   ERROR: Python no esta instalado o no esta en el PATH.
-echo.
+echo   Python no esta instalado o no esta en el PATH.
 echo   Descargalo desde: https://www.python.org/downloads/
-echo   IMPORTANTE: Al instalar marca "Add Python to PATH".
+echo   IMPORTANTE: marca "Add Python to PATH" al instalar.
 echo  ==========================================================
-echo.
-pause
-exit /b 1
-
-:PYTHON_OK
-%PYTHON% --version
-echo   OK: Python detectado.
-
-REM --- PASO 2: Actualizar pip -----------------------------
-echo.
-echo  [2/5] Actualizando pip y herramientas...
-%PYTHON% -m pip install --upgrade pip wheel setuptools --quiet --no-warn-script-location
-if errorlevel 1 (
-    echo   AVISO: no se pudo actualizar pip. Continuando de todas formas...
-) else (
-    echo   OK: pip actualizado.
-)
-
-REM --- PASO 3: Instalar dependencias con reintento -------
-echo.
-echo  [3/5] Instalando dependencias del proyecto...
-echo         Primera vez tarda 1-3 minutos. Despues es casi instantaneo.
-echo.
-
-set INSTALL_TRY=0
-
-:INSTALL_LOOP
-set /a INSTALL_TRY+=1
-echo   Intento %INSTALL_TRY% de 3...
-%PYTHON% -m pip install -r requirements.txt --no-warn-script-location --disable-pip-version-check
-if not errorlevel 1 goto INSTALL_OK
-
-if %INSTALL_TRY% GEQ 3 goto INSTALL_FAILED
-echo   Fallo el intento %INSTALL_TRY%. Reintentando en 3 segundos...
-timeout /t 3 /nobreak >nul
-goto INSTALL_LOOP
-
-:INSTALL_FAILED
-echo.
-echo  ==========================================================
-echo   ERROR: Fallo la instalacion tras 3 intentos.
-echo.
-echo   Prueba manualmente en esta ventana:
-echo     %PYTHON% -m pip install -r requirements.txt
-echo.
-echo   Verifica tu conexion a internet o revisa el error arriba.
-echo  ==========================================================
-pause
-exit /b 1
-
-:INSTALL_OK
-echo   OK: Dependencias instaladas correctamente.
-
-REM --- PASO 4: Iniciar servidor ---------------------------
-echo.
-echo  [4/5] Iniciando servidor local en http://localhost:8001 ...
-
-REM Liberar el puerto 8001 si esta ocupado
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do (
-    echo   Puerto 8001 ocupado por PID %%p. Liberando...
-    taskkill /F /PID %%p >nul 2>&1
-)
-
-start "Cinema Productions [servidor - NO CERRAR]" /min %PYTHON% app.py
-
-echo   Esperando que el servidor este listo (max 30 seg)...
-set /a TRIES=0
-
-:WAIT_LOOP
-    timeout /t 1 /nobreak >nul
-    %PYTHON% -c "import urllib.request,sys; urllib.request.urlopen('http://localhost:8001/api/', timeout=2); sys.exit(0)" >nul 2>&1
-    if not errorlevel 1 goto SERVER_READY
-    set /a TRIES+=1
-    if %TRIES% GEQ 30 goto SERVER_FAILED
-    goto WAIT_LOOP
-
-:SERVER_FAILED
-echo.
-echo  ==========================================================
-echo   ERROR: El servidor no respondio en 30 segundos.
-echo.
-echo   Posibles causas:
-echo     - Puerto 8001 ocupado por otro programa
-echo     - Error en .env (MONGO_URL invalida)
-echo     - Alguna dependencia no se instalo
-echo.
-echo   Solucion:
-echo     1) Cierra otras copias de Cinema Productions
-echo     2) Revisa la ventana del servidor para ver el error
-echo     3) Ejecuta config.bat para verificar la base de datos
-echo  ==========================================================
-pause
-exit /b 1
-
-:SERVER_READY
-echo   OK: Servidor arriba y funcionando.
-
-REM --- PASO 5: Abrir navegador ----------------------------
-echo.
-echo  [5/5] Abriendo Cinema Productions en tu navegador...
-timeout /t 1 /nobreak >nul
-start http://localhost:8001
-
-echo.
-echo  ==========================================================
-echo    Cinema Productions esta corriendo
-echo.
-echo    URL:     http://localhost:8001
-echo    Datos:   cinema_data.json (auto-guardado cada 60 seg)
-echo    Config:  ejecuta config.bat para cambiar la BD
-echo    Cerrar:  cierra la ventana "Cinema Productions [servidor]"
-echo  ==========================================================
-echo.
-echo   Deja esta ventana abierta o cierrala; la app sigue en la otra ventana.
 echo.
 pause
 """

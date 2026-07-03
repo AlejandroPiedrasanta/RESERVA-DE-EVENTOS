@@ -195,3 +195,28 @@ Contiene claves de apariencia + configuración de negocio:
   - `server.py` 4148 → 2700 líneas. Extraídos `desktop_package.py` (plantillas instalador) y `ai_context_default.py` (DEFAULT_AI_CONTEXT).
   - Añadido ÍNDICE de navegación en server.py + `/app/ARCHITECTURE.md` (mapa interno para la próxima IA).
 - **Pendiente P2**: replicar fixes 1–4 en `standalone_app.py` (desktop); opcional: dividir server.py en routers por dominio (<700 líneas/archivo).
+
+### Actualización 2026-07-03 — App de ESCRITORIO: fix pantalla blanca + independencia
+**Causa raíz de la pantalla blanca**: `standalone_app.py` no tenía varios endpoints que el
+frontend llama (github/config, github/check-updates, github/apply-update, ai-context,
+security/advanced-config, notifications/pending, push/*, oauth/gmail/*). Al faltar,
+el catch-all SPA devolvía index.html (HTML) con 200 y el frontend lo parseaba como JSON → crash.
+
+**Cambios (standalone_app.py):**
+- Añadidos TODOS los endpoints faltantes (GitHub informativo, ai-context, seguridad avanzada,
+  notificaciones/pruebas, push/gmail con respuestas controladas).
+- Guard: rutas `/api/*` desconocidas devuelven JSON 404 (nunca HTML) → mata pantallas blancas.
+- Repo de GitHub pre-cargado de fábrica: DEFAULT_GITHUB_REPO = RESERVA-DE-EVENTOS.
+- security/status ahora incluye campos avanzados (auto_lock, max_attempts, etc.).
+- 100% independiente: sin URL de servidor Emergent; DB embebida por defecto (cinema_data.json).
+
+**Cambios (desktop_package.py + download_package):**
+- start.bat ahora lanza el launcher gráfico SIN consola negra (pythonw), auto-arranca (sin clic).
+- launcher.pyw: auto-start, salta reinstalación si `.deps_ok` existe (arranque rápido),
+  corre el servidor oculto (pythonw/CREATE_NO_WINDOW), abre navegador y se cierra solo.
+- Nuevo Iniciar.vbs (arranque 100% sin consola). config.bat/config.py CONSERVADOS.
+- Se eliminó update_server_url.txt (dependía de Emergent). ZIP verificado: 0 URLs emergent en app.py.
+
+**Verificado en runtime** (puerto 8009, modo embebido): todos los endpoints OK, check-updates
+consulta GitHub real (5 commits), /api/* → JSON 404, ZIP con launcher.pyw/Iniciar.vbs, sin emergent.
+**NOTA**: el usuario debe RE-DESCARGAR el ZIP para obtener el app.py corregido.

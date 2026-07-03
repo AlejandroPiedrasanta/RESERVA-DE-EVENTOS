@@ -1680,7 +1680,7 @@ async def trigger_reminders_manual():
 
 from desktop_package import (
     _ENV_TEMPLATE, _CONFIG_PY, _CONFIG_BAT, _LAUNCHER_PYW, _START_BAT,
-    _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README,
+    _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README, _INICIAR_VBS,
 )
 
 
@@ -1983,10 +1983,12 @@ async def download_package(request: Request):
         zf.writestr('cinema-productions/config.bat', _win_lines(_CONFIG_BAT))
         zf.writestr('cinema-productions/requirements.txt', _REQUIREMENTS)
         zf.writestr('cinema-productions/start.bat', _win_lines(_START_BAT))
+        zf.writestr('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS))
+        zf.writestr('cinema-productions/launcher.pyw', _LAUNCHER_PYW)
         zf.writestr('cinema-productions/start.sh', _START_SH)
         zf.writestr('cinema-productions/README.txt', _win_lines(_README))
-        # Embed cloud URL + this version so Desktop App knows its own version
-        zf.writestr('cinema-productions/update_server_url.txt', cloud_url)
+        # App 100% independiente: sin URL de servidor Emergent. La versión local
+        # se guarda para mostrarla; las actualizaciones se revisan vía GitHub.
         zf.writestr('cinema-productions/version.txt', auto_version)
 
         for file_path in sorted(build_dir.rglob('*')):
