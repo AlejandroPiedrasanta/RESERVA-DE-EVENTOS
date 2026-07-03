@@ -1981,6 +1981,18 @@ async def ntfy_test():
 
 _build_state = {"status": "idle", "message": "Listo para actualizar", "started_at": None, "finished_at": None, "progress": 0}
 
+# Estado del push a GitHub — alimenta la barra de progreso de la UI
+_push_state = {"status": "idle", "progress": 0, "message": "", "started_at": None, "finished_at": None}
+
+def _set_push_state(progress=None, message=None, status=None):
+    global _push_state
+    if status is not None:
+        _push_state["status"] = status
+    if progress is not None:
+        _push_state["progress"] = progress
+    if message is not None:
+        _push_state["message"] = message
+
 
 async def _run_frontend_build():
     global _build_state
@@ -2961,6 +2973,9 @@ async def github_push_all(payload: dict = Body(default={})):
 
     # Directorio temporal (limpio) para clonar
     work_dir = Path(tempfile.mkdtemp(prefix="cp_push_"))
+    _set_push_state(progress=5, message="Conectando con GitHub…", status="running")
+    _push_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    _push_state["finished_at"] = None
 
     # Helper para ejecutar comandos git
     def _run(args, cwd=None, timeout=120, sensitive=False):
@@ -2989,6 +3004,7 @@ async def github_push_all(payload: dict = Body(default={})):
             _run(["git", "checkout", "-b", branch], cwd=work_dir)
 
         # ── 2. Configurar identidad ──────────────────────────────────
+        _set_push_state(progress=20, message="Repositorio clonado. Preparando compilación…")
         _run(["git", "config", "user.email", f"{username}@users.noreply.github.com"], cwd=work_dir)
         _run(["git", "config", "user.name", username], cwd=work_dir)
 
@@ -3013,13 +3029,16 @@ async def github_push_all(payload: dict = Body(default={})):
         if payload.get("build_frontend", True):
             frontend_src = ROOT_DIR.parent / "frontend"
             if frontend_src.exists():
+                _set_push_state(progress=30, message="Compilando interfaz (yarn build)… puede tardar 1–2 min")
                 rc_b, out_b = _run(["yarn", "build"], cwd=frontend_src, timeout=600)
                 if rc_b != 0:
                     shutil.rmtree(str(work_dir), ignore_errors=True)
+                    _set_push_state(progress=0, message="Error al compilar el frontend", status="error")
                     raise HTTPException(
                         status_code=500,
                         detail=f"yarn build falló, no se subió nada: {out_b[-400:]}",
                     )
+                _set_push_state(progress=60, message="Interfaz compilada. Empaquetando archivos…")
 
 
         for d in mirror_dirs:
@@ -3067,6 +3086,7 @@ async def github_push_all(payload: dict = Body(default={})):
         # correctamente y de forma automática y remota, sin reinstalar.
         try:
             standalone_src = ROOT_DIR / "standalone_app.py"
+            _set_push_state(progress=75, message="Preparando versión para PC (app.py + build)…")
             if standalone_src.exists():
                 shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
             fe_build = ROOT_DIR.parent / "frontend" / "build"
@@ -3082,6 +3102,7 @@ async def github_push_all(payload: dict = Body(default={})):
             logger.warning(f"No se pudo publicar la versión PC plana: {e}")
 
         # ── 4. Add + Commit + Push ───────────────────────────────────
+        _set_push_state(progress=85, message="Registrando cambios (git add)…")
         _run(["git", "add", "-A"], cwd=work_dir)
         # Forzar el add de la versión PC (build/ está en .gitignore como /build)
         for forced in ("build", "app.py", "version.txt"):
@@ -3091,6 +3112,8 @@ async def github_push_all(payload: dict = Body(default={})):
         rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():
             shutil.rmtree(str(work_dir), ignore_errors=True)
+            _set_push_state(progress=100, message="Sin cambios que subir — ya está sincronizado", status="done")
+            _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
             return {
                 "success": True,
                 "nothing_to_commit": True,
@@ -3100,12 +3123,16 @@ async def github_push_all(payload: dict = Body(default={})):
         # Contar archivos cambiados para el resumen
         changed = len([l for l in status_out.strip().split("\n") if l.strip()])
 
+        _set_push_state(progress=90, message="Creando commit…")
         rc_c, out_c = _run(["git", "commit", "-m", message], cwd=work_dir)
         if rc_c != 0:
+            _set_push_state(progress=0, message="Error al crear el commit", status="error")
             raise HTTPException(status_code=500, detail=f"git commit falló: {out_c[-400:]}")
 
+        _set_push_state(progress=95, message="Subiendo a GitHub…")
         rc_p, out_p = _run(["git", "push", "origin", branch], cwd=work_dir, timeout=300, sensitive=True)
         if rc_p != 0:
+            _set_push_state(progress=0, message="Error al subir a GitHub", status="error")
             raise HTTPException(status_code=502, detail=f"git push falló: {out_p[-500:]}")
 
         # ── 5. Obtener SHA del commit ────────────────────────────────
@@ -3178,6 +3205,8 @@ async def github_push_all(payload: dict = Body(default={})):
             upsert=True,
         )
 
+        _set_push_state(progress=100, message="¡Subido a GitHub! La versión PC ya está publicada.", status="done")
+        _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
         return {
             "success": True,
             "nothing_to_commit": False,
@@ -3192,14 +3221,22 @@ async def github_push_all(payload: dict = Body(default={})):
     except HTTPException:
         raise
     except subprocess.TimeoutExpired as e:
+        _set_push_state(progress=0, message="Tiempo de espera agotado. Revisa tu conexión.", status="error")
         raise HTTPException(status_code=504, detail=f"Timeout ({e.timeout}s). Verifica tu conexión y tamaño del repo.")
     except Exception as e:
+        _set_push_state(progress=0, message=f"Error inesperado: {type(e).__name__}", status="error")
         raise HTTPException(status_code=500, detail=f"Error inesperado: {type(e).__name__}: {e}")
     finally:
         try:
             shutil.rmtree(str(work_dir), ignore_errors=True)
         except Exception:
             pass
+
+
+@api_router.get("/github/push-status")
+async def github_push_status():
+    """Estado actual del push a GitHub (para la barra de progreso en la UI)."""
+    return _push_state
 
 
 # ── DIAGNÓSTICO DE LA APP ─────────────────────────────────────────

@@ -20,7 +20,7 @@ import {
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
-  githubPushAll,
+  githubPushAll, getGithubPushStatus,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -165,6 +165,9 @@ export default function DatabasePage() {
   const [ghConnectToken, setGhConnectToken] = useState("");
   const [ghConnectSaving, setGhConnectSaving] = useState(false);
   const [ghPushing, setGhPushing] = useState(false);
+  const [ghPushProgress, setGhPushProgress] = useState(0);
+  const [ghPushMsg, setGhPushMsg] = useState("");
+  const ghPushPollRef = useRef(null);
   const [diagnostic, setDiagnostic] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
@@ -378,14 +381,28 @@ export default function DatabasePage() {
     );
     if (message === null) return; // usuario canceló
     setGhPushing(true);
+    setGhPushProgress(3);
+    setGhPushMsg("Iniciando…");
+    // Polling del progreso real reportado por el backend
+    if (ghPushPollRef.current) clearInterval(ghPushPollRef.current);
+    ghPushPollRef.current = setInterval(async () => {
+      try {
+        const st = await getGithubPushStatus();
+        if (typeof st.progress === "number") setGhPushProgress(st.progress);
+        if (st.message) setGhPushMsg(st.message);
+      } catch (_) { /* ignora errores de polling */ }
+    }, 800);
     try {
       const res = await githubPushAll(message || undefined);
+      setGhPushProgress(100);
       if (res.nothing_to_commit) {
+        setGhPushMsg("Sin cambios que subir");
         toast({
           title: "Sin cambios que subir",
           description: "El repositorio ya está sincronizado.",
         });
       } else {
+        setGhPushMsg("¡Subido a GitHub!");
         toast({
           title: `✓ Subido a GitHub`,
           description: `Commit ${res.commit_short} en rama ${res.branch}`,
@@ -394,13 +411,23 @@ export default function DatabasePage() {
       }
       await loadGithubConfig();
     } catch (err) {
+      setGhPushMsg("Error al subir");
       toast({
         title: "Error al subir",
         description: err?.response?.data?.detail?.slice(0, 200) || String(err),
         variant: "destructive",
       });
     } finally {
-      setGhPushing(false);
+      if (ghPushPollRef.current) {
+        clearInterval(ghPushPollRef.current);
+        ghPushPollRef.current = null;
+      }
+      // Deja ver 100%/estado final un instante antes de resetear
+      setTimeout(() => {
+        setGhPushing(false);
+        setGhPushProgress(0);
+        setGhPushMsg("");
+      }, 1200);
     }
   };
 
@@ -1684,6 +1711,37 @@ export default function DatabasePage() {
                     {ghPushing ? "Subiendo..." : "Guardar todo al repositorio"}
                   </motion.button>
                 </div>
+
+                {/* Barra de progreso del push a GitHub */}
+                <AnimatePresence>
+                  {ghPushing && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      data-testid="github-push-progress"
+                      className="overflow-hidden bg-emerald-50/60 border border-emerald-100 rounded-2xl px-4 py-3 space-y-2"
+                    >
+                      <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
+                        <span className="flex items-center gap-2">
+                          <Loader2 size={13} className="animate-spin" />
+                          {ghPushMsg || "Subiendo repositorio…"}
+                        </span>
+                        <span data-testid="github-push-progress-pct" className="font-mono tabular-nums">
+                          {Math.round(ghPushProgress)}%
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-full bg-emerald-100 overflow-hidden">
+                        <motion.div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.max(3, Math.min(100, ghPushProgress))}%` }}
+                          transition={{ duration: 0.4, ease: "easeOut" }}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Estado del último push */}
                 {ghConfig.last_push_at && (

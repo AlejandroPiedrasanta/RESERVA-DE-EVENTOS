@@ -108,6 +108,7 @@ export const saveGithubConfig = (data) => api.post("/github/config", data).then(
 export const connectGithub = (token, repo_url, branch) => api.post("/github/connect", { token, repo_url, branch }).then(r => r.data);
 export const disconnectGithub = () => api.post("/github/disconnect").then(r => r.data);
 export const githubPushAll = (message) => api.post("/github/push-all", { message }).then(r => r.data);
+export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart").then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
 export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);
