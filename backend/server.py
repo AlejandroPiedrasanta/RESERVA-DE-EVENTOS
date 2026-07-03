@@ -3023,7 +3023,7 @@ async def run_diagnostic():
         mongo_version = server_info.get("version", "?")
         add("mongo_conn", f"MongoDB conectado (v{mongo_version})", True, f"URL: {_mongo_url[:35]}...")
     except Exception as e:
-        add("mongo_conn", "MongoDB conectado", False, str(e)[:200])
+        add("mongo_conn", "MongoDB conectado", False, str(e)[:200], fixable=True)
 
     # 4) Solo la BD por defecto (sin bases externas rondando)
     try:
@@ -3077,7 +3077,8 @@ async def run_diagnostic():
     # 8) Variables de entorno críticas
     env_ok = bool(os.environ.get("MONGO_URL")) and bool(os.environ.get("DB_NAME"))
     add("env_vars", "Variables de entorno (backend/.env)", env_ok,
-        "MONGO_URL y DB_NAME configuradas" if env_ok else "Faltan variables críticas")
+        "MONGO_URL y DB_NAME configuradas" if env_ok else "Faltan variables críticas",
+        fixable=True)
 
     # 9) Seguridad — contraseña ZIP no está vacía
     sec_cfg = (await db.app_settings.find_one({}, {"security_config": 1}) or {}).get("security_config") or {}
@@ -3087,6 +3088,7 @@ async def run_diagnostic():
         len(zip_pwd) >= 3,
         f"Longitud: {len(zip_pwd)} chars ({'DEFAULT (2868)' if zip_pwd == DEFAULT_ZIP_PASSWORD else 'personalizada'})",
         severity="warning",
+        fixable=True,
     )
 
     # 10) Directorio de backups escribible
@@ -3105,8 +3107,9 @@ async def run_diagnostic():
     add("frontend_build",
         "Build de frontend (para app de escritorio)",
         has_build,
-        "Build presente" if has_build else "Sin build — compila desde Ajustes → App de Escritorio",
+        "Build presente" if has_build else "Sin build — se puede compilar automáticamente",
         severity="info",
+        fixable=True,
     )
 
     # Score global
@@ -3131,6 +3134,7 @@ async def run_diagnostic():
 @api_router.post("/diagnostic/fix")
 async def diagnostic_fix(payload: dict = Body(...)):
     """Aplica una corrección concreta al item indicado por id."""
+    global client, db
     check_id = (payload.get("id") or "").strip()
     if not check_id:
         raise HTTPException(status_code=400, detail="Falta 'id' del chequeo a corregir")
@@ -3171,10 +3175,114 @@ async def diagnostic_fix(payload: dict = Body(...)):
             detail = f"Directorio creado: {BACKUP_DIR}"
         except Exception as e:
             detail = str(e)
+    elif check_id == "mongo_conn":
+        # Reintenta la conexión con la URL original
+        try:
+            original_url = os.environ.get("MONGO_URL", "")
+            if original_url:
+                new_client = AsyncIOMotorClient(original_url)
+                await new_client[DB_NAME].command("ping")
+                client = new_client
+                db = new_client[DB_NAME]
+                fixed = True
+                detail = "Reconectado a MongoDB usando la URL original"
+            else:
+                detail = "No hay MONGO_URL en el entorno"
+        except Exception as e:
+            detail = f"Reconexión falló: {e}"
+    elif check_id == "env_vars":
+        # Recrea el .env con valores por defecto seguros (backup del anterior si existe)
+        try:
+            env_path = ROOT_DIR / ".env"
+            if env_path.exists():
+                bak = ROOT_DIR / ".env.bak"
+                bak.write_text(env_path.read_text())
+            env_path.write_text(
+                "MONGO_URL=mongodb://localhost:27017\n"
+                "DB_NAME=reserva_eventos\n"
+                "CORS_ORIGINS=*\n"
+            )
+            fixed = True
+            detail = f".env restaurado a valores por defecto (backup: {env_path}.bak)"
+        except Exception as e:
+            detail = str(e)
+    elif check_id == "zip_password":
+        await db.app_settings.update_one(
+            {},
+            {"$set": {"security_config.zip_password": DEFAULT_ZIP_PASSWORD}},
+            upsert=True,
+        )
+        fixed = True
+        detail = f"Contraseña ZIP restaurada a {DEFAULT_ZIP_PASSWORD}"
+    elif check_id == "frontend_build":
+        # Compila el frontend
+        result = subprocess.run(
+            ["yarn", "build"], cwd=str(ROOT_DIR.parent / "frontend"),
+            capture_output=True, text=True, timeout=600,
+        )
+        fixed = result.returncode == 0
+        detail = ("Build compilado correctamente" if fixed else (result.stderr or result.stdout))[-400:]
     else:
         raise HTTPException(status_code=400, detail=f"El chequeo '{check_id}' no es corregible automáticamente")
 
     return {"success": fixed, "id": check_id, "detail": detail}
+
+
+@api_router.post("/diagnostic/fix-all")
+async def diagnostic_fix_all():
+    """Ejecuta el diagnóstico y aplica correcciones automáticas a todo lo que sea fixable.
+
+    Devuelve un resumen con lo que se corrigió y lo que no.
+    """
+    diag = await run_diagnostic()
+    results = []
+    fixed_count = 0
+    failed_count = 0
+
+    for check in diag["checks"]:
+        if check["ok"] or not check.get("fixable"):
+            continue
+        try:
+            res = await diagnostic_fix({"id": check["id"]})
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": res.get("success", False),
+                "detail": res.get("detail", "")[:200],
+            })
+            if res.get("success"):
+                fixed_count += 1
+            else:
+                failed_count += 1
+        except HTTPException as e:
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": False,
+                "detail": str(e.detail)[:200],
+            })
+            failed_count += 1
+        except Exception as e:
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": False,
+                "detail": str(e)[:200],
+            })
+            failed_count += 1
+
+    # Ejecutar diagnóstico final
+    final_diag = await run_diagnostic()
+
+    return {
+        "success": failed_count == 0,
+        "fixed": fixed_count,
+        "failed": failed_count,
+        "results": results,
+        "final_score": final_diag["summary"]["score"],
+        "final_errors": final_diag["summary"]["errors"],
+        "final_warnings": final_diag["summary"]["warnings"],
+    }
 
 
 def _get_local_commit_sha():

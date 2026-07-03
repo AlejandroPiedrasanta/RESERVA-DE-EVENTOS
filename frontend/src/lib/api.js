@@ -111,6 +111,7 @@ export const githubPushAll = (message) => api.post("/github/push-all", { message
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart").then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
 export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);
+export const fixAllDiagnosticIssues = () => api.post("/diagnostic/fix-all").then(r => r.data);
 export const checkGithubUpdates = () => api.get("/github/check-updates").then(r => r.data);
 export const applyGithubUpdate = (force = true) => api.post("/github/apply-update", { force }).then(r => r.data);
 

@@ -19,7 +19,7 @@ import {
   getReservations, getBackupHistory, createServerBackup,
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
-  connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue,
+  connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
   githubPushAll,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
@@ -434,6 +434,38 @@ export default function DatabasePage() {
     }
   };
 
+  // ── Auto-corregir TODO lo que sea corregible ──────────────────────────
+  const [diagFixingAll, setDiagFixingAll] = useState(false);
+  const handleFixAll = async () => {
+    if (!window.confirm("Se ejecutarán correcciones automáticas en todos los items que estén marcados como corregibles (reinstalar dependencias, recrear .env, resetear repo, etc.). ¿Continuar?")) return;
+    setDiagFixingAll(true);
+    try {
+      const res = await fixAllDiagnosticIssues();
+      if (res.fixed > 0 && res.failed === 0) {
+        toast({
+          title: `✓ Todo corregido (${res.fixed} items)`,
+          description: `Score final: ${res.final_score}/100`,
+        });
+        fireEpic();
+      } else if (res.fixed > 0) {
+        toast({
+          title: `Parcialmente corregido`,
+          description: `${res.fixed} OK, ${res.failed} fallaron · Score: ${res.final_score}/100`,
+        });
+      } else {
+        toast({
+          title: `Nada que corregir`,
+          description: `Todo lo corregible ya está OK · Score: ${res.final_score}/100`,
+        });
+      }
+      await loadDiagnostic();
+    } catch (err) {
+      toast({ title: "Error al auto-corregir", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setDiagFixingAll(false);
+    }
+  };
+
   const handleOpenContext = async () => {
     setCtxOpen(true);
     setCtxLoading(true);
@@ -582,11 +614,18 @@ export default function DatabasePage() {
   const handleOptimize = async () => {
     setOptimizing(true);
     try {
+      // 1) Optimizar/compactar BD en el backend
       const r = await optimizeDatabase();
-      toast({ title: "Base de datos optimizada ✓", description: r.message || "Compactada y reordenada" });
-      loadDbStats?.();
+      // 2) Refrescar TODOS los datos de la app en el cliente (reservas, socios, apariencia, settings)
+      try { window.dispatchEvent(new Event("cp:refresh-all")); } catch {}
+      try { await loadAll?.(); } catch {}
+      try { await loadDbStats?.(); } catch {}
+      toast({
+        title: "Base de datos actualizada ✓",
+        description: r.message || "Reservas, contactos, diseño y configuración sincronizados",
+      });
     } catch (e) {
-      toast({ title: e.response?.data?.detail || "Error al optimizar", variant: "destructive" });
+      toast({ title: e.response?.data?.detail || "Error al actualizar", variant: "destructive" });
     } finally { setOptimizing(false); }
   };
 
@@ -1147,15 +1186,19 @@ export default function DatabasePage() {
                     </div>
                   )}
 
-                  {/* ── Compactar y reordenar ── */}
+                  {/* ── Actualizar base de datos ── */}
                   <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
                     onClick={handleOptimize} disabled={optimizing}
                     data-testid="optimize-db-btn"
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 text-white text-xs font-bold disabled:opacity-60">
+                    title="Sincroniza reservas, contactos, diseño, configuración y todo el estado de la app. Compacta y reordena la BD."
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold disabled:opacity-60 shadow-md">
                     {optimizing
-                      ? <><RefreshCw size={14} className="animate-spin" /> Optimizando…</>
-                      : <><RefreshCw size={14} /> Compactar y reordenar base de datos</>}
+                      ? <><RefreshCw size={14} className="animate-spin" /> Actualizando datos…</>
+                      : <><RefreshCw size={14} /> Actualizar base de datos</>}
                   </motion.button>
+                  <p className="text-[10px] text-slate-400 -mt-1 px-1">
+                    Sincroniza reservas · contactos · diseño · configuración · optimiza la BD
+                  </p>
                 </div>
               ) : (
                 <div className="flex items-center justify-between py-4">
@@ -1459,187 +1502,8 @@ export default function DatabasePage() {
           </div>
         </motion.div>
 
-        {/* ── LIMPIEZA DE BASE DE DATOS ── */}
-        <motion.div variants={fadeUp}>
-          <div className="glass rounded-3xl overflow-hidden">
-            <div onClick={() => toggleBlock("cleanup")} data-testid="db-block-toggle-cleanup"
-              className="flex items-center gap-3 px-5 py-4 border-b border-white/40 cursor-pointer select-none">
-              <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
-                <Scissors size={16} className="text-orange-600" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Limpieza de base de datos</p>
-                <p className="text-[11px] text-slate-400">Elimina registros innecesarios y libera espacio</p>
-              </div>
-              <span className="ml-auto"><BlockChevron open={openBlocks.cleanup} /></span>
-            </div>
-            <CollapseBody open={openBlocks.cleanup}>
-            <div className="p-5 space-y-3">
 
-              {/* Preview counts */}
-              {cleanupPreview && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-red-50/60 rounded-2xl p-3 text-center border border-red-200/40">
-                    <div className="text-2xl font-black text-red-600" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{cleanupPreview.cancelled_count}</div>
-                    <div className="text-[10px] font-bold text-red-400 mt-1">Reservas canceladas</div>
-                  </div>
-                  <div className="bg-slate-50/60 rounded-2xl p-3 text-center border border-slate-200/40">
-                    <div className="text-2xl font-black text-slate-600" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{cleanupPreview.old_completed_count}</div>
-                    <div className="text-[10px] font-bold text-slate-400 mt-1">Completadas {">"} 6 meses</div>
-                  </div>
-                </div>
-              )}
 
-              <div className="space-y-2">
-                <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                  onClick={() => handleCleanup("cancelled")}
-                  disabled={cleanupLoading || (cleanupPreview?.cancelled_count === 0)}
-                  data-testid="cleanup-cancelled-btn"
-                  className="w-full flex items-center justify-between py-3 px-4 rounded-2xl text-xs font-bold transition-all border bg-red-50/40 border-red-200/50 text-red-700 hover:bg-red-50 disabled:opacity-40">
-                  <div className="flex items-center gap-2">
-                    {cleanupLoading && cleanupAction === "cancelled" ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                    Eliminar reservas canceladas
-                  </div>
-                  <span className="text-[10px] font-black bg-red-100 px-2 py-0.5 rounded-full">
-                    {cleanupPreview?.cancelled_count ?? "—"} registros
-                  </span>
-                </motion.button>
-
-                <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                  onClick={() => handleCleanup("old_completed")}
-                  disabled={cleanupLoading || (cleanupPreview?.old_completed_count === 0)}
-                  data-testid="cleanup-old-btn"
-                  className="w-full flex items-center justify-between py-3 px-4 rounded-2xl text-xs font-bold transition-all border bg-slate-50/40 border-slate-200/50 text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-                  <div className="flex items-center gap-2">
-                    {cleanupLoading && cleanupAction === "old_completed" ? <Loader2 size={12} className="animate-spin" /> : <Clock size={12} />}
-                    Eliminar reservas completadas {">"} 6 meses
-                  </div>
-                  <span className="text-[10px] font-black bg-slate-100 px-2 py-0.5 rounded-full">
-                    {cleanupPreview?.old_completed_count ?? "—"} registros
-                  </span>
-                </motion.button>
-              </div>
-              <p className="text-[10px] text-slate-400 text-center">Se crea un respaldo automático antes de cada limpieza</p>
-            </div>
-            </CollapseBody>
-          </div>
-        </motion.div>
-
-        {/* ── ACTUALIZACIONES EN LA BASE DE DATOS ── */}
-        <motion.div variants={fadeUp}>
-          <div className="glass rounded-3xl overflow-hidden">
-            <div onClick={() => toggleBlock("updates")} data-testid="db-block-toggle-updates"
-              className="flex items-center justify-between px-5 py-4 border-b border-white/40 cursor-pointer select-none">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
-                  <Package size={16} className="text-violet-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Actualizaciones guardadas</p>
-                  <p className="text-[11px] text-slate-400">Versiones de la app almacenadas en esta base de datos</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-violet-100 text-violet-700">{dbUpdates.length} versiones</span>
-                <button onClick={(e) => { e.stopPropagation(); loadDbUpdates(); }} className="w-8 h-8 rounded-xl hover:bg-white/60 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all">
-                  <RefreshCw size={13} className={updatesLoading ? "animate-spin" : ""} />
-                </button>
-                <BlockChevron open={openBlocks.updates} />
-              </div>
-            </div>
-            <CollapseBody open={openBlocks.updates}>
-            <div className="p-5">
-              {updatesLoading ? (
-                <div className="space-y-2">{[...Array(2)].map((_,i) => <div key={i} className="h-12 glass rounded-2xl animate-pulse"/>)}</div>
-              ) : dbUpdates.length === 0 ? (
-                <div className="py-8 text-center">
-                  <Package size={28} className="mx-auto text-slate-200 mb-2"/>
-                  <p className="text-xs text-slate-400 font-medium">No hay versiones en esta base de datos</p>
-                  <p className="text-[10px] text-slate-300 mt-1">Descarga la App desde Ajustes para registrar la primera versión</p>
-                  <a href="/actualizaciones" className="inline-flex items-center gap-1 mt-3 text-xs text-indigo-500 font-bold hover:underline">
-                    Ir a Actualizaciones <ChevronRight size={12}/>
-                  </a>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {dbUpdates.map((u) => (
-                    <div key={u.id} data-testid={`db-update-row-${u.id}`}
-                      className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-50/60 border border-slate-200/40 hover:bg-white/60 transition-colors">
-                      <div className="w-8 h-8 rounded-xl bg-violet-50 flex items-center justify-center flex-shrink-0">
-                        <Package size={13} className="text-violet-500"/>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs font-black text-slate-800">v{u.version}</p>
-                          {u.is_latest && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">ACTIVA</span>}
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${u.channel === "stable" ? "bg-slate-100 text-slate-500" : u.channel === "beta" ? "bg-amber-100 text-amber-600" : "bg-red-100 text-red-500"}`}>
-                            {u.channel === "stable" ? "Estable" : u.channel === "beta" ? "Beta" : "Alpha"}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate">{u.filename} · {u.file_size ? (u.file_size > 1048576 ? `${(u.file_size/1048576).toFixed(1)} MB` : `${(u.file_size/1024).toFixed(0)} KB`) : "—"} · {new Date(u.created_at).toLocaleDateString("es-GT")}</p>
-                      </div>
-                      {u.notes && <p className="text-[10px] text-slate-400 italic truncate max-w-[120px] hidden md:block">{u.notes}</p>}
-                      <button onClick={() => handleDeleteUpdate(u.id)} data-testid={`db-update-del-${u.id}`}
-                        className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors flex-shrink-0">
-                        <Trash2 size={11} className="text-red-400"/>
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-center pt-2">
-                    <a href="/actualizaciones" className="flex items-center gap-1.5 text-xs text-indigo-500 font-bold hover:underline">
-                      Administrar versiones <ChevronRight size={12}/>
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
-            </CollapseBody>
-          </div>
-        </motion.div>
-
-        {/* ── OPCIONES DE BASE DE DATOS ── */}
-        <motion.div variants={fadeUp}>
-          <div className="glass rounded-3xl overflow-hidden">
-            <div onClick={() => toggleBlock("options")} data-testid="db-block-toggle-options"
-              className="flex items-center gap-3 px-5 py-4 border-b border-white/40 cursor-pointer select-none">
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center">
-                <ToggleRight size={16} className="text-slate-600" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Opciones de base de datos</p>
-                <p className="text-[11px] text-slate-400">Activa o desactiva funciones de la base de datos</p>
-              </div>
-              <span className="ml-auto"><BlockChevron open={openBlocks.options} /></span>
-            </div>
-            <CollapseBody open={openBlocks.options}>
-            <div className="p-5 space-y-1">
-              {[
-                { key: "autoTest",     icon: Wifi,          label: "Probar conexión antes de conectar",      sub: "Verifica que el servidor esté disponible antes de cambiar" },
-                { key: "notifySwitch", icon: MonitorSpeaker, label: "Notificar al cambiar de base de datos",  sub: "Muestra una alerta de confirmación al conectar" },
-                { key: "showFullUrl",  icon: Link2,          label: "Mostrar URL completa en el estado",      sub: "Muestra la URL sin ocultar contraseñas (solo local)" },
-                { key: "compressBackup", icon: HardDrive,    label: "Comprimir respaldos automáticos",        sub: "Reduce el tamaño de los archivos de backup" },
-              ].map(({ key, icon: Icon, label, sub }) => (
-                <div key={key} data-testid={`db-option-${key}`}
-                  className="flex items-center justify-between py-3 px-3 rounded-2xl hover:bg-white/40 transition-colors cursor-pointer"
-                  onClick={() => saveDbOption(key, !dbOptions[key])}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
-                      <Icon size={14} className="text-slate-500"/>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{label}</p>
-                      <p className="text-[10px] text-slate-400">{sub}</p>
-                    </div>
-                  </div>
-                  <div className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${dbOptions[key] ? "bg-indigo-500" : "bg-slate-200"}`}>
-                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${dbOptions[key] ? "right-0.5" : "left-0.5"}`}/>
-                  </div>
-                </div>
-              ))}
-            </div>
-            </CollapseBody>
-          </div>
-        </motion.div>
 
         {/* ── GITHUB & CONTEXTO IA ── */}
         <motion.div variants={fadeUp}>
@@ -1906,9 +1770,24 @@ export default function DatabasePage() {
                     {diagLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                     {diagLoading ? "Ejecutando..." : "Ejecutar diagnóstico"}
                   </motion.button>
+
+                  {/* Botón: corregir TODO lo que sea corregible */}
+                  {diagnostic && (diagnostic.summary.errors > 0 || diagnostic.summary.warnings > 0) && (
+                    <motion.button
+                      whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleFixAll}
+                      disabled={diagFixingAll}
+                      data-testid="diagnostic-fix-all-btn"
+                      className="px-4 py-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60 shadow-md"
+                    >
+                      {diagFixingAll ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
+                      {diagFixingAll ? "Corrigiendo..." : "Corregir todo"}
+                    </motion.button>
+                  )}
+
                   {diagnostic && (
-                    <p className="text-[10px] text-slate-400 ml-2">
-                      Última ejecución: {new Date(diagnostic.generated_at).toLocaleTimeString("es-GT")}
+                    <p className="text-[10px] text-slate-400 ml-auto">
+                      Última: {new Date(diagnostic.generated_at).toLocaleTimeString("es-GT")}
                     </p>
                   )}
                 </div>
