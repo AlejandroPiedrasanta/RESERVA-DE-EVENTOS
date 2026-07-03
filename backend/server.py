@@ -2931,7 +2931,8 @@ async def github_push_all(payload: dict = Body(default={})):
     1. Clona el repo remoto en una carpeta temporal (--depth 1)
     2. Copia el backend/, frontend/ y archivos raíz actuales dentro del clone,
        preservando el .git del clone. NUNCA copia .env, node_modules, __pycache__,
-       build/, backups/, uploads/.
+       backups/, uploads/. SÍ incluye frontend/build/ (compilado) para que la
+       app de escritorio en otras PCs reciba la interfaz actualizada.
     3. Configura git identity con la cuenta conectada
     4. git add -A && git commit && git push origin <branch>
     5. Limpia la carpeta temporal.
@@ -2996,14 +2997,30 @@ async def github_push_all(payload: dict = Body(default={})):
         mirror_dirs = ["backend", "frontend"]
 
         # Patrones a ignorar SIEMPRE (nunca subir a GitHub)
+        # NOTA: 'build' NO se ignora — el frontend/build/ compilado SÍ se sube
+        # para que la app de escritorio en otras PCs reciba la UI actualizada.
         ignore_patterns = shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache",
-            "node_modules", "build", ".cache",
+            "node_modules", ".cache",
             ".env", ".env.local", ".env.production", ".env.development",
             ".db_override", "backups", "uploads",
             "cinema_data.json", "cinema_data.json.bak",
             "*.log", ".DS_Store", "desktop_wheels",
         )
+
+        # ── 2b. Compilar el frontend para incluir frontend/build/ actualizado ──
+        # (así la auto-actualización de otras PCs recibe el bundle nuevo, no solo el fuente)
+        if payload.get("build_frontend", True):
+            frontend_src = ROOT_DIR.parent / "frontend"
+            if frontend_src.exists():
+                rc_b, out_b = _run(["yarn", "build"], cwd=frontend_src, timeout=600)
+                if rc_b != 0:
+                    shutil.rmtree(str(work_dir), ignore_errors=True)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"yarn build falló, no se subió nada: {out_b[-400:]}",
+                    )
+
 
         for d in mirror_dirs:
             src = ROOT_DIR.parent / d
@@ -3041,6 +3058,10 @@ async def github_push_all(payload: dict = Body(default={})):
 
         # ── 4. Add + Commit + Push ───────────────────────────────────
         _run(["git", "add", "-A"], cwd=work_dir)
+        # Forzar el add del bundle compilado (frontend/.gitignore ignora /build,
+        # pero SÍ queremos subirlo para que otras PCs reciban la UI actualizada)
+        if (work_dir / "frontend" / "build").exists():
+            _run(["git", "add", "-f", "frontend/build"], cwd=work_dir)
 
         rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():
