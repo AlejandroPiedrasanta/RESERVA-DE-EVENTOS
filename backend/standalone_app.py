@@ -23,6 +23,7 @@ import secrets
 import logging
 import base64
 import uuid
+import subprocess
 import webbrowser
 import threading
 import time
@@ -2216,6 +2217,269 @@ async def health_check_url(url: str):
             return {"ok": r.status_code < 400, "status": r.status_code}
     except Exception as e:
         return {"ok": False, "error": str(e)[:100]}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DIAGNÓSTICO DE LA APP (versión desktop/standalone)
+# ═══════════════════════════════════════════════════════════════════
+
+DEFAULT_ZIP_PASSWORD_STANDALONE = "2868"
+
+
+@api_router.get("/diagnostic")
+async def run_diagnostic():
+    """Chequeos de salud de la app: dependencias, DB embedded/remota, GitHub, seguridad."""
+    import importlib.util
+
+    checks = []
+
+    def add(id_, label, ok, detail="", severity="error", fixable=False):
+        checks.append({
+            "id": id_,
+            "label": label,
+            "ok": bool(ok),
+            "detail": detail,
+            "severity": severity if not ok else "ok",
+            "fixable": bool(fixable),
+        })
+
+    # 1) Dependencias Python críticas
+    critical_py = ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt"]
+    # pyzipper y requests son opcionales en desktop embedded
+    missing_py = [p for p in critical_py if importlib.util.find_spec(p) is None]
+    add("python_deps",
+        f"Dependencias Python ({len(critical_py)} críticas)",
+        not missing_py,
+        f"Faltantes: {', '.join(missing_py)}" if missing_py else f"Todas instaladas: {', '.join(critical_py)}",
+        fixable=True,
+    )
+
+    # 2) MongoDB (embedded o real)
+    try:
+        if _using_embedded:
+            add("mongo_conn", "Base de datos local (embedded)", True,
+                f"Modo embedded — datos en cinema_data.json")
+        else:
+            await db.command("ping")
+            server_info = await db.client.server_info()
+            mongo_version = server_info.get("version", "?")
+            add("mongo_conn", f"MongoDB conectado (v{mongo_version})", True,
+                f"URL: {_effective_mongo_url[:35]}...")
+    except Exception as e:
+        add("mongo_conn", "MongoDB conectado", False, str(e)[:200], fixable=True)
+
+    # 3) Archivo de datos embedded existe y es escribible
+    if _using_embedded:
+        data_file = ROOT_DIR / "cinema_data.json"
+        add("embedded_data_file",
+            "Archivo de datos (cinema_data.json)",
+            data_file.exists(),
+            f"OK — {data_file.stat().st_size} bytes" if data_file.exists() else "No existe todavía",
+            severity="info",
+        )
+
+    # 4) Repositorio GitHub configurado
+    cfg = await _get_github_cfg()
+    repo_url = cfg.get("repo_url", "")
+    is_default_repo = repo_url == DEFAULT_GITHUB_REPO
+    add("github_default_repo",
+        "Repositorio GitHub por defecto",
+        is_default_repo,
+        f"OK: {repo_url}" if is_default_repo else (f"Otro repo: {repo_url}" if repo_url else "Sin repo configurado"),
+        severity="warning",
+        fixable=True,
+    )
+
+    # 5) Token de GitHub
+    add("github_token",
+        "Cuenta de GitHub vinculada",
+        bool(cfg.get("token")),
+        f"Conectado como @{cfg.get('username', '?')}" if cfg.get("token") else "Sin token — usa 'Conectar con GitHub'",
+        severity="warning",
+    )
+
+    # 6) Directorio de backups escribible
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        test_file = BACKUP_DIR / ".diagnostic_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        add("backup_writable", "Directorio de backups escribible", True, str(BACKUP_DIR))
+    except Exception as e:
+        add("backup_writable", "Directorio de backups escribible", False, str(e)[:120], fixable=True)
+
+    # 7) Contraseña ZIP configurada
+    sec_cfg = (await db.app_settings.find_one({}, {"security_config": 1}) or {}).get("security_config") or {}
+    zip_pwd = sec_cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD_STANDALONE
+    add("zip_password",
+        "Contraseña ZIP configurada",
+        len(zip_pwd) >= 3,
+        f"Longitud: {len(zip_pwd)} chars ({'DEFAULT (2868)' if zip_pwd == DEFAULT_ZIP_PASSWORD_STANDALONE else 'personalizada'})",
+        severity="warning",
+        fixable=True,
+    )
+
+    # 8) Espacio en disco (aviso si <100MB libres)
+    try:
+        import shutil as _sh
+        free_bytes = _sh.disk_usage(str(ROOT_DIR)).free
+        free_mb = free_bytes // (1024 * 1024)
+        add("disk_space",
+            "Espacio libre en disco",
+            free_mb >= 100,
+            f"{free_mb} MB libres",
+            severity="warning",
+        )
+    except Exception as e:
+        add("disk_space", "Espacio libre en disco", True, "N/A")
+
+    # Score global
+    total = len(checks)
+    ok_count = sum(1 for c in checks if c["ok"])
+    errors = sum(1 for c in checks if not c["ok"] and c["severity"] == "error")
+    warnings = sum(1 for c in checks if not c["ok"] and c["severity"] == "warning")
+
+    return {
+        "checks": checks,
+        "summary": {
+            "total": total,
+            "ok": ok_count,
+            "errors": errors,
+            "warnings": warnings,
+            "score": round((ok_count / total) * 100) if total else 0,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api_router.post("/diagnostic/fix")
+async def diagnostic_fix(payload: dict = Body(...)):
+    """Corrige el chequeo indicado por id."""
+    global client, db
+    check_id = (payload.get("id") or "").strip()
+    if not check_id:
+        raise HTTPException(status_code=400, detail="Falta 'id'")
+
+    fixed = False
+    detail = ""
+
+    if check_id == "python_deps":
+        # En desktop no hay requirements.txt centralizado, pero podemos intentar
+        # instalar el paquete faltante conocido
+        import importlib.util
+        missing = [p for p in ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt"]
+                   if importlib.util.find_spec(p) is None]
+        if missing:
+            result = subprocess.run(
+                ["pip", "install", "--quiet"] + missing,
+                capture_output=True, text=True, timeout=180,
+            )
+            fixed = result.returncode == 0
+            detail = f"Instalados: {', '.join(missing)}"
+        else:
+            fixed = True
+            detail = "Todas las dependencias ya están instaladas"
+    elif check_id == "github_default_repo":
+        await db.app_settings.update_one(
+            {},
+            {"$set": {
+                "github_config.repo_url": DEFAULT_GITHUB_REPO,
+                "github_config.branch": DEFAULT_GITHUB_BRANCH,
+            }},
+            upsert=True,
+        )
+        if _using_embedded:
+            await _save_embedded_data()
+        fixed = True
+        detail = f"Repositorio restaurado a {DEFAULT_GITHUB_REPO}"
+    elif check_id == "backup_writable":
+        try:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            fixed = True
+            detail = f"Directorio creado: {BACKUP_DIR}"
+        except Exception as e:
+            detail = str(e)
+    elif check_id == "mongo_conn":
+        if _using_embedded:
+            fixed = True
+            detail = "Modo embedded — no requiere reconexión"
+        else:
+            try:
+                new_client = AsyncIOMotorClient(_effective_mongo_url)
+                await new_client[DB_NAME].command("ping")
+                client = new_client
+                db = new_client[DB_NAME]
+                fixed = True
+                detail = "Reconectado exitosamente"
+            except Exception as e:
+                detail = f"Reconexión falló: {e}"
+    elif check_id == "zip_password":
+        await db.app_settings.update_one(
+            {},
+            {"$set": {"security_config.zip_password": DEFAULT_ZIP_PASSWORD_STANDALONE}},
+            upsert=True,
+        )
+        if _using_embedded:
+            await _save_embedded_data()
+        fixed = True
+        detail = f"Contraseña ZIP restaurada a {DEFAULT_ZIP_PASSWORD_STANDALONE}"
+    else:
+        raise HTTPException(status_code=400, detail=f"'{check_id}' no es corregible automáticamente")
+
+    return {"success": fixed, "id": check_id, "detail": detail}
+
+
+@api_router.post("/diagnostic/fix-all")
+async def diagnostic_fix_all():
+    """Ejecuta el diagnóstico y aplica todas las correcciones fixables."""
+    diag = await run_diagnostic()
+    results = []
+    fixed_count = 0
+    failed_count = 0
+
+    for check in diag["checks"]:
+        if check["ok"] or not check.get("fixable"):
+            continue
+        try:
+            res = await diagnostic_fix({"id": check["id"]})
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": res.get("success", False),
+                "detail": res.get("detail", "")[:200],
+            })
+            if res.get("success"):
+                fixed_count += 1
+            else:
+                failed_count += 1
+        except HTTPException as e:
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": False,
+                "detail": str(e.detail)[:200],
+            })
+            failed_count += 1
+        except Exception as e:
+            results.append({
+                "id": check["id"],
+                "label": check["label"],
+                "success": False,
+                "detail": str(e)[:200],
+            })
+            failed_count += 1
+
+    final_diag = await run_diagnostic()
+
+    return {
+        "success": failed_count == 0,
+        "fixed": fixed_count,
+        "failed": failed_count,
+        "results": results,
+        "final_score": final_diag["summary"]["score"],
+        "final_errors": final_diag["summary"]["errors"],
+        "final_warnings": final_diag["summary"]["warnings"],
+    }
 
 
 # ─── App config ───────────────────────────────────────────
