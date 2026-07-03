@@ -220,3 +220,17 @@ el catch-all SPA devolvía index.html (HTML) con 200 y el frontend lo parseaba c
 **Verificado en runtime** (puerto 8009, modo embebido): todos los endpoints OK, check-updates
 consulta GitHub real (5 commits), /api/* → JSON 404, ZIP con launcher.pyw/Iniciar.vbs, sin emergent.
 **NOTA**: el usuario debe RE-DESCARGAR el ZIP para obtener el app.py corregido.
+
+### Actualización 2026-07-03 (v3) — App escritorio: launcher nuevo + deps offline
+- **Causa del "servidor no respondió en 30s"**: app.py fallaba en silencio bajo pythonw y el
+  launcher solo mostraba timeout genérico. Ahora el launcher captura el error real.
+- **Launcher reescrito** (desktop_package._LAUNCHER_PYW): UI limpia (barra de progreso), auto-arranca,
+  detecta si el server crashea (poll) y muestra el error real (error_log.txt / server_log.txt),
+  chequea si el puerto 8001 ya está arriba, y arranque rápido (salta reinstalación con .deps_ok).
+- **Dependencias offline en el ZIP**: se bundlean wheels win_amd64 (cp311/312/313) en libs/ (~13MB).
+  El launcher instala con --no-index --find-links libs (offline, ~15-30s la 1ª vez), fallback online.
+  Requisitos adelgazados (se quitó pandas/cryptography/requests/aiofiles no usados).
+- **config.bat y config.py ELIMINADOS del ZIP** (la BD se configura dentro de la app / .env).
+- **Sin doble pestaña**: launcher pasa CP_NO_BROWSER=1 al server; standalone no auto-abre si está seteado.
+- README actualizado. version 100% independiente (sin Emergent). NOTA: el usuario debe RE-DESCARGAR el ZIP.
+- desktop_wheels/ es caché de build en /app/backend (acelera descargas).

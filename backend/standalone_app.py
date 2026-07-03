@@ -1878,7 +1878,10 @@ if __name__ == "__main__":
         time.sleep(3)
         webbrowser.open("http://localhost:8001")
 
-    threading.Thread(target=_open_browser, daemon=True).start()
+    # El launcher grafico abre el navegador con mejor timing; si nos lanza,
+    # define CP_NO_BROWSER=1 para no abrir dos pestanas.
+    if not os.environ.get("CP_NO_BROWSER"):
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     print("\n" + "=" * 54)
     print("  CINEMA PRODUCTIONS — Gestor de Reservas")

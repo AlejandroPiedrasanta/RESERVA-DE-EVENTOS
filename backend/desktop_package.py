@@ -189,420 +189,192 @@ notepad .env
 # de progreso minimalista. Instala dependencias en background y abre el
 # servidor + navegador al terminar.
 # =====================================================================
-_LAUNCHER_PYW = r'''"""Cinema Productions - Launcher Grafico
-Se ejecuta con pythonw / py -w para ocultar la consola.
-"""
-import os
-import sys
-import time
-import threading
-import subprocess
-import webbrowser
-import urllib.request
+_LAUNCHER_PYW = r'''# Cinema Productions - Launcher local (arranque sin consola)
+import os, sys, time, socket, threading, subprocess, webbrowser, traceback
 from pathlib import Path
 import tkinter as tk
-from tkinter import font as tkfont
-
-# Paleta de colores (dark mode moderno)
-BG        = "#0f172a"   # slate-900
-CARD      = "#1e293b"   # slate-800
-BORDER    = "#334155"   # slate-700
-TEXT      = "#f1f5f9"   # slate-100
-TEXT_DIM  = "#94a3b8"   # slate-400
-ACCENT    = "#7c3aed"   # violet-600
-ACCENT_2  = "#a855f7"   # purple-500
-SUCCESS   = "#10b981"   # emerald-500
-ERROR     = "#ef4444"   # red-500
+from tkinter import ttk
 
 APP_DIR = Path(__file__).resolve().parent
 os.chdir(APP_DIR)
+PORT = 8001
+URL = "http://127.0.0.1:8001"
+
+BG = "#0b1020"; ACC = "#6d5efc"; OK = "#22c55e"; ERR = "#ef4444"
+TXT = "#eef0fb"; DIM = "#8b90a6"
+NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
-class Launcher:
+def port_open(timeout=0.5):
+    try:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def pythonw_exe():
+    if sys.platform == "win32":
+        cand = Path(sys.executable).with_name("pythonw.exe")
+        if cand.exists():
+            return str(cand)
+    return sys.executable
+
+
+class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Cinema Productions")
-        self.root.configure(bg=BG)
-        self.root.resizable(False, False)
-
-        # Centrar ventana
-        w, h = 620, 480
+        self.proc = None
+        root.title("Cinema Productions")
+        root.configure(bg=BG)
+        w, h = 560, 380
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        x, y = (sw - w) // 2, (sh - h) // 2
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
+        root.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, (sh - h) // 2))
+        root.resizable(False, False)
 
-        # Icono (si existe)
+        tk.Frame(root, bg=ACC, height=4).pack(fill="x")
+        tk.Label(root, text="CINEMA PRODUCTIONS", bg=BG, fg=TXT,
+                 font=("Segoe UI Semibold", 23)).pack(pady=(46, 2))
+        tk.Label(root, text="Gestor de Reservas de Eventos", bg=BG, fg=DIM,
+                 font=("Segoe UI", 11)).pack()
+
+        style = ttk.Style(root)
         try:
-            self.root.iconbitmap(default="")
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("CP.Horizontal.TProgressbar", troughcolor="#1a2036",
+                        background=ACC, bordercolor=BG, lightcolor=ACC,
+                        darkcolor=ACC, thickness=7)
+        self.bar = ttk.Progressbar(root, style="CP.Horizontal.TProgressbar",
+                                   length=420, mode="determinate", maximum=100)
+        self.bar.pack(pady=(52, 12))
+        self.status = tk.Label(root, text="Iniciando...", bg=BG, fg=TXT,
+                               font=("Segoe UI", 11))
+        self.status.pack()
+        self.detail = tk.Label(root, text="", bg=BG, fg=DIM, font=("Consolas", 9))
+        self.detail.pack(pady=(5, 0))
+        self.retry = tk.Button(root, text="Reintentar", command=self.start,
+                               bg=ACC, fg="white", activebackground="#5648e0",
+                               activeforeground="white", relief="flat", bd=0,
+                               padx=22, pady=7, cursor="hand2",
+                               font=("Segoe UI Semibold", 10))
+        root.after(250, self.start)
+
+    def set(self, pct=None, status=None, detail=None, color=None):
+        def _do():
+            if pct is not None:
+                self.bar["value"] = pct
+            if status is not None:
+                self.status.config(text=status)
+            if detail is not None:
+                self.detail.config(text=str(detail)[:78], fg=DIM)
+            if color is not None:
+                self.status.config(fg=color)
+        self.root.after(0, _do)
+
+    def fail(self, title, log_text=""):
+        try:
+            (APP_DIR / "error_log.txt").write_text(title + "\n\n" + (log_text or ""),
+                                                   encoding="utf-8", errors="ignore")
         except Exception:
             pass
 
-        self.state = "idle"          # idle | running | ready | error
-        self.progress = 0.0
-        self.pulse_dir = 1
-        self.pulse_val = 0
+        def _do():
+            self.bar["value"] = 100
+            self.status.config(text=title, fg=ERR)
+            self.detail.config(text="Detalle guardado en error_log.txt", fg=DIM)
+            self.retry.pack(pady=(18, 0))
+        self.root.after(0, _do)
 
-        self._build_ui()
-        self._animate_pulse()
-        # Arranque automatico: no requiere clic (doble clic y listo).
-        self.root.after(500, self.on_start)
+    def start(self):
+        self.retry.pack_forget()
+        self.status.config(fg=TXT)
+        threading.Thread(target=self._run, daemon=True).start()
 
-    def _build_ui(self):
-        # Header
-        header = tk.Frame(self.root, bg=BG, height=110)
-        header.pack(fill="x", pady=(30, 0))
-        header.pack_propagate(False)
-
-        title_font = tkfont.Font(family="Segoe UI", size=26, weight="bold")
-        subtitle_font = tkfont.Font(family="Segoe UI", size=11)
-
-        tk.Label(header, text="CINEMA PRODUCTIONS", font=title_font,
-                 bg=BG, fg=TEXT).pack()
-        tk.Label(header, text="Gestor de Reservas de Eventos",
-                 font=subtitle_font, bg=BG, fg=TEXT_DIM).pack(pady=(4, 0))
-
-        # Boton central en tarjeta
-        btn_frame = tk.Frame(self.root, bg=BG)
-        btn_frame.pack(pady=(30, 20))
-
-        self.btn_canvas = tk.Canvas(btn_frame, width=200, height=200,
-                                    bg=BG, highlightthickness=0)
-        self.btn_canvas.pack()
-        self.btn_canvas.bind("<Button-1>", lambda e: self.on_start())
-        self.btn_canvas.bind("<Enter>", lambda e: self._draw_button(hover=True))
-        self.btn_canvas.bind("<Leave>", lambda e: self._draw_button(hover=False))
-        self._draw_button(hover=False)
-
-        # Barra de progreso minimalista
-        prog_frame = tk.Frame(self.root, bg=BG)
-        prog_frame.pack(pady=(0, 10), padx=60, fill="x")
-
-        self.prog_bg = tk.Canvas(prog_frame, height=4, bg=BORDER,
-                                 highlightthickness=0)
-        self.prog_bg.pack(fill="x")
-        self.prog_bar = self.prog_bg.create_rectangle(
-            0, 0, 0, 4, fill=ACCENT, outline="")
-
-        # Status text
-        self.status_font = tkfont.Font(family="Segoe UI", size=10)
-        self.status = tk.Label(self.root, text="Pulsa el boton para iniciar",
-                               font=self.status_font, bg=BG, fg=TEXT_DIM)
-        self.status.pack(pady=(8, 0))
-
-        # Log discreto (2 lineas)
-        self.log_font = tkfont.Font(family="Consolas", size=9)
-        self.log = tk.Label(self.root, text="", font=self.log_font,
-                            bg=BG, fg=TEXT_DIM, justify="center")
-        self.log.pack(pady=(4, 0))
-
-        # Footer
-        footer = tk.Frame(self.root, bg=BG)
-        footer.pack(side="bottom", pady=15)
-        footer_font = tkfont.Font(family="Segoe UI", size=8)
-        tk.Label(footer, text="Version local  |  localhost:8001",
-                 font=footer_font, bg=BG, fg=TEXT_DIM).pack()
-
-    # ----- Boton animado (canvas) -----
-    def _draw_button(self, hover=False):
-        c = self.btn_canvas
-        c.delete("all")
-        r = 90
-
-        # Halo pulsante cuando idle
-        if self.state == "idle":
-            halo = 10 + int(self.pulse_val * 8)
-            c.create_oval(100 - r - halo, 100 - r - halo,
-                          100 + r + halo, 100 + r + halo,
-                          fill="", outline=ACCENT_2, width=1)
-
-        # Fondo circulo (con leve gradiente simulado)
-        color = ACCENT
-        if self.state == "ready":
-            color = SUCCESS
-        elif self.state == "error":
-            color = ERROR
-        elif self.state == "running":
-            color = ACCENT_2
-        if hover and self.state == "idle":
-            color = ACCENT_2
-
-        # Sombra
-        c.create_oval(100 - r + 3, 100 - r + 5, 100 + r + 3, 100 + r + 5,
-                      fill="#000000", outline="", stipple="gray50")
-        # Circulo principal
-        c.create_oval(100 - r, 100 - r, 100 + r, 100 + r,
-                      fill=color, outline="")
-
-        # Icono / texto central
-        icon_font = tkfont.Font(family="Segoe UI", size=42, weight="bold")
-        label_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
-
-        if self.state == "idle":
-            # Triangulo play
-            c.create_polygon(82, 70, 82, 130, 130, 100,
-                             fill="white", outline="")
-            c.create_text(100, 155, text="INICIAR", fill="white",
-                          font=label_font)
-        elif self.state == "running":
-            # Puntos animados
-            for i in range(3):
-                offset = (self.pulse_val + i * 0.3) % 1
-                dot_size = 6 + int(offset * 6)
-                c.create_oval(70 + i * 30 - dot_size // 2,
-                              100 - dot_size // 2,
-                              70 + i * 30 + dot_size // 2,
-                              100 + dot_size // 2,
-                              fill="white", outline="")
-            c.create_text(100, 155, text="CARGANDO...", fill="white",
-                          font=label_font)
-        elif self.state == "ready":
-            # Check mark
-            c.create_line(70, 105, 92, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_line(92, 125, 132, 78, fill="white", width=6,
-                          capstyle="round")
-            c.create_text(100, 155, text="LISTO", fill="white",
-                          font=label_font)
-        elif self.state == "error":
-            c.create_line(75, 75, 125, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_line(125, 75, 75, 125, fill="white", width=6,
-                          capstyle="round")
-            c.create_text(100, 155, text="ERROR", fill="white",
-                          font=label_font)
-
-    def _animate_pulse(self):
-        self.pulse_val += 0.05 * self.pulse_dir
-        if self.pulse_val >= 1:
-            self.pulse_val = 1
-            self.pulse_dir = -1
-        elif self.pulse_val <= 0:
-            self.pulse_val = 0
-            self.pulse_dir = 1
-        if self.state in ("idle", "running"):
-            self._draw_button(hover=False)
-        self.root.after(60, self._animate_pulse)
-
-    def set_progress(self, pct, msg=None, log_line=None):
-        pct = max(0, min(100, pct))
-        self.progress = pct
-        w = self.prog_bg.winfo_width() or 400
-        target_w = int(w * pct / 100)
-        self.prog_bg.coords(self.prog_bar, 0, 0, target_w, 4)
-        if msg:
-            self.status.config(text=msg)
-        if log_line is not None:
-            self.log.config(text=log_line[:80])
-        self.root.update_idletasks()
-
-    def on_start(self):
-        if self.state == "running":
-            return
-        if self.state == "ready":
-            # Reabrir navegador
-            webbrowser.open("http://localhost:8001")
-            return
-        self.state = "running"
-        self._draw_button()
-        self.set_progress(2, "Preparando...", "")
-        threading.Thread(target=self._run_pipeline, daemon=True).start()
-
-    # ----- Pipeline en background -----
-    def _run_pipeline(self):
+    def _run(self):
         try:
-            pyexe = sys.executable  # ya estamos ejecutando desde pythonw
-
-            # PASO 1: verificar python
-            self.set_progress(8, "Verificando Python...",
-                              f"Usando {sys.version.split()[0]}")
-            time.sleep(0.3)
-
-            # PASO 2: actualizar pip
-            self.set_progress(15, "Actualizando pip y wheel...",
-                              "pip install --upgrade pip wheel")
-            self._run([pyexe, "-m", "pip", "install", "--upgrade",
-                       "pip", "wheel", "setuptools",
-                       "--quiet", "--no-warn-script-location"],
-                      ignore_errors=True)
-
-            # PASO 3: instalar dependencias con progreso simulado
-            self.set_progress(25, "Instalando dependencias...",
-                              "Primera vez tarda 1-3 minutos")
-
-            deps_thread = threading.Thread(
-                target=self._install_deps_with_progress, daemon=True)
-            deps_thread.start()
-            deps_thread.join()
-
-            if self.state == "error":
+            if port_open():
+                self.set(100, "La app ya estaba abierta", URL, OK)
+                webbrowser.open(URL)
+                self.root.after(1200, self.root.destroy)
                 return
 
-            # PASO 4: iniciar servidor
-            self.set_progress(85, "Iniciando servidor local...",
-                              "puerto 8001")
-
-            # Liberar puerto si esta ocupado (best-effort)
-            self._free_port_8001()
-
-            # Lanzar app.py en background SIN ventana de consola (pythonw)
-            server_exe = pyexe
-            if sys.platform == "win32":
-                _pyw = Path(pyexe).with_name("pythonw.exe")
-                if _pyw.exists():
-                    server_exe = str(_pyw)
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            self.server_proc = subprocess.Popen(
-                [server_exe, "app.py"],
-                cwd=str(APP_DIR),
-                creationflags=creationflags,
-            )
-
-            # PASO 5: esperar que responda
-            self.set_progress(92, "Esperando al servidor...", "GET /api/")
-            for i in range(30):
-                if self._check_server():
-                    break
-                time.sleep(1)
-                self.set_progress(92 + (i * 0.2), None, f"intento {i+1}/30")
+            if not (APP_DIR / ".deps_ok").exists():
+                if not self._install():
+                    return
             else:
-                raise RuntimeError("El servidor no respondio en 30 segundos")
+                self.set(62, "Dependencias listas", "arranque rapido")
 
-            # PASO 6: listo — abrir navegador y cerrar el launcher (el servidor sigue)
-            self.set_progress(100, "App lista - abriendo navegador",
-                              "http://localhost:8001")
-            time.sleep(0.4)
-            webbrowser.open("http://localhost:8001")
-            self.state = "ready"
-            self._draw_button()
-            self.status.config(text="App corriendo en localhost:8001", fg=SUCCESS)
-            self.log.config(text="Puedes cerrar esta ventana. La app sigue corriendo.")
-            self.root.after(2500, self.root.destroy)
+            self.set(80, "Iniciando servidor...", "app.py")
+            log = open(APP_DIR / "server_log.txt", "w", encoding="utf-8", errors="ignore")
+            self.proc = subprocess.Popen([pythonw_exe(), "app.py"], cwd=str(APP_DIR),
+                                         stdout=log, stderr=subprocess.STDOUT,
+                                         creationflags=NO_WINDOW,
+                                         env={**os.environ, "CP_NO_BROWSER": "1"})
 
+            for i in range(50):
+                if port_open():
+                    self.set(100, "Abriendo navegador...", URL, OK)
+                    time.sleep(0.2)
+                    webbrowser.open(URL)
+                    self.set(100, "App corriendo - puedes cerrar esta ventana", URL, OK)
+                    self.root.after(1600, self.root.destroy)
+                    return
+                if self.proc.poll() is not None:
+                    tail = ""
+                    try:
+                        tail = (APP_DIR / "server_log.txt").read_text(
+                            encoding="utf-8", errors="ignore")[-1600:]
+                    except Exception:
+                        pass
+                    self.fail("El servidor se cerro al iniciar", tail)
+                    return
+                self.set(80 + i * 0.4, None, "esperando servidor (%ds)" % (i // 2 + 1))
+                time.sleep(0.4)
+
+            self.fail("El servidor no respondio a tiempo",
+                      "Revisa server_log.txt. Posible causa: el puerto 8001 esta ocupado.")
         except Exception as e:
-            self.state = "error"
-            self._draw_button()
-            self.set_progress(0, f"Error: {str(e)[:60]}",
-                              "Revisa la consola o reintenta")
-            self.status.config(fg=ERROR)
+            self.fail("Error inesperado: %s" % e, traceback.format_exc())
 
-    def _install_deps_with_progress(self):
-        pyexe = sys.executable
-        req_file = APP_DIR / "requirements.txt"
-        if not req_file.exists():
-            return
-
-        # Arranque rapido: si ya se instalaron antes, no reinstalar.
-        marker = APP_DIR / ".deps_ok"
-        if marker.exists():
-            self.set_progress(80, "Dependencias ya instaladas", "arranque rapido")
-            return
-
-        # Contar dependencias para simular progreso
-        try:
-            with open(req_file, "r", encoding="utf-8") as f:
-                deps = [ln.strip() for ln in f
-                        if ln.strip() and not ln.strip().startswith("#")]
-        except Exception:
-            deps = []
-
-        total = max(len(deps), 1)
-
-        # Ejecutar pip install con retry
-        for attempt in range(3):
-            self.set_progress(25 + attempt * 5,
-                              f"Instalando dependencias (intento {attempt+1}/3)...",
-                              f"{total} paquetes")
-
-            # Simulacion visual del progreso mientras pip instala
-            stop_sim = threading.Event()
-
-            def simulate():
-                p = 25
-                while not stop_sim.is_set() and p < 80:
-                    time.sleep(0.7)
-                    p += 1.5
-                    self.set_progress(min(p, 80), None,
-                                      f"instalando... ({int(p-25)}%)")
-
-            sim_thread = threading.Thread(target=simulate, daemon=True)
-            sim_thread.start()
-
-            ret = self._run([pyexe, "-m", "pip", "install",
-                             "-r", "requirements.txt",
-                             "--quiet", "--no-warn-script-location",
-                             "--disable-pip-version-check"],
-                            ignore_errors=True)
-
-            stop_sim.set()
-            sim_thread.join(timeout=1)
-
-            if ret == 0:
-                try:
-                    (APP_DIR / ".deps_ok").write_text("ok", encoding="utf-8")
-                except Exception:
-                    pass
-                self.set_progress(80, "Dependencias listas",
-                                  f"{total} paquetes instalados")
-                return
-
-            self.set_progress(25 + attempt * 5,
-                              f"Reintentando en 3 seg...",
-                              f"intento fallido {attempt+1}")
-            time.sleep(3)
-
-        self.state = "error"
-        raise RuntimeError("No se pudieron instalar las dependencias")
-
-    def _run(self, cmd, ignore_errors=False):
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = subprocess.CREATE_NO_WINDOW
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(APP_DIR),
-                capture_output=True,
-                timeout=300,
-                creationflags=creationflags,
-            )
-            return result.returncode
-        except Exception:
-            if not ignore_errors:
-                raise
-            return 1
-
-    def _free_port_8001(self):
-        if sys.platform != "win32":
-            try:
-                subprocess.run(["fuser", "-k", "8001/tcp"],
-                               capture_output=True, timeout=5)
-            except Exception:
-                pass
-            return
-        try:
-            result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True,
-                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
-            for line in result.stdout.splitlines():
-                if ":8001" in line and "LISTENING" in line:
-                    pid = line.split()[-1]
-                    subprocess.run(["taskkill", "/F", "/PID", pid],
-                                   capture_output=True, timeout=5,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
-        except Exception:
-            pass
-
-    def _check_server(self):
-        try:
-            urllib.request.urlopen("http://localhost:8001/api/", timeout=2)
+    def _install(self):
+        req = APP_DIR / "requirements.txt"
+        if not req.exists():
             return True
-        except Exception:
-            return False
+        libs = APP_DIR / "libs"
+        base = [sys.executable, "-m", "pip", "install",
+                "--disable-pip-version-check", "-q"]
+        attempts = []
+        if libs.exists() and any(libs.glob("*.whl")):
+            attempts.append(("paquete local (sin internet)",
+                             base + ["--no-index", "--find-links", str(libs),
+                                     "-r", str(req)]))
+        attempts.append(("descarga online", base + ["-r", str(req)]))
+
+        self.set(10, "Instalando dependencias (solo la primera vez)...",
+                 "puede tardar ~1 minuto")
+        out = ""
+        for idx, (label, cmd) in enumerate(attempts):
+            self.set(18 + idx * 14, None, "instalando: %s" % label)
+            try:
+                r = subprocess.run(cmd, cwd=str(APP_DIR), stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True,
+                                   creationflags=NO_WINDOW)
+                out = r.stdout or ""
+                if r.returncode == 0:
+                    (APP_DIR / ".deps_ok").write_text("ok", encoding="utf-8")
+                    self.set(62, "Dependencias instaladas", "listo")
+                    return True
+            except Exception as e:
+                out += "\n" + str(e)
+        self.fail("No se pudieron instalar las dependencias", out[-1800:])
+        return False
 
 
 def main():
     root = tk.Tk()
-    Launcher(root)
+    App(root)
     root.mainloop()
 
 
@@ -757,74 +529,59 @@ echo "  =========================================================="
 wait $SERVER_PID
 """
 
-_REQUIREMENTS = """# Cinema Productions - Dependencias del Servidor Desktop
-# Instalado automaticamente por start.bat / start.sh
+_REQUIREMENTS = """# Cinema Productions - Dependencias del servidor local
+# Se instalan automaticamente la primera vez (desde libs/ si existe, si no online).
 fastapi>=0.100.0
-uvicorn[standard]>=0.20.0
+uvicorn>=0.20.0
 motor>=3.0.0
 pymongo>=4.0.0
 dnspython>=2.3.0
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 python-multipart>=0.0.9
-
-# Base de datos embebida (modo local sin internet)
 mongomock-motor>=0.0.36
-
-# Notificaciones y emails
 resend>=2.0.0
 httpx>=0.24.0
-
-# HTTP y utilidades
-requests>=2.28.0
-aiofiles>=23.0.0
-
-# Compatibilidad de tiempo
-tzdata>=2023.3
-python-dateutil>=2.8.0
-
-# Seguridad
-cryptography>=41.0.0
-
-# Reportes PDF/Excel (opcional)
 openpyxl>=3.1.0
-pandas>=2.0.0
+tzdata>=2023.3
 """
+
 
 _README = """CINEMA PRODUCTIONS - Gestor de Reservas
 =========================================
 
 INICIO RAPIDO (Windows):
-  1. Doble clic en  start.bat
-  2. Presiona ENTER (o espera 3 seg) para iniciar
-  3. La app se abre automaticamente en el navegador
+  1. Doble clic en  Iniciar.vbs   (recomendado: arranca sin ventana negra)
+     o bien en      start.bat
+  2. La PRIMERA vez instala dependencias desde la carpeta  libs/  (offline, ~15-30 seg).
+     Aparece una ventanita con barra de progreso.
+  3. La app se abre sola en tu navegador. Las siguientes veces arranca en segundos.
 
-REQUISITO: Python 3.8+
+REQUISITO: Python 3.11, 3.12 o 3.13
   https://www.python.org/downloads/
-  IMPORTANTE: marcar "Add Python to PATH"
+  IMPORTANTE: marcar "Add Python to PATH" al instalar.
 
-BASE DE DATOS:
-  El archivo  .env  controla donde se guardan tus datos.
+BASE DE DATOS (se configura DENTRO de la app):
+  Abre la app y ve a  Ajustes -> Base de Datos.
+  Por defecto usa base local (cinema_data.json), sin internet ni instalaciones.
+  Ahi mismo puedes conectar tu propio MongoDB o MongoDB Atlas cuando quieras.
 
-  OPCIONES:
-    MONGO_URL=embedded
-      -> Base de datos local, SIN internet, datos en cinema_data.json
-        Recomendado para uso personal en un solo PC.
+  (Avanzado) Tambien puedes editar el archivo  .env  con el Bloc de Notas:
+    MONGO_URL=embedded                         -> local, datos en cinema_data.json
+    MONGO_URL=mongodb://localhost:27017        -> MongoDB en tu PC
+    MONGO_URL=mongodb+srv://user:pass@cluster  -> MongoDB Atlas (nube)
 
-    MONGO_URL=mongodb://localhost:27017
-      -> MongoDB instalado en tu computadora.
+DATOS:
+  En modo local, todo se guarda en  cinema_data.json  (auto-guardado cada 60 seg
+  y al cerrar). Copia ese archivo para respaldar o mover tus datos.
 
-    MONGO_URL=mongodb+srv://user:pass@cluster.mongodb.net
-      -> MongoDB Atlas (nube GRATUITA en mongodb.com/atlas)
-        Accesible desde cualquier dispositivo.
+ACTUALIZAR:
+  La app revisa tu repositorio de GitHub e informa si hay una version nueva.
+  Para actualizar, descarga de nuevo el paquete y reemplaza los archivos
+  (conserva tu  cinema_data.json).
 
-CAMBIAR BASE DE DATOS (2 formas):
-  A) Doble clic en  config.bat  -> Ventana visual de configuracion
-  B) Abrir  .env  con el Bloc de Notas -> Edita MONGO_URL -> Guarda
-
-DATOS AUTOMATICOS:
-  En modo embebido, los datos se guardan en  cinema_data.json
-  Auto-guardado cada 60 segundos y al cerrar la app.
+SI ALGO FALLA:
+  Revisa  error_log.txt  y  server_log.txt  en esta carpeta: contienen el detalle.
 
 Cinema Productions - Sistema de Gestion de Reservas
 """

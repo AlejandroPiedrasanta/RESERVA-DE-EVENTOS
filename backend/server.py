@@ -78,6 +78,31 @@ BACKUP_DIR.mkdir(exist_ok=True)
 # ── Updates directory ─────────────────────────────────────────
 UPDATES_DIR = ROOT_DIR / "uploads" / "updates"
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+DESKTOP_WHEELS_DIR = ROOT_DIR / "desktop_wheels"
+
+
+def _ensure_desktop_wheels():
+    """Descarga (una vez, cacheado) wheels win_amd64 para instalacion offline del escritorio."""
+    import sys as _sys, subprocess as _sp
+    marker = DESKTOP_WHEELS_DIR / ".ok"
+    if marker.exists() and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
+        return DESKTOP_WHEELS_DIR
+    DESKTOP_WHEELS_DIR.mkdir(exist_ok=True)
+    req = DESKTOP_WHEELS_DIR / "req.txt"
+    req.write_text(_REQUIREMENTS, encoding="utf-8")
+    got = False
+    for ver in ("311", "312", "313"):
+        try:
+            _sp.run([_sys.executable, "-m", "pip", "download", "-r", str(req),
+                     "--dest", str(DESKTOP_WHEELS_DIR), "--platform", "win_amd64",
+                     "--python-version", ver, "--only-binary=:all:", "--implementation", "cp"],
+                    check=True, timeout=240, stdout=_sp.PIPE, stderr=_sp.STDOUT)
+            got = True
+        except Exception as e:
+            logger.warning(f"[desktop] wheel download py{ver} fallo: {e}")
+    if got and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
+        marker.write_text("ok", encoding="utf-8")
+    return DESKTOP_WHEELS_DIR
 
 # ── Google / VAPID config ─────────────────────────────────────
 # Public URL of this deployment (used for OAuth redirects). Configurable via env
@@ -1979,8 +2004,6 @@ async def download_package(request: Request):
         def _win_lines(s: str) -> str:
             return s.replace('\r\n', '\n').replace('\n', '\r\n')
         zf.writestr('cinema-productions/.env', _win_lines(_ENV_TEMPLATE))
-        zf.writestr('cinema-productions/config.py', _CONFIG_PY)
-        zf.writestr('cinema-productions/config.bat', _win_lines(_CONFIG_BAT))
         zf.writestr('cinema-productions/requirements.txt', _REQUIREMENTS)
         zf.writestr('cinema-productions/start.bat', _win_lines(_START_BAT))
         zf.writestr('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS))
@@ -1990,6 +2013,11 @@ async def download_package(request: Request):
         # App 100% independiente: sin URL de servidor Emergent. La versión local
         # se guarda para mostrarla; las actualizaciones se revisan vía GitHub.
         zf.writestr('cinema-productions/version.txt', auto_version)
+
+        # Dependencias empaquetadas (wheels win_amd64) → instalacion offline y rapida.
+        wheels_dir = await asyncio.to_thread(_ensure_desktop_wheels)
+        for whl in sorted(wheels_dir.glob('*.whl')):
+            zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
 
         for file_path in sorted(build_dir.rglob('*')):
             if file_path.is_file():
