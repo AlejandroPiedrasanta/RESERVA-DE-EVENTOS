@@ -3444,11 +3444,14 @@ async def check_github_updates():
         has_updates = True
         new_commits_data = commits_data[:local_found_at]
     else:
-        # Local no está en la lista: puede estar adelantado o divergente.
-        # Solo marcamos updates si el remoto tiene un SHA distinto Y no encontramos el local.
-        # Para ser conservadores, si local_sha existe (no vacío) y no aparece en top 20, asumimos divergencia
-        # y marcamos has_updates SOLO si no hay local_sha (primera vez)
-        has_updates = bool(remote_sha) and (not local_sha)
+        # Local NO se encuentra en top-20 commits del remoto:
+        # Casos posibles:
+        #   a) Local está muy desactualizado (remoto tiene >20 commits nuevos) → has_updates=True
+        #   b) Primer arranque, local_sha vacío → has_updates=True
+        #   c) Local es un SHA de otra rama/divergente → no podemos determinarlo con la API,
+        #      pero es más útil marcarlo como "hay updates" para que el usuario resincronice.
+        # En todos los casos, si remote_sha existe y difiere de local_sha, marcamos update.
+        has_updates = bool(remote_sha) and (remote_sha != local_sha)
         new_commits_data = commits_data if has_updates else []
 
     new_commits = []
