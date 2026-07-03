@@ -2997,19 +2997,19 @@ async def github_push_all(payload: dict = Body(default={})):
         mirror_dirs = ["backend", "frontend"]
 
         # Patrones a ignorar SIEMPRE (nunca subir a GitHub)
-        # NOTA: 'build' NO se ignora — el frontend/build/ compilado SÍ se sube
-        # para que la app de escritorio en otras PCs reciba la UI actualizada.
+        # NOTA: NO subimos frontend/build (fuente compilado nested); en su lugar
+        # publicamos la "versión para PC" PLANA en la raíz (app.py + build/), que
+        # es lo que el actualizador de escritorio sabe aplicar directamente.
         ignore_patterns = shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache",
-            "node_modules", ".cache",
+            "node_modules", "build", ".cache",
             ".env", ".env.local", ".env.production", ".env.development",
             ".db_override", "backups", "uploads",
             "cinema_data.json", "cinema_data.json.bak",
             "*.log", ".DS_Store", "desktop_wheels",
         )
 
-        # ── 2b. Compilar el frontend para incluir frontend/build/ actualizado ──
-        # (así la auto-actualización de otras PCs recibe el bundle nuevo, no solo el fuente)
+        # ── 2b. Compilar el frontend (necesario para la versión PC) ──
         if payload.get("build_frontend", True):
             frontend_src = ROOT_DIR.parent / "frontend"
             if frontend_src.exists():
@@ -3056,12 +3056,37 @@ async def github_push_all(payload: dict = Body(default={})):
                         shutil.rmtree(str(dst_sub))
                     shutil.copytree(str(item), str(dst_sub), ignore=ignore_patterns)
 
+        # ── 3b. Publicar la "VERSIÓN PARA PC" (layout PLANO) en la RAÍZ del repo ──
+        # La app de escritorio instalada tiene layout plano: install_dir/app.py y
+        # install_dir/build/. Su actualizador copia los archivos de la RAÍZ del repo
+        # directo a la carpeta de instalación. Por eso publicamos aquí:
+        #   raíz/app.py    (= backend/standalone_app.py)
+        #   raíz/build/    (= frontend/build compilado)
+        #   raíz/version.txt
+        # Así CUALQUIER actualizador (el ya instalado o el nuevo) aplica los cambios
+        # correctamente y de forma automática y remota, sin reinstalar.
+        try:
+            standalone_src = ROOT_DIR / "standalone_app.py"
+            if standalone_src.exists():
+                shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
+            fe_build = ROOT_DIR.parent / "frontend" / "build"
+            if fe_build.exists() and (fe_build / "index.html").exists():
+                root_build = work_dir / "build"
+                if root_build.exists():
+                    shutil.rmtree(str(root_build))
+                shutil.copytree(str(fe_build), str(root_build))
+            (work_dir / "version.txt").write_text(
+                datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M"), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo publicar la versión PC plana: {e}")
+
         # ── 4. Add + Commit + Push ───────────────────────────────────
         _run(["git", "add", "-A"], cwd=work_dir)
-        # Forzar el add del bundle compilado (frontend/.gitignore ignora /build,
-        # pero SÍ queremos subirlo para que otras PCs reciban la UI actualizada)
-        if (work_dir / "frontend" / "build").exists():
-            _run(["git", "add", "-f", "frontend/build"], cwd=work_dir)
+        # Forzar el add de la versión PC (build/ está en .gitignore como /build)
+        for forced in ("build", "app.py", "version.txt"):
+            if (work_dir / forced).exists():
+                _run(["git", "add", "-f", forced], cwd=work_dir)
 
         rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():
