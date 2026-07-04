@@ -10,7 +10,7 @@ import { checkGithubUpdates, applyGithubUpdate } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
-const INITIAL_DELAY_MS = 3000;
+const INITIAL_DELAY_MS = 1200;
 const DISMISSED_KEY = "gh_update_dismissed_sha";
 
 function relativeTime(iso) {
@@ -122,13 +122,39 @@ export default function GithubUpdateNotifier() {
   const handleApply = async () => {
     setApplying(true);
     try {
-      await applyGithubUpdate(true);
+      const res = await applyGithubUpdate(true);
       setApplied(true);
-      toast({
-        title: "Actualización aplicada",
-        description: "El servidor se reiniciará y cargará los cambios más recientes.",
-      });
-      setTimeout(() => window.location.reload(), 2200);
+      // App de escritorio: mensaje específico según si se reinició o no
+      if (res?.is_desktop) {
+        if (res.restarted) {
+          toast({
+            title: "Actualización aplicada",
+            description: `${res.files_updated || 0} archivos actualizados. La app se reiniciará en 2 segundos.`,
+          });
+          setTimeout(() => window.location.reload(), 2500);
+        } else if (res.dry_run) {
+          toast({
+            title: "Simulación completada (DRY RUN)",
+            description: res.message || "Actualización simulada sin cambios reales.",
+          });
+          setApplied(false);
+          setApplying(false);
+        } else {
+          // Fallback: hay nueva versión pero no se pudo reiniciar
+          toast({
+            title: "Hay una versión nueva en GitHub",
+            description: res.message || "Descarga el paquete de nuevo para actualizar.",
+          });
+          setApplied(false);
+          setApplying(false);
+        }
+      } else {
+        toast({
+          title: "Actualización aplicada",
+          description: "El servidor se reiniciará y cargará los cambios más recientes.",
+        });
+        setTimeout(() => window.location.reload(), 2200);
+      }
     } catch (err) {
       toast({
         title: "No se pudo aplicar la actualización",

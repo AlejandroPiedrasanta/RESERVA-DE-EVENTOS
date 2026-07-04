@@ -1,7 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════
 // Celebrations — Animaciones épicas para eventos importantes
 // ═══════════════════════════════════════════════════════════════════
-import confetti from "canvas-confetti";
+import confettiLib from "canvas-confetti";
+
+// Resolver seguro: soporta tanto ESM default como CJS (module.exports = fn).
+const _confetti = (typeof confettiLib === "function")
+  ? confettiLib
+  : (confettiLib && typeof confettiLib.default === "function" ? confettiLib.default : null);
+
+// Wrapper resiliente: nunca lanza excepciones al llamador.
+const safeConfetti = (opts) => {
+  try {
+    if (typeof _confetti === "function") _confetti(opts);
+  } catch (e) {
+    // Silenciamos errores de canvas-confetti para no romper el flujo (guardado, push, etc.)
+    console.warn("[confetti] error suppressed:", e?.message || e);
+  }
+};
 
 const isReducedMotion = () => {
   try {
@@ -25,9 +40,9 @@ export const fireConfetti = (type = "success", origin = { x: 0.5, y: 0.7 }) => {
   const colors = PALETTES[type] || PALETTES.success;
   const defaults = { origin, colors, ticks: 200, gravity: 0.9, scalar: 1 };
 
-  confetti({ ...defaults, particleCount: 80, spread: 70, startVelocity: 45 });
-  setTimeout(() => confetti({ ...defaults, particleCount: 50, spread: 100, startVelocity: 35, scalar: 0.8 }), 120);
-  setTimeout(() => confetti({ ...defaults, particleCount: 40, spread: 120, startVelocity: 25, scalar: 1.2 }), 240);
+  safeConfetti({ ...defaults, particleCount: 80, spread: 70, startVelocity: 45 });
+  setTimeout(() => safeConfetti({ ...defaults, particleCount: 50, spread: 100, startVelocity: 35, scalar: 0.8 }), 120);
+  setTimeout(() => safeConfetti({ ...defaults, particleCount: 40, spread: 120, startVelocity: 25, scalar: 1.2 }), 240);
 };
 
 // Explosión doble lateral (más épica)
@@ -37,15 +52,17 @@ export const fireEpic = (type = "success") => {
   const end = Date.now() + 900;
 
   const frame = () => {
-    confetti({ particleCount: 4, angle: 60, spread: 55, origin: { x: 0, y: 0.7 }, colors, startVelocity: 60 });
-    confetti({ particleCount: 4, angle: 120, spread: 55, origin: { x: 1, y: 0.7 }, colors, startVelocity: 60 });
-    if (Date.now() < end) requestAnimationFrame(frame);
+    safeConfetti({ particleCount: 4, angle: 60, spread: 55, origin: { x: 0, y: 0.7 }, colors, startVelocity: 60 });
+    safeConfetti({ particleCount: 4, angle: 120, spread: 55, origin: { x: 1, y: 0.7 }, colors, startVelocity: 60 });
+    if (Date.now() < end) {
+      try { requestAnimationFrame(frame); } catch { /* noop */ }
+    }
   };
-  frame();
+  try { frame(); } catch (e) { /* noop */ }
 
   // Explosión central final
   setTimeout(() => {
-    confetti({ particleCount: 150, spread: 160, origin: { x: 0.5, y: 0.5 }, colors, startVelocity: 50, scalar: 1.3, ticks: 300 });
+    safeConfetti({ particleCount: 150, spread: 160, origin: { x: 0.5, y: 0.5 }, colors, startVelocity: 50, scalar: 1.3, ticks: 300 });
   }, 700);
 };
 
@@ -58,7 +75,7 @@ export const fireStars = (type = "payment") => {
 
   const interval = setInterval(() => {
     if (Date.now() > end) { clearInterval(interval); return; }
-    confetti({
+    safeConfetti({
       particleCount: 3,
       startVelocity: 0,
       gravity: 0.5,
@@ -74,7 +91,11 @@ export const fireStars = (type = "payment") => {
 // ══════════════ Sidebar shine sweep ══════════════
 // Dispara un barrido de luz en el sidebar via evento global
 export const triggerSidebarSweep = (color = "purple") => {
-  window.dispatchEvent(new CustomEvent("cp:sidebar-sweep", { detail: { color } }));
+  try {
+    window.dispatchEvent(new CustomEvent("cp:sidebar-sweep", { detail: { color } }));
+  } catch (e) {
+    console.warn("[sidebar-sweep] error:", e?.message || e);
+  }
 };
 
 // ══════════════ Celebraciones específicas ══════════════
