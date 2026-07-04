@@ -1,7 +1,7 @@
 {
   "app": "Cinema Productions — Reserva de Eventos",
   "kind": "saved_themes_backup",
-  "generated_at": "2026-07-04T04:24:12.718013+00:00",
+  "generated_at": "2026-07-04T04:24:50.879147+00:00",
   "count": 1,
   "themes": [
     {
@@ -12,7 +12,7 @@
       },
       "created_at": "2026-07-04T04:09:45.325988+00:00",
       "updated_at": "",
-      "is_default": false
+      "is_default": true
     }
   ]
 }
