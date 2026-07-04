@@ -89,7 +89,11 @@ export const getCloudAppearance = () => api.get("/settings/appearance").then(r =
 export const saveCloudAppearance = (snapshot) => api.put("/settings/appearance", { snapshot }).then(r => r.data);
 export const getSavedThemes = () => api.get("/themes").then(r => r.data);
 export const createSavedTheme = (name, snapshot) => api.post("/themes", { name, snapshot }).then(r => r.data);
+export const updateSavedTheme = (id, snapshot, name) => api.put(`/themes/${id}`, { snapshot, ...(name ? { name } : {}) }).then(r => r.data);
 export const deleteSavedTheme = (id) => api.delete(`/themes/${id}`).then(r => r.data);
+export const setDefaultTheme = (id) => api.post(`/themes/${id}/set-default`).then(r => r.data);
+export const syncThemesNow = () => api.post("/themes/sync").then(r => r.data);
+export const getThemesSyncStatus = () => api.get("/themes/sync/status").then(r => r.data);
 
 // App security
 export const getSecurityStatus = () => api.get("/security/status").then(r => r.data);

@@ -80,6 +80,11 @@ UPDATES_DIR = ROOT_DIR / "uploads" / "updates"
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 DESKTOP_WHEELS_DIR = ROOT_DIR / "desktop_wheels"
 
+# ── Themes JSON backup (local file mirror of saved_themes collection) ────
+THEMES_DIR = Path("/app/themes")
+THEMES_DIR.mkdir(parents=True, exist_ok=True)
+THEMES_JSON_PATH = THEMES_DIR / "saved_themes.json"
+
 
 def _ensure_desktop_wheels():
     """Descarga (cacheado por hash de requirements) wheels win_amd64 para instalacion offline del escritorio."""
@@ -167,6 +172,94 @@ async def lifespan(app_instance: FastAPI):
             logger.info(f"Factory GitHub repo seeded: {SUGGESTED_GITHUB_REPO}")
     except Exception as e:
         logger.warning(f"Could not seed factory GitHub config: {e}")
+
+    # ── Seed default "Minimalista" theme si la BD está vacía ───────────
+    # Reglas:
+    #   1. Si saved_themes está vacía → intentar cargar desde
+    #      /app/themes/saved_themes.json (mirror local que viene con el repo).
+    #   2. Si el JSON no existe o falla → insertar un tema "Minimalista"
+    #      con un snapshot mínimo por defecto.
+    #   3. En cualquier caso, si algún tema tiene is_default=True, se marca
+    #      como `default_theme_id` en app_settings y se aplica su snapshot
+    #      como `appearance_snapshot` inicial.
+    try:
+        themes_count = await db.saved_themes.count_documents({})
+        if themes_count == 0:
+            seeded_default_id = None
+            seeded_default_snapshot = None
+            if THEMES_JSON_PATH.exists():
+                try:
+                    data = json.loads(THEMES_JSON_PATH.read_text(encoding="utf-8"))
+                    for t in (data.get("themes") or []):
+                        ins = await db.saved_themes.insert_one({
+                            "name": t.get("name", "Minimalista"),
+                            "snapshot": t.get("snapshot", {}),
+                            "created_at": t.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                            "updated_at": t.get("updated_at") or "",
+                            "is_default": bool(t.get("is_default", False)),
+                        })
+                        if t.get("is_default") and not seeded_default_id:
+                            seeded_default_id = ins.inserted_id
+                            seeded_default_snapshot = t.get("snapshot", {})
+                    logger.info(f"Seeded {len(data.get('themes') or [])} theme(s) from local JSON")
+                except Exception as ex:
+                    logger.warning(f"No se pudo leer saved_themes.json: {ex}")
+
+            if not seeded_default_id:
+                # Snapshot minimalista por defecto
+                default_snapshot = {
+                    "sidebar_style": "island",
+                    "nav_config": "[]",
+                }
+                ins = await db.saved_themes.insert_one({
+                    "name": "Minimalista",
+                    "snapshot": default_snapshot,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": "",
+                    "is_default": True,
+                })
+                seeded_default_id = ins.inserted_id
+                seeded_default_snapshot = default_snapshot
+                logger.info("Seeded default 'Minimalista' theme (fallback snapshot)")
+
+            if seeded_default_id:
+                await db.app_settings.update_one(
+                    {},
+                    {"$set": {
+                        "default_theme_id": seeded_default_id,
+                        "default_theme_name": "Minimalista",
+                        "appearance_snapshot": seeded_default_snapshot or {},
+                        "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                    upsert=True,
+                )
+        else:
+            # BD ya tiene temas: si no hay default_theme_id configurado, buscar
+            # uno llamado "Minimalista" (o el primero) y marcarlo como default.
+            cur_settings = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+            if not cur_settings.get("default_theme_id"):
+                minimal = await db.saved_themes.find_one({"name": {"$regex": "^minimal", "$options": "i"}})
+                if not minimal:
+                    minimal = await db.saved_themes.find_one({}, sort=[("created_at", 1)])
+                if minimal:
+                    await db.app_settings.update_one(
+                        {},
+                        {"$set": {
+                            "default_theme_id": minimal["_id"],
+                            "default_theme_name": minimal.get("name", "Minimalista"),
+                            "appearance_snapshot": minimal.get("snapshot", {}),
+                            "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
+                        }},
+                        upsert=True,
+                    )
+                    logger.info(f"Marcado tema por defecto: {minimal.get('name')}")
+        # Siempre asegurar que el JSON local refleje el estado actual
+        try:
+            await _write_themes_local_json()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Could not seed default 'Minimalista' theme: {e}")
 
     yield
     scheduler.shutdown()
@@ -2528,12 +2621,185 @@ async def save_appearance_snapshot(payload: dict = Body(...)):
 
 
 # ── SAVED THEMES ─────────────────────────────────────────────────────────────
+#
+# Sincronización de 3 vías (MongoDB → JSON local → GitHub):
+#   · MongoDB (colección `saved_themes`) es la fuente principal de la verdad.
+#   · Cada cambio (create/update/delete) exporta la lista completa al archivo
+#     local `/app/themes/saved_themes.json` (mirror inmediato en disco).
+#   · Si hay `GITHUB_TOKEN` configurado (en .env o en app_settings.github_config),
+#     ese JSON se sube al repo AlejandroPiedrasanta/RESERVA-DE-EVENTOS en
+#     `themes/saved_themes.json` usando la GitHub Contents API (upsert por SHA).
+#   · Si la BD arranca vacía, se siembra automáticamente el tema "Minimalista"
+#     desde el JSON local (o un snapshot por defecto) y se aplica como
+#     `appearance_snapshot` inicial.
+# ────────────────────────────────────────────────────────────────────────────
+
+async def _themes_snapshot_payload() -> dict:
+    """Construye el payload JSON con todos los temas guardados."""
+    docs = await db.saved_themes.find({}, sort=[("created_at", -1)]).to_list(500)
+    settings_doc = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+    default_id = str(settings_doc.get("default_theme_id") or "")
+    return {
+        "app": "Cinema Productions — Reserva de Eventos",
+        "kind": "saved_themes_backup",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(docs),
+        "themes": [
+            {
+                "id": str(d["_id"]),
+                "name": d.get("name", ""),
+                "snapshot": d.get("snapshot", {}),
+                "created_at": d.get("created_at", ""),
+                "updated_at": d.get("updated_at", ""),
+                "is_default": (str(d["_id"]) == default_id) or bool(d.get("is_default", False)),
+            }
+            for d in docs
+        ],
+    }
+
+
+async def _write_themes_local_json(payload: dict | None = None) -> dict:
+    """Escribe el mirror local /app/themes/saved_themes.json."""
+    if payload is None:
+        payload = await _themes_snapshot_payload()
+    try:
+        THEMES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+        THEMES_JSON_PATH.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning(f"[themes] no se pudo escribir JSON local: {e}")
+    return payload
+
+
+async def _resolve_github_creds() -> tuple[str, str, str]:
+    """Retorna (token, repo_url, branch). Prioriza .env, luego app_settings."""
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    repo_url = (os.environ.get("GITHUB_REPO_URL") or "").strip()
+    branch = (os.environ.get("GITHUB_BRANCH") or "").strip()
+    if not token or not repo_url:
+        try:
+            cfg = await _get_github_config()
+            if not token:
+                token = (cfg.get("token") or "").strip()
+            if not repo_url:
+                repo_url = (cfg.get("repo_url") or "").strip()
+            if not branch:
+                branch = (cfg.get("branch") or "").strip()
+        except Exception:
+            pass
+    if not repo_url:
+        repo_url = SUGGESTED_GITHUB_REPO
+    if not branch:
+        branch = DEFAULT_GITHUB_BRANCH
+    return token, repo_url, branch
+
+
+async def _push_themes_to_github(payload: dict) -> dict:
+    """Upsert `themes/saved_themes.json` en GitHub via Contents API."""
+    token, repo_url, branch = await _resolve_github_creds()
+    if not token:
+        return {"skipped": True, "reason": "no_token"}
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        return {"skipped": True, "reason": "bad_repo_url"}
+
+    path_in_repo = "themes/saved_themes.json"
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path_in_repo}"
+    content_b64 = base64.b64encode(
+        json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cinema-productions-app",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as h:
+            sha = None
+            try:
+                r_get = await h.get(api_url, headers=headers, params={"ref": branch})
+                if r_get.status_code == 200:
+                    sha = r_get.json().get("sha")
+            except Exception:
+                pass
+            body = {
+                "message": f"chore(themes): sync {payload.get('count', 0)} saved theme(s)",
+                "content": content_b64,
+                "branch": branch,
+            }
+            if sha:
+                body["sha"] = sha
+            r = await h.put(api_url, headers=headers, json=body)
+            if r.status_code in (200, 201):
+                data = r.json()
+                sync_info = {
+                    "themes_sync.last_github_sha": (data.get("content") or {}).get("sha", ""),
+                    "themes_sync.last_github_commit": (data.get("commit") or {}).get("sha", ""),
+                    "themes_sync.last_github_at": datetime.now(timezone.utc).isoformat(),
+                    "themes_sync.last_status": "ok",
+                    "themes_sync.last_error": "",
+                }
+                await db.app_settings.update_one({}, {"$set": sync_info}, upsert=True)
+                return {"ok": True, "commit_sha": (data.get("commit") or {}).get("sha", "")}
+            logger.warning(f"[themes/github] {r.status_code}: {r.text[:400]}")
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "themes_sync.last_status": f"error_{r.status_code}",
+                    "themes_sync.last_error": r.text[:400],
+                    "themes_sync.last_github_at": datetime.now(timezone.utc).isoformat(),
+                }},
+                upsert=True,
+            )
+            return {"ok": False, "status": r.status_code, "error": r.text[:400]}
+    except Exception as e:
+        logger.warning(f"[themes/github] excepción: {e}")
+        try:
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "themes_sync.last_status": "error_exception",
+                    "themes_sync.last_error": str(e)[:400],
+                    "themes_sync.last_github_at": datetime.now(timezone.utc).isoformat(),
+                }},
+                upsert=True,
+            )
+        except Exception:
+            pass
+        return {"ok": False, "error": str(e)}
+
+
+async def _sync_themes_all_channels(push_github: bool = True) -> dict:
+    """Ejecuta la sincronización de 3 vías: Mongo → JSON local → (GitHub)."""
+    payload = await _write_themes_local_json()
+    gh = {"skipped": True, "reason": "disabled"}
+    if push_github:
+        gh = await _push_themes_to_github(payload)
+    return {
+        "local_ok": True,
+        "local_path": str(THEMES_JSON_PATH),
+        "count": payload.get("count", 0),
+        "github": gh,
+    }
+
 
 @api_router.get("/themes")
 async def list_saved_themes():
-    docs = await db.saved_themes.find({}, sort=[("created_at", -1)]).to_list(200)
+    docs = await db.saved_themes.find({}, sort=[("created_at", -1)]).to_list(500)
+    settings_doc = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+    default_id = str(settings_doc.get("default_theme_id") or "")
     return [
-        {"id": str(d["_id"]), "name": d["name"], "snapshot": d.get("snapshot", {}), "created_at": d["created_at"]}
+        {
+            "id": str(d["_id"]),
+            "name": d.get("name", ""),
+            "snapshot": d.get("snapshot", {}),
+            "created_at": d.get("created_at", ""),
+            "updated_at": d.get("updated_at", ""),
+            "is_default": (str(d["_id"]) == default_id) or bool(d.get("is_default", False)),
+        }
         for d in docs
     ]
 
@@ -2543,13 +2809,52 @@ async def create_saved_theme(payload: dict = Body(...)):
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="El nombre del tema es requerido")
+    now = datetime.now(timezone.utc).isoformat()
     doc = {
         "name": name,
         "snapshot": payload.get("snapshot") or {},
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
+        "updated_at": now,
     }
     result = await db.saved_themes.insert_one(doc)
-    return {"id": str(result.inserted_id), "name": name, "created_at": doc["created_at"]}
+    # sync en background (no bloquea la respuesta)
+    asyncio.create_task(_sync_themes_all_channels())
+    return {
+        "id": str(result.inserted_id),
+        "name": name,
+        "snapshot": doc["snapshot"],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+@api_router.put("/themes/{theme_id}")
+async def update_saved_theme(theme_id: str, payload: dict = Body(...)):
+    """Sobreescribe un tema existente con la apariencia actual (Reguardar)."""
+    try:
+        oid = ObjectId(theme_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    update: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if "name" in payload:
+        n = (payload.get("name") or "").strip()
+        if not n:
+            raise HTTPException(status_code=400, detail="El nombre no puede quedar vacío")
+        update["name"] = n
+    if "snapshot" in payload:
+        update["snapshot"] = payload.get("snapshot") or {}
+    result = await db.saved_themes.update_one({"_id": oid}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Tema no encontrado")
+    asyncio.create_task(_sync_themes_all_channels())
+    doc = await db.saved_themes.find_one({"_id": oid}) or {}
+    return {
+        "id": str(oid),
+        "name": doc.get("name", ""),
+        "snapshot": doc.get("snapshot", {}),
+        "created_at": doc.get("created_at", ""),
+        "updated_at": doc.get("updated_at", ""),
+    }
 
 
 @api_router.delete("/themes/{theme_id}")
@@ -2558,10 +2863,84 @@ async def delete_saved_theme(theme_id: str):
         oid = ObjectId(theme_id)
     except Exception:
         raise HTTPException(status_code=400, detail="ID inválido")
+    # Si era el default, limpiar la referencia
+    settings_doc = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+    was_default = str(settings_doc.get("default_theme_id") or "") == theme_id
     result = await db.saved_themes.delete_one({"_id": oid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Tema no encontrado")
+    if was_default:
+        # Fallback: buscar "Minimalista" o el primer tema restante para no
+        # dejar la app sin tema por defecto.
+        fallback = await db.saved_themes.find_one({"name": {"$regex": "^minimal", "$options": "i"}})
+        if not fallback:
+            fallback = await db.saved_themes.find_one({}, sort=[("created_at", 1)])
+        if fallback:
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "default_theme_id": fallback["_id"],
+                    "default_theme_name": fallback.get("name", ""),
+                }},
+                upsert=True,
+            )
+        else:
+            await db.app_settings.update_one({}, {"$unset": {"default_theme_id": "", "default_theme_name": ""}}, upsert=True)
+    asyncio.create_task(_sync_themes_all_channels())
     return {"message": "Tema eliminado"}
+
+
+@api_router.post("/themes/{theme_id}/set-default")
+async def set_default_theme(theme_id: str):
+    try:
+        oid = ObjectId(theme_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    doc = await db.saved_themes.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Tema no encontrado")
+    await db.app_settings.update_one(
+        {},
+        {"$set": {"default_theme_id": oid, "default_theme_name": doc.get("name", "")}},
+        upsert=True,
+    )
+    asyncio.create_task(_sync_themes_all_channels())
+    return {"success": True, "default_theme_id": str(oid), "name": doc.get("name", "")}
+
+
+@api_router.post("/themes/sync")
+async def themes_sync_now():
+    """Fuerza una sincronización manual (Mongo → JSON local → GitHub)."""
+    result = await _sync_themes_all_channels()
+    return {"success": True, **result}
+
+
+@api_router.get("/themes/sync/status")
+async def themes_sync_status():
+    doc = await db.app_settings.find_one({}, {"themes_sync": 1, "default_theme_id": 1, "default_theme_name": 1}) or {}
+    ts = doc.get("themes_sync") or {}
+    local_mtime = None
+    if THEMES_JSON_PATH.exists():
+        try:
+            local_mtime = datetime.fromtimestamp(
+                THEMES_JSON_PATH.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+        except Exception:
+            pass
+    token_env = bool(os.environ.get("GITHUB_TOKEN"))
+    return {
+        "local_path": str(THEMES_JSON_PATH),
+        "local_exists": THEMES_JSON_PATH.exists(),
+        "local_mtime": local_mtime,
+        "last_github_at": ts.get("last_github_at"),
+        "last_github_sha": ts.get("last_github_sha"),
+        "last_github_commit": ts.get("last_github_commit"),
+        "last_status": ts.get("last_status"),
+        "last_error": ts.get("last_error"),
+        "github_configured": token_env or bool((await _resolve_github_creds())[0]),
+        "default_theme_id": str(doc.get("default_theme_id") or ""),
+        "default_theme_name": doc.get("default_theme_name", ""),
+    }
 
 
 # ── APP SECURITY (password lock + page protection) ──────────────────────────
