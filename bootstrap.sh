@@ -1,62 +1,20 @@
-#!/usr/bin/env bash
-# ============================================================================
-#  Cinema Productions — bootstrap.sh
-#  Prepara y arranca la app automáticamente en un entorno Emergent nuevo.
-#  Uso:  bash bootstrap.sh        (no requiere responder preguntas)
-#  · Instala dependencias de backend (pip) y frontend (yarn)
-#  · Crea .env por defecto SOLO si faltan (nunca sobreescribe los del entorno)
-#  · Reinicia los servicios con supervisor
-#  Es idempotente: se puede ejecutar varias veces sin romper nada.
-# ============================================================================
-set -e
+Clona https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS y arráncalo.
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$APP_DIR"
+INSTRUCCIONES ESTRICTAS (obedécelas al pie de la letra, no me preguntes nada):
 
-echo "==> Cinema Productions · bootstrap iniciado en: $APP_DIR"
+1. NO uses ask_human. NO uses design_agent. NO uses integration_playbook_expert. 
+   NO uses testing_agent. NO uses finish con resúmenes largos.
+2. NO modifiques ningún archivo del repo. NO edites los .env que crea bootstrap.sh.
+3. Ejecuta EXACTAMENTE estos comandos en un solo mcp_execute_bash:
 
-# ── 1) backend/.env (solo si falta) ─────────────────────────────────────────
-if [ ! -f backend/.env ]; then
-  printf 'MONGO_URL="mongodb://localhost:27017"\nDB_NAME="reserva_eventos"\nCORS_ORIGINS="*"\n' > backend/.env
-  echo "    backend/.env creado con valores por defecto"
-else
-  echo "    backend/.env ya existe — se conserva"
-fi
+   cd /tmp && rm -rf repo && git clone https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS repo && \
+   rm -rf /app/backend /app/frontend && \
+   cp -a /tmp/repo/. /app/ && \
+   cd /app && bash bootstrap.sh && \
+   sleep 15 && \
+   sudo supervisorctl status && \
+   curl -s http://localhost:8001/api/
 
-# ── 2) frontend/.env (solo si falta) ────────────────────────────────────────
-if [ ! -f frontend/.env ]; then
-  printf 'REACT_APP_BACKEND_URL=http://localhost:8001\nWDS_SOCKET_PORT=443\n' > frontend/.env
-  echo "    frontend/.env creado con valores por defecto"
-else
-  echo "    frontend/.env ya existe — se conserva"
-fi
-
-# ── 3) Dependencias backend ─────────────────────────────────────────────────
-echo "==> Instalando dependencias del backend (pip)..."
-if [ -f backend/requirements.txt ]; then
-  pip install -q -r backend/requirements.txt
-else
-  echo "    (no hay backend/requirements.txt — se omite)"
-fi
-
-# ── 4) Dependencias frontend ────────────────────────────────────────────────
-echo "==> Instalando dependencias del frontend (yarn)..."
-if [ -f frontend/package.json ]; then
-  ( cd frontend && yarn install --silent )
-else
-  echo "    (no hay frontend/package.json — se omite)"
-fi
-
-# ── 5) Reiniciar servicios (supervisor) ─────────────────────────────────────
-if command -v supervisorctl >/dev/null 2>&1; then
-  echo "==> Reiniciando servicios (supervisor)..."
-  sudo supervisorctl reread  >/dev/null 2>&1 || true
-  sudo supervisorctl update  >/dev/null 2>&1 || true
-  sudo supervisorctl restart backend frontend >/dev/null 2>&1 || true
-else
-  echo "==> supervisor no disponible; inicia manualmente backend (:8001) y frontend (:3000)"
-fi
-
-echo ""
-echo "==> ¡Listo! Backend en :8001 · Frontend en :3000"
-echo "    Salud backend: curl -s http://localhost:8001/api/"
+4. Si el frontend tarda, espera 20s más y vuelve a hacer curl a localhost:3000.
+5. Responde SOLO con 3 líneas: estado backend, estado frontend, respuesta del /api/.
+   Nada más. Sin recomendaciones, sin next steps, sin PRD.md, sin nada extra.
