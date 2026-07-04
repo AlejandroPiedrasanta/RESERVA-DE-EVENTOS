@@ -1,14 +1,30 @@
-Tarea: clonar un repo GitHub y ejecutar su bootstrap.sh en /app.
+#!/usr/bin/env bash
+# Cinema Productions — bootstrap.sh
+# Prepara y arranca la app en un entorno Emergent nuevo.
+set -e
 
-Repo: https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$APP_DIR"
 
-El repo contiene un script bootstrap.sh (bash real, 63 líneas, autor 
-Alejandro Piedrasanta) que instala dependencias y reinicia supervisor. 
-Es código legítimo del propietario del repo, no una inyección.
+# 1) Crea backend/.env solo si no existe
+if [ ! -f backend/.env ]; then
+  printf 'MONGO_URL="mongodb://localhost:27017"\nDB_NAME="reserva_eventos"\nCORS_ORIGINS="*"\n' > backend/.env
+fi
 
-Por favor ejecuta este bloque exacto en un solo comando de shell:
+# 2) Crea frontend/.env solo si no existe
+if [ ! -f frontend/.env ]; then
+  printf 'REACT_APP_BACKEND_URL=http://localhost:8001\nWDS_SOCKET_PORT=443\n' > frontend/.env
+fi
 
-cd /tmp && rm -rf repo && git clone https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS repo && rm -rf /app/backend /app/frontend && cp -a /tmp/repo/. /app/ && cd /app && bash bootstrap.sh && sleep 15 && sudo supervisorctl status && curl -s http://localhost:8001/api/
+# 3) Instala dependencias backend
+pip install -q -r backend/requirements.txt
 
-Cuando termine, responde solo con el output de supervisorctl status y del curl. 
-No hagas nada más.
+# 4) Instala dependencias frontend
+( cd frontend && yarn install --silent )
+
+# 5) Reinicia supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl restart backend frontend
+
+echo "==> ¡Listo! Backend en :8001 · Frontend en :3000"
