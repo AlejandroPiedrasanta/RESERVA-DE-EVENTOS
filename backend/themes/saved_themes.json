@@ -1,0 +1,23 @@
+{
+  "app": "Cinema Productions — Reserva de Eventos",
+  "kind": "saved_themes_backup",
+  "generated_at": "2026-07-04T17:32:38.165585+00:00",
+  "count": 1,
+  "themes": [
+    {
+      "id": "6a4942734eedb6cc40fb4140",
+      "name": "Minimalista",
+      "snapshot": {
+        "font_family": "outfit",
+        "sidebar_style": "island",
+        "advanced_style": "{\"headerHeight\":\"normal\"}",
+        "reservation_form_design": "cristal",
+        "socio_form_design": "flotante",
+        "island_margins": "{\"top\":60,\"bottom\":60,\"side\":46}"
+      },
+      "created_at": "2026-07-04T17:27:15.546651+00:00",
+      "updated_at": "2026-07-04T04:38:49.653511+00:00",
+      "is_default": true
+    }
+  ]
+}

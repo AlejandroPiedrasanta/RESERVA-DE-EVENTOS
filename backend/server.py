@@ -2287,6 +2287,18 @@ async def download_package(request: Request):
         ('cinema-productions/version.txt', auto_version.encode('utf-8')),
     ]
 
+    # Adjuntar el mirror actual de saved_themes.json (contiene "Minimalista"
+    # como is_default) para que la app de escritorio arranque con el mismo
+    # tema por defecto que la web incluso sin internet.
+    try:
+        themes_payload = await _themes_snapshot_payload()
+        themes_json_bytes = json.dumps(themes_payload, indent=2, ensure_ascii=False).encode('utf-8')
+        files_to_add.append(
+            ('cinema-productions/themes/saved_themes.json', themes_json_bytes)
+        )
+    except Exception as _themes_err:
+        logger.warning(f"No se pudo adjuntar themes/saved_themes.json al ZIP: {_themes_err}")
+
     wheels_dir = await asyncio.to_thread(_ensure_desktop_wheels)
     wheel_files = sorted(wheels_dir.glob('*.whl'))
     build_files = [f for f in sorted(build_dir.rglob('*')) if f.is_file()]
