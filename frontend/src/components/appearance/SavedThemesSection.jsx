@@ -189,11 +189,21 @@ export function SavedThemesSection() {
     setSyncing(true);
     try {
       const r = await syncThemesNow();
+      const gh = r?.github || {};
+      const isDesktop = gh.reason === "desktop_no_github";
+      const ghOkOrSkipped = gh.ok || gh.skipped;
+      const ghText = gh.ok
+        ? "✓"
+        : isDesktop
+          ? (es ? "no aplica (escritorio)" : "n/a (desktop)")
+          : gh.skipped
+            ? (es ? "omitido" : "skipped")
+            : (es ? "error" : "error");
       toast({
         title: es
-          ? `Sincronización: local ✓ · GitHub ${r?.github?.ok ? "✓" : (r?.github?.skipped ? "omitido" : "error")}`
-          : `Synced: local ✓ · GitHub ${r?.github?.ok ? "✓" : (r?.github?.skipped ? "skipped" : "error")}`,
-        variant: r?.github?.ok || r?.github?.skipped ? "default" : "destructive",
+          ? `Sincronización: local ✓ · GitHub ${ghText}`
+          : `Synced: local ✓ · GitHub ${ghText}`,
+        variant: ghOkOrSkipped ? "default" : "destructive",
       });
       load();
     } catch {

@@ -762,7 +762,7 @@ export default function DatabasePage() {
         <h1 className="text-5xl font-black gradient-text" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
           Base de Datos
         </h1>
-        <p className="text-sm text-slate-500 font-medium mt-1.5">Respaldos y conexión MongoDB</p>
+        <p className="text-sm text-slate-500 font-medium mt-1.5">Respaldos y conexión a la base de datos en la nube</p>
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
@@ -783,7 +783,7 @@ export default function DatabasePage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-black text-slate-800 flex items-center gap-2">
-                    Tu MongoDB Atlas ya está lista
+                    Tu base de datos en la nube ya está lista
                     <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500 text-white">De fábrica</span>
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
@@ -796,7 +796,7 @@ export default function DatabasePage() {
                     onClick={async () => {
                       try {
                         await switchDatabase(factoryPreset.url);
-                        toast({ title: "Conectado a MongoDB Atlas ✓ — Actualizando..." });
+                        toast({ title: "Conectado a la base de datos en la nube ✓ — Actualizando..." });
                         try { localStorage.setItem("cp_atlas_banner_dismissed", "1"); } catch {}
                         setTimeout(() => window.location.reload(), 1200);
                       } catch (e) { toast({ title: e.response?.data?.detail || "Error al conectar", variant: "destructive" }); }
@@ -1124,7 +1124,7 @@ export default function DatabasePage() {
                   <Database size={16} className="text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Base de Datos MongoDB</p>
+                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Base de datos en la nube</p>
                   <p className="text-[11px] text-slate-400">Estado, conexión y bases guardadas</p>
                 </div>
               </div>
@@ -1157,7 +1157,7 @@ export default function DatabasePage() {
                     <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
                       <WifiOff size={14} className="text-red-500 mt-0.5 shrink-0" />
                       <div>
-                        <p className="text-xs font-bold text-red-700">Sin conexión a MongoDB Atlas</p>
+                        <p className="text-xs font-bold text-red-700">Sin conexión a la base de datos en la nube</p>
                         <p className="text-[10px] text-red-500 mt-0.5">Verifica tu internet y que el URL sea correcto.</p>
                       </div>
                     </div>
@@ -1187,7 +1187,7 @@ export default function DatabasePage() {
                     <div data-testid="db-space-info" className="bg-slate-50/80 rounded-2xl px-4 py-3">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Espacio {dbStats.is_atlas ? "(MongoDB Atlas)" : ""}
+                          Espacio {dbStats.is_atlas ? "(en la nube)" : ""}
                         </p>
                         <p className="text-[11px] font-black text-slate-600">
                           {dbStats.used_size} usado{dbStats.limit_size && dbStats.limit_size !== "—" ? ` / ${dbStats.limit_size}` : ""}

@@ -1294,8 +1294,17 @@ async def save_appearance_snapshot(payload: dict = Body(...)):
 @api_router.get("/themes")
 async def list_saved_themes():
     docs = await db.saved_themes.find({}, sort=[("created_at", -1)]).to_list(200)
+    settings_doc = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+    default_id = str(settings_doc.get("default_theme_id") or "")
     return [
-        {"id": str(d["_id"]), "name": d["name"], "snapshot": d.get("snapshot", {}), "created_at": d["created_at"]}
+        {
+            "id": str(d["_id"]),
+            "name": d["name"],
+            "snapshot": d.get("snapshot", {}),
+            "created_at": d["created_at"],
+            "updated_at": d.get("updated_at", ""),
+            "is_default": (str(d["_id"]) == default_id) or bool(d.get("is_default", False)),
+        }
         for d in docs
     ]
 
@@ -1390,7 +1399,7 @@ async def themes_sync_now():
     return {
         "success": True,
         "local": {"ok": True},
-        "github": {"ok": False, "reason": "desktop_no_github"},
+        "github": {"skipped": True, "reason": "desktop_no_github"},
     }
 
 
