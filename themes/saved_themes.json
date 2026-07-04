@@ -1,7 +1,7 @@
 {
   "app": "Cinema Productions — Reserva de Eventos",
   "kind": "saved_themes_backup",
-  "generated_at": "2026-07-04T01:20:14.655512+00:00",
+  "generated_at": "2026-07-04T01:20:26.500060+00:00",
   "count": 2,
   "themes": [
     {
@@ -16,13 +16,13 @@
     },
     {
       "id": "6a485fce96f33c2f8dfab83d",
-      "name": "Test Theme",
+      "name": "Test Theme Updated",
       "snapshot": {
-        "theme": "emerald",
-        "preset": "aurora"
+        "theme": "rose",
+        "preset": "crystal"
       },
       "created_at": "2026-07-04T01:20:14.653326+00:00",
-      "updated_at": "2026-07-04T01:20:14.653326+00:00"
+      "updated_at": "2026-07-04T01:20:26.497839+00:00"
     }
   ]
 }
