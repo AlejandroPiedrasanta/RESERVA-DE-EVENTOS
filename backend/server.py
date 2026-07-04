@@ -226,7 +226,7 @@ async def lifespan(app_instance: FastAPI):
                 await db.app_settings.update_one(
                     {},
                     {"$set": {
-                        "default_theme_id": seeded_default_id,
+                        "default_theme_id": str(seeded_default_id),
                         "default_theme_name": "Minimalista",
                         "appearance_snapshot": seeded_default_snapshot or {},
                         "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
@@ -237,7 +237,17 @@ async def lifespan(app_instance: FastAPI):
             # BD ya tiene temas: si no hay default_theme_id configurado, buscar
             # uno llamado "Minimalista" (o el primero) y marcarlo como default.
             cur_settings = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
-            if not cur_settings.get("default_theme_id"):
+            existing_default = cur_settings.get("default_theme_id")
+            # Migración: si algún default_theme_id anterior quedó como ObjectId,
+            # normalizarlo a string (esto rompía backups y JSON serialization).
+            if isinstance(existing_default, ObjectId):
+                await db.app_settings.update_one(
+                    {}, {"$set": {"default_theme_id": str(existing_default)}}
+                )
+                existing_default = str(existing_default)
+                logger.info("Migrated default_theme_id from ObjectId → string")
+
+            if not existing_default:
                 minimal = await db.saved_themes.find_one({"name": {"$regex": "^minimal", "$options": "i"}})
                 if not minimal:
                     minimal = await db.saved_themes.find_one({}, sort=[("created_at", 1)])
@@ -245,7 +255,7 @@ async def lifespan(app_instance: FastAPI):
                     await db.app_settings.update_one(
                         {},
                         {"$set": {
-                            "default_theme_id": minimal["_id"],
+                            "default_theme_id": str(minimal["_id"]),
                             "default_theme_name": minimal.get("name", "Minimalista"),
                             "appearance_snapshot": minimal.get("snapshot", {}),
                             "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
@@ -279,6 +289,29 @@ def doc_to_dict(doc: dict) -> dict:
     if '_id' in doc:
         d['id'] = str(doc['_id'])
     return d
+
+
+def _json_safe(obj):
+    """Recursive fallback for json.dumps: converts ObjectId, datetime, bytes, etc."""
+    from bson import ObjectId as _OID
+    if isinstance(obj, _OID):
+        return str(obj)
+    if isinstance(obj, (datetime,)):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8", errors="replace")
+        except Exception:
+            return obj.hex()
+    if hasattr(obj, "isoformat"):
+        try:
+            return obj.isoformat()
+        except Exception:
+            pass
+    return str(obj)
 
 
 # ─── Pydantic Models ─────────────────────────────────────
@@ -1133,7 +1166,7 @@ async def _create_backup(label: str = "manual") -> dict:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"backup_{label}_{ts}.json"
     filepath = BACKUP_DIR / filename
-    filepath.write_text(json.dumps(backup_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    filepath.write_text(json.dumps(backup_data, ensure_ascii=False, indent=2, default=_json_safe), encoding="utf-8")
 
     # Keep only the last 15 backups (oldest removed first)
     existing = sorted(BACKUP_DIR.glob("backup_*.json"), key=lambda f: f.stat().st_mtime)
@@ -1158,7 +1191,7 @@ async def download_full_backup():
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"cinema_backup_{ts}.json"
-    content = json.dumps(backup_data, ensure_ascii=False, indent=2)
+    content = json.dumps(backup_data, ensure_ascii=False, indent=2, default=_json_safe)
     return Response(
         content=content.encode("utf-8"),
         media_type="application/json",
@@ -2879,7 +2912,7 @@ async def delete_saved_theme(theme_id: str):
             await db.app_settings.update_one(
                 {},
                 {"$set": {
-                    "default_theme_id": fallback["_id"],
+                    "default_theme_id": str(fallback["_id"]),
                     "default_theme_name": fallback.get("name", ""),
                 }},
                 upsert=True,
@@ -2901,7 +2934,7 @@ async def set_default_theme(theme_id: str):
         raise HTTPException(status_code=404, detail="Tema no encontrado")
     await db.app_settings.update_one(
         {},
-        {"$set": {"default_theme_id": oid, "default_theme_name": doc.get("name", "")}},
+        {"$set": {"default_theme_id": str(oid), "default_theme_name": doc.get("name", "")}},
         upsert=True,
     )
     asyncio.create_task(_sync_themes_all_channels())
