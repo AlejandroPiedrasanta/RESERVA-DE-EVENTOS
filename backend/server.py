@@ -3401,6 +3401,34 @@ async def github_disconnect():
 
 @api_router.post("/github/push-all")
 async def github_push_all(payload: dict = Body(default={})):
+    """Lanza el push-all en background para evitar timeouts de Cloudflare (>100s).
+    El frontend hace polling a /github/push-status para conocer el resultado final."""
+    # Verificaciones rápidas antes de arrancar el worker
+    cfg = await _get_github_config()
+    if not cfg.get("token"):
+        raise HTTPException(status_code=400, detail="Sin cuenta conectada. Usa 'Conectar con GitHub' primero.")
+    if not cfg.get("repo_url") or not cfg.get("username"):
+        raise HTTPException(status_code=400, detail="Repositorio o usuario no configurado.")
+
+    if _push_state.get("status") == "running":
+        return {
+            "status": "already_running",
+            "message": "Ya hay un push en curso. Espera a que termine.",
+            "progress": _push_state.get("progress", 0),
+        }
+
+    # Limpia el resultado anterior
+    _push_state["result"] = None
+    _push_state["error"] = None
+    _set_push_state(progress=1, message="En cola…", status="running")
+    _push_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    _push_state["finished_at"] = None
+
+    asyncio.create_task(_do_github_push_all(payload))
+    return {"status": "started", "message": "Push iniciado en background. Sigue el progreso en /github/push-status."}
+
+
+async def _do_github_push_all(payload: dict):
     """Sube TODO el código actual al repositorio de GitHub, funcionando como
     el botón "Save to GitHub" de Emergent.
 
@@ -3576,14 +3604,14 @@ async def github_push_all(payload: dict = Body(default={})):
 
         rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():
-            shutil.rmtree(str(work_dir), ignore_errors=True)
             _set_push_state(progress=100, message="Sin cambios que subir — ya está sincronizado", status="done")
             _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-            return {
+            _push_state["result"] = {
                 "success": True,
                 "nothing_to_commit": True,
                 "message": "Sin cambios que subir — el repositorio ya está sincronizado",
             }
+            return
 
         # Contar archivos cambiados para el resumen
         changed = len([l for l in status_out.strip().split("\n") if l.strip()])
@@ -3689,7 +3717,7 @@ async def github_push_all(payload: dict = Body(default={})):
 
         _set_push_state(progress=100, message="¡Subido a GitHub! La versión PC ya está publicada.", status="done")
         _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-        return {
+        _push_state["result"] = {
             "success": True,
             "nothing_to_commit": False,
             "commit_sha": new_sha,
@@ -3700,14 +3728,22 @@ async def github_push_all(payload: dict = Body(default={})):
             "repo_url": repo_url,
             "version": registered_version,
         }
-    except HTTPException:
-        raise
+        return
     except subprocess.TimeoutExpired as e:
-        _set_push_state(progress=0, message="Tiempo de espera agotado. Revisa tu conexión.", status="error")
-        raise HTTPException(status_code=504, detail=f"Timeout ({e.timeout}s). Verifica tu conexión y tamaño del repo.")
+        _set_push_state(progress=0, message=f"Timeout ({e.timeout}s). Verifica tu conexión.", status="error")
+        _push_state["error"] = f"Timeout ({e.timeout}s)"
+        _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return
+    except HTTPException as he:
+        _set_push_state(progress=0, message=str(he.detail)[:200], status="error")
+        _push_state["error"] = str(he.detail)[:400]
+        _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return
     except Exception as e:
         _set_push_state(progress=0, message=f"Error inesperado: {type(e).__name__}", status="error")
-        raise HTTPException(status_code=500, detail=f"Error inesperado: {type(e).__name__}: {e}")
+        _push_state["error"] = f"{type(e).__name__}: {e}"[:400]
+        _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        return
     finally:
         try:
             shutil.rmtree(str(work_dir), ignore_errors=True)
@@ -3717,8 +3753,17 @@ async def github_push_all(payload: dict = Body(default={})):
 
 @api_router.get("/github/push-status")
 async def github_push_status():
-    """Estado actual del push a GitHub (para la barra de progreso en la UI)."""
-    return _push_state
+    """Estado actual del push a GitHub (para la barra de progreso en la UI).
+    Incluye `result` cuando termina OK y `error` cuando falla."""
+    return {
+        "status": _push_state.get("status", "idle"),
+        "progress": _push_state.get("progress", 0),
+        "message": _push_state.get("message", ""),
+        "started_at": _push_state.get("started_at"),
+        "finished_at": _push_state.get("finished_at"),
+        "result": _push_state.get("result"),
+        "error": _push_state.get("error"),
+    }
 
 
 # ── DIAGNÓSTICO DE LA APP ─────────────────────────────────────────

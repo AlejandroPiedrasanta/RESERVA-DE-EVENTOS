@@ -383,51 +383,59 @@ export default function DatabasePage() {
     setGhPushing(true);
     setGhPushProgress(3);
     setGhPushMsg("Iniciando…");
-    // Polling del progreso real reportado por el backend
     if (ghPushPollRef.current) clearInterval(ghPushPollRef.current);
+
+    // Función que finaliza el flujo cuando el polling detecta done/error
+    const finish = (kind, payload) => {
+      if (ghPushPollRef.current) {
+        clearInterval(ghPushPollRef.current);
+        ghPushPollRef.current = null;
+      }
+      if (kind === "done") {
+        setGhPushProgress(100);
+        if (payload?.nothing_to_commit) {
+          setGhPushMsg("Sin cambios que subir");
+          toast({ title: "Sin cambios que subir", description: "El repositorio ya está sincronizado." });
+        } else {
+          setGhPushMsg("¡Subido a GitHub!");
+          toast({
+            title: "✓ Subido a GitHub",
+            description: `Commit ${payload?.commit_short || ""} en rama ${payload?.branch || "main"}`,
+          });
+          fireEpic();
+        }
+        loadGithubConfig();
+      } else {
+        setGhPushMsg("Error al subir");
+        toast({
+          title: "Error al subir",
+          description: String(payload || "").slice(0, 250),
+          variant: "destructive",
+        });
+      }
+      setTimeout(() => {
+        setGhPushing(false);
+        setGhPushProgress(0);
+        setGhPushMsg("");
+      }, 1400);
+    };
+
+    // Polling del progreso + detección de fin
     ghPushPollRef.current = setInterval(async () => {
       try {
         const st = await getGithubPushStatus();
         if (typeof st.progress === "number") setGhPushProgress(st.progress);
         if (st.message) setGhPushMsg(st.message);
-      } catch (_) { /* ignora errores de polling */ }
-    }, 800);
+        if (st.status === "done") finish("done", st.result || {});
+        else if (st.status === "error") finish("error", st.error || st.message || "Error desconocido");
+      } catch (_) { /* ignora errores de polling puntuales */ }
+    }, 900);
+
+    // Dispara el trabajo. Ahora el POST retorna inmediatamente ({status:"started"}).
     try {
-      const res = await githubPushAll(message || undefined);
-      setGhPushProgress(100);
-      if (res.nothing_to_commit) {
-        setGhPushMsg("Sin cambios que subir");
-        toast({
-          title: "Sin cambios que subir",
-          description: "El repositorio ya está sincronizado.",
-        });
-      } else {
-        setGhPushMsg("¡Subido a GitHub!");
-        toast({
-          title: `✓ Subido a GitHub`,
-          description: `Commit ${res.commit_short} en rama ${res.branch}`,
-        });
-        fireEpic();
-      }
-      await loadGithubConfig();
+      await githubPushAll(message || undefined);
     } catch (err) {
-      setGhPushMsg("Error al subir");
-      toast({
-        title: "Error al subir",
-        description: err?.response?.data?.detail?.slice(0, 200) || String(err),
-        variant: "destructive",
-      });
-    } finally {
-      if (ghPushPollRef.current) {
-        clearInterval(ghPushPollRef.current);
-        ghPushPollRef.current = null;
-      }
-      // Deja ver 100%/estado final un instante antes de resetear
-      setTimeout(() => {
-        setGhPushing(false);
-        setGhPushProgress(0);
-        setGhPushMsg("");
-      }, 1200);
+      finish("error", err?.response?.data?.detail || String(err));
     }
   };
 
