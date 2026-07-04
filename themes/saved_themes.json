@@ -1,11 +1,11 @@
 {
   "app": "Cinema Productions — Reserva de Eventos",
   "kind": "saved_themes_backup",
-  "generated_at": "2026-07-04T17:32:38.165585+00:00",
+  "generated_at": "2026-07-04T20:47:11.813759+00:00",
   "count": 1,
   "themes": [
     {
-      "id": "6a4942734eedb6cc40fb4140",
+      "id": "6a4966bbdab22d9f3ed31a6e",
       "name": "Minimalista",
       "snapshot": {
         "font_family": "outfit",
@@ -13,10 +13,11 @@
         "advanced_style": "{\"headerHeight\":\"normal\"}",
         "reservation_form_design": "cristal",
         "socio_form_design": "flotante",
-        "island_margins": "{\"top\":60,\"bottom\":60,\"side\":46}"
+        "island_margins": "{\"top\":60,\"bottom\":60,\"side\":46}",
+        "nav_config": "[{\"path\":\"/dashboard\",\"custom\":\"\"},{\"path\":\"/reservaciones\",\"custom\":\"\"},{\"path\":\"/calendario\",\"custom\":\"\"},{\"path\":\"/socios\",\"custom\":\"\"},{\"path\":\"/apariencia\",\"custom\":\"\"},{\"path\":\"/base-de-datos\",\"custom\":\"\"},{\"path\":\"/ajustes\",\"custom\":\"\"},{\"path\":\"/actualizaciones\",\"custom\":\"\"}]"
       },
       "created_at": "2026-07-04T17:27:15.546651+00:00",
-      "updated_at": "2026-07-04T04:38:49.653511+00:00",
+      "updated_at": "2026-07-04T20:47:11.800433+00:00",
       "is_default": true
     }
   ]
