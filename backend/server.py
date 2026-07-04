@@ -183,93 +183,94 @@ async def lifespan(app_instance: FastAPI):
     #      como `default_theme_id` en app_settings y se aplica su snapshot
     #      como `appearance_snapshot` inicial.
     try:
-        themes_count = await db.saved_themes.count_documents({})
-        if themes_count == 0:
-            seeded_default_id = None
-            seeded_default_snapshot = None
-            if THEMES_JSON_PATH.exists():
-                try:
-                    data = json.loads(THEMES_JSON_PATH.read_text(encoding="utf-8"))
-                    for t in (data.get("themes") or []):
+        seeded_default_id = None
+        seeded_default_snapshot = None
+
+        # ── Merge de temas desde el mirror local JSON (viene con el repo/GitHub) ──
+        # Garantiza que los temas subidos a GitHub queden PRE-CARGADOS tras una
+        # actualización, AUNQUE la BD ya tenga otros temas. Se hace upsert por
+        # nombre para no duplicar ni pisar temas locales existentes.
+        if THEMES_JSON_PATH.exists():
+            try:
+                data = json.loads(THEMES_JSON_PATH.read_text(encoding="utf-8"))
+                imported = 0
+                for t in (data.get("themes") or []):
+                    name = t.get("name", "Minimalista")
+                    existing = await db.saved_themes.find_one({"name": name})
+                    if existing:
+                        tid = existing["_id"]
+                    else:
                         ins = await db.saved_themes.insert_one({
-                            "name": t.get("name", "Minimalista"),
+                            "name": name,
                             "snapshot": t.get("snapshot", {}),
                             "created_at": t.get("created_at") or datetime.now(timezone.utc).isoformat(),
                             "updated_at": t.get("updated_at") or "",
                             "is_default": bool(t.get("is_default", False)),
                         })
-                        if t.get("is_default") and not seeded_default_id:
-                            seeded_default_id = ins.inserted_id
-                            seeded_default_snapshot = t.get("snapshot", {})
-                    logger.info(f"Seeded {len(data.get('themes') or [])} theme(s) from local JSON")
-                except Exception as ex:
-                    logger.warning(f"No se pudo leer saved_themes.json: {ex}")
+                        tid = ins.inserted_id
+                        imported += 1
+                    if t.get("is_default") and not seeded_default_id:
+                        seeded_default_id = tid
+                        seeded_default_snapshot = t.get("snapshot", {})
+                if imported:
+                    logger.info(f"Imported {imported} theme(s) from local JSON (GitHub mirror)")
+            except Exception as ex:
+                logger.warning(f"No se pudo leer saved_themes.json: {ex}")
 
+        # ── Fallback: si aún no hay NINGÚN tema, crear "Minimalista" mínimo ──
+        if await db.saved_themes.count_documents({}) == 0:
+            default_snapshot = {"sidebar_style": "island", "nav_config": "[]"}
+            ins = await db.saved_themes.insert_one({
+                "name": "Minimalista",
+                "snapshot": default_snapshot,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": "",
+                "is_default": True,
+            })
+            seeded_default_id = ins.inserted_id
+            seeded_default_snapshot = default_snapshot
+            logger.info("Seeded default 'Minimalista' theme (fallback snapshot)")
+
+        # ── Asegurar que exista un default_theme_id válido ──
+        cur_settings = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
+        existing_default = cur_settings.get("default_theme_id")
+        # Migración: normalizar ObjectId → string (rompía backups/serialización).
+        if isinstance(existing_default, ObjectId):
+            await db.app_settings.update_one(
+                {}, {"$set": {"default_theme_id": str(existing_default)}}
+            )
+            existing_default = str(existing_default)
+            logger.info("Migrated default_theme_id from ObjectId → string")
+
+        if not existing_default:
             if not seeded_default_id:
-                # Snapshot minimalista por defecto
-                default_snapshot = {
-                    "sidebar_style": "island",
-                    "nav_config": "[]",
-                }
-                ins = await db.saved_themes.insert_one({
-                    "name": "Minimalista",
-                    "snapshot": default_snapshot,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": "",
-                    "is_default": True,
-                })
-                seeded_default_id = ins.inserted_id
-                seeded_default_snapshot = default_snapshot
-                logger.info("Seeded default 'Minimalista' theme (fallback snapshot)")
-
-            if seeded_default_id:
-                await db.app_settings.update_one(
-                    {},
-                    {"$set": {
-                        "default_theme_id": str(seeded_default_id),
-                        "default_theme_name": "Minimalista",
-                        "appearance_snapshot": seeded_default_snapshot or {},
-                        "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
-                    }},
-                    upsert=True,
-                )
-        else:
-            # BD ya tiene temas: si no hay default_theme_id configurado, buscar
-            # uno llamado "Minimalista" (o el primero) y marcarlo como default.
-            cur_settings = await db.app_settings.find_one({}, {"default_theme_id": 1}) or {}
-            existing_default = cur_settings.get("default_theme_id")
-            # Migración: si algún default_theme_id anterior quedó como ObjectId,
-            # normalizarlo a string (esto rompía backups y JSON serialization).
-            if isinstance(existing_default, ObjectId):
-                await db.app_settings.update_one(
-                    {}, {"$set": {"default_theme_id": str(existing_default)}}
-                )
-                existing_default = str(existing_default)
-                logger.info("Migrated default_theme_id from ObjectId → string")
-
-            if not existing_default:
                 minimal = await db.saved_themes.find_one({"name": {"$regex": "^minimal", "$options": "i"}})
                 if not minimal:
                     minimal = await db.saved_themes.find_one({}, sort=[("created_at", 1)])
                 if minimal:
-                    await db.app_settings.update_one(
-                        {},
-                        {"$set": {
-                            "default_theme_id": str(minimal["_id"]),
-                            "default_theme_name": minimal.get("name", "Minimalista"),
-                            "appearance_snapshot": minimal.get("snapshot", {}),
-                            "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
-                        }},
-                        upsert=True,
-                    )
-                    logger.info(f"Marcado tema por defecto: {minimal.get('name')}")
+                    seeded_default_id = minimal["_id"]
+                    seeded_default_snapshot = minimal.get("snapshot", {})
+            if seeded_default_id:
+                doc = await db.saved_themes.find_one({"_id": seeded_default_id}) or {}
+                await db.app_settings.update_one(
+                    {},
+                    {"$set": {
+                        "default_theme_id": str(seeded_default_id),
+                        "default_theme_name": doc.get("name", "Minimalista"),
+                        "appearance_snapshot": seeded_default_snapshot or doc.get("snapshot", {}),
+                        "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                    upsert=True,
+                )
+                logger.info(f"Marcado tema por defecto: {doc.get('name', 'Minimalista')}")
+
         # Siempre asegurar que el JSON local refleje el estado actual
         try:
             await _write_themes_local_json()
         except Exception:
             pass
     except Exception as e:
-        logger.warning(f"Could not seed default 'Minimalista' theme: {e}")
+        logger.warning(f"Could not seed/merge themes: {e}")
 
     yield
     scheduler.shutdown()
