@@ -3577,9 +3577,38 @@ async def _do_github_push_all(payload: dict):
         #   raíz/version.txt
         # Así CUALQUIER actualizador (el ya instalado o el nuevo) aplica los cambios
         # correctamente y de forma automática y remota, sin reinstalar.
+        # ── Resolver la VERSIÓN de esta publicación ──
+        # El usuario puede escribir un número/nombre personalizado desde el modal
+        # ("2.0", "Navidad", etc.). Si no, se calcula automáticamente como 1.NN.
+        custom_version = (payload.get("version") or "").strip().lstrip("vV").strip()
+        version_name = (payload.get("version_name") or "").strip()
+        try:
+            if custom_version:
+                version_str = custom_version
+            else:
+                cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
+                local_build = int(cdoc.get("desktop_build", 9))
+                max_remote_build = 0
+                try:
+                    rc_ls, ls_out = _run(
+                        ["git", "ls-remote", "--tags", "origin", "v1.*"],
+                        cwd=work_dir, timeout=30, sensitive=True,
+                    )
+                    if rc_ls == 0:
+                        for m in _re.finditer(r"refs/tags/v1\.(\d+)", ls_out):
+                            max_remote_build = max(max_remote_build, int(m.group(1)))
+                except Exception as ls_err:
+                    logger.warning(f"No se pudieron listar tags remotos: {ls_err}")
+                new_build = max(local_build, max_remote_build) + 1
+                await db.app_settings.update_one({}, {"$set": {"desktop_build": new_build}}, upsert=True)
+                version_str = f"1.{new_build}"
+        except Exception as ver_err:
+            logger.warning(f"No se pudo resolver versión: {ver_err}")
+            version_str = custom_version or datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
+
         try:
             standalone_src = ROOT_DIR / "standalone_app.py"
-            _set_push_state(progress=75, message="Preparando versión para PC (app.py + build)…")
+            _set_push_state(progress=75, message=f"Preparando versión v{version_str} para PC…")
             if standalone_src.exists():
                 shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
             fe_build = ROOT_DIR.parent / "frontend" / "build"
@@ -3588,9 +3617,7 @@ async def _do_github_push_all(payload: dict):
                 if root_build.exists():
                     shutil.rmtree(str(root_build))
                 shutil.copytree(str(fe_build), str(root_build))
-            (work_dir / "version.txt").write_text(
-                datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M"), encoding="utf-8"
-            )
+            (work_dir / "version.txt").write_text(version_str, encoding="utf-8")
         except Exception as e:
             logger.warning(f"No se pudo publicar la versión PC plana: {e}")
 
@@ -3635,35 +3662,12 @@ async def _do_github_push_all(payload: dict):
         # ── 6. Crear registro en app_updates (para que aparezca en el historial
         #    y sea detectado por la app de escritorio como nueva versión) ──
         try:
-            # Versión estilo v1.NN incremental. Para evitar colisiones con tags
-            # que ya existen en el remoto (p.ej. tras recrear la base de datos y
-            # reiniciar el contador local), calculamos el próximo número por
-            # encima del máximo tag remoto v1.NN existente.
-            cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
-            local_build = int(cdoc.get("desktop_build", 9))
-
-            max_remote_build = 0
-            try:
-                rc_ls, ls_out = _run(
-                    ["git", "ls-remote", "--tags", "origin", "v1.*"],
-                    cwd=work_dir, timeout=30, sensitive=True,
-                )
-                if rc_ls == 0:
-                    for m in _re.finditer(r"refs/tags/v1\.(\d+)", ls_out):
-                        max_remote_build = max(max_remote_build, int(m.group(1)))
-            except Exception as ls_err:
-                logger.warning(f"No se pudieron listar tags remotos: {ls_err}")
-
-            new_build = max(local_build, max_remote_build) + 1
-            await db.app_settings.update_one(
-                {}, {"$set": {"desktop_build": new_build}}, upsert=True
-            )
-            version_str = f"1.{new_build}"
-
+            # Reutiliza la versión ya resuelta arriba (custom o auto 1.NN).
             # Marcar todos los anteriores como no-latest
             await db.app_updates.update_many({}, {"$set": {"is_latest": False}})
             await db.app_updates.insert_one({
                 "version": version_str,
+                "version_name": version_name or None,
                 "commit_sha": new_sha,
                 "commit_short": new_sha[:7],
                 "source": "github_push",

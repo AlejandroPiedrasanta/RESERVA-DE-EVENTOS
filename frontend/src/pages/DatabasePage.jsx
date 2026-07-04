@@ -9,7 +9,7 @@ import {
   Star, Bookmark, ChevronDown, Sparkles, Scissors,
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
-  Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink,
+  Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -168,6 +168,10 @@ export default function DatabasePage() {
   const [ghPushProgress, setGhPushProgress] = useState(0);
   const [ghPushMsg, setGhPushMsg] = useState("");
   const ghPushPollRef = useRef(null);
+  // Modal de publicación: versión + mensaje
+  const [ghPushModalOpen, setGhPushModalOpen] = useState(false);
+  const [ghPushVersion, setGhPushVersion] = useState("");
+  const [ghPushCommitMsg, setGhPushCommitMsg] = useState("");
   const [diagnostic, setDiagnostic] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
@@ -370,16 +374,22 @@ export default function DatabasePage() {
   };
 
   // ── Guardar TODO el repositorio a GitHub (git add + commit + push) ──
-  const handlePushAllToGithub = async () => {
+  // Abre el modal para que el usuario ingrese versión + mensaje.
+  const handlePushAllToGithub = () => {
     if (!ghConfig.username) {
       toast({ title: "Conecta tu cuenta de GitHub primero", variant: "destructive" });
       return;
     }
-    const message = window.prompt(
-      "Mensaje del commit:",
-      `Auto-save from Cinema Productions — ${new Date().toLocaleString("es-GT")}`,
-    );
-    if (message === null) return; // usuario canceló
+    setGhPushVersion("");
+    setGhPushCommitMsg(`Actualización — ${new Date().toLocaleString("es-GT")}`);
+    setGhPushModalOpen(true);
+  };
+
+  // Ejecuta el push real con la versión/mensaje elegidos en el modal.
+  const runPushToGithub = async () => {
+    const version = ghPushVersion.trim();
+    const message = (ghPushCommitMsg.trim() || `Actualización — ${new Date().toLocaleString("es-GT")}`);
+    setGhPushModalOpen(false);
     setGhPushing(true);
     setGhPushProgress(3);
     setGhPushMsg("Iniciando…");
@@ -440,7 +450,7 @@ export default function DatabasePage() {
 
     // Dispara el trabajo. Ahora el POST retorna inmediatamente ({status:"started"}).
     try {
-      await githubPushAll(message || undefined);
+      await githubPushAll(message || undefined, version || undefined);
     } catch (err) {
       finish("error", err?.response?.data?.detail || String(err));
     }
@@ -1924,6 +1934,87 @@ export default function DatabasePage() {
                   transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
                   initial={{ width: "40%" }}
                 />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══════════ MODAL: Publicar (versión + mensaje) ═══════════ */}
+      <AnimatePresence>
+        {ghPushModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setGhPushModalOpen(false)}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 22 }}
+              data-testid="github-push-modal"
+              className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="px-6 pt-6 pb-5 text-white"
+                style={{ background: "linear-gradient(135deg,#059669 0%,#0d9488 100%)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                    <Upload size={20} />
+                  </div>
+                  <div>
+                    <p className="text-base font-black">Publicar en GitHub</p>
+                    <p className="text-xs text-white/70 mt-0.5">Dale un número o nombre a esta versión</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
+                    <Package size={12} /> Número o nombre de versión
+                    <span className="font-normal text-slate-400">(opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={ghPushVersion}
+                    onChange={(e) => setGhPushVersion(e.target.value)}
+                    placeholder="ej. 1.1, 2.0 o Navidad — vacío = automático"
+                    data-testid="github-push-version-input"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                  />
+                  <p className="text-[10px] text-slate-400">Se mostrará como <b className="text-slate-500">v{ghPushVersion.trim().replace(/^v/i, "") || "1.N"}</b> en la app. Si lo dejas vacío, se numera automáticamente.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
+                    <GitCommit size={12} /> Mensaje del cambio
+                  </label>
+                  <textarea
+                    value={ghPushCommitMsg}
+                    onChange={(e) => setGhPushCommitMsg(e.target.value)}
+                    rows={3}
+                    data-testid="github-push-message-input"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setGhPushModalOpen(false)}
+                    data-testid="github-push-cancel-btn"
+                    className="flex-1 py-3 rounded-2xl text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                    onClick={runPushToGithub}
+                    data-testid="github-push-confirm-btn"
+                    className="flex-[1.4] flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-black text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-lg transition-all"
+                  >
+                    <Upload size={15} /> Publicar
+                  </motion.button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
