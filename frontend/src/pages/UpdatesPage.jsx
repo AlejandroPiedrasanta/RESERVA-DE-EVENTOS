@@ -55,6 +55,7 @@ export default function UpdatesPage() {
   // History
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   // Online check
   const [checking, setChecking] = useState(false);
@@ -479,7 +480,7 @@ export default function UpdatesPage() {
           </div>
         ) : (
           <div className="divide-y divide-white/20">
-            {history.map((v, idx) => (
+            {(showAllHistory ? history : history.slice(0, 5)).map((v, idx) => (
               <motion.div key={v.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.04 }}
                 className="flex items-center gap-4 px-6 py-4 hover:bg-white/20 transition-colors"
                 data-testid={`update-row-${v.id}`}>
@@ -536,6 +537,20 @@ export default function UpdatesPage() {
                 </div>
               </motion.div>
             ))}
+          </div>
+        )}
+
+        {!loadingHistory && history.length > 5 && (
+          <div className="px-6 py-4 border-t border-white/30 flex justify-center">
+            <motion.button
+              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={() => setShowAllHistory(s => !s)}
+              data-testid="toggle-history-btn"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-all">
+              {showAllHistory
+                ? <>Ver menos <ArrowRight size={14} className="rotate-[-90deg]" /></>
+                : <>Ver todas ({history.length}) <ArrowRight size={14} className="rotate-90" /></>}
+            </motion.button>
           </div>
         )}
       </motion.div>
