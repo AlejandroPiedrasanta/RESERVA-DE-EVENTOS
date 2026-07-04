@@ -218,31 +218,13 @@ export default function AppearancePage() {
   return (
     <div className={`px-6 py-8 ${PANEL_SIZES[panelSize]} mx-auto transition-all duration-300`}>
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-              {es ? "Apariencia" : "Appearance"}
-            </h1>
-            <p className="text-sm text-slate-500 font-medium mt-1.5">
-              {es ? "50+ opciones para personalizar cada detalle visual" : "50+ options to customize every visual detail"}
-            </p>
-          </div>
-          {/* Panel size control */}
-          <div className="flex items-center gap-2 bg-white/50 border border-white/70 rounded-2xl p-1 shadow-sm shrink-0">
-            <span className="text-[9px] font-black text-slate-400 px-2 uppercase tracking-widest">{es ? "Tamaño" : "Size"}</span>
-            {[
-              { id: "small",  label: es ? "Pequeño" : "Small",  icon: "▪" },
-              { id: "medium", label: es ? "Medio" : "Medium",   icon: "▫" },
-              { id: "full",   label: es ? "Completo" : "Full",  icon: "□" },
-            ].map(s => (
-              <motion.button key={s.id} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                data-testid={`panel-size-${s.id}`}
-                onClick={() => setPanelSize(s.id)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${panelSize === s.id ? "btn-primary text-white shadow-sm" : "text-slate-500 hover:bg-white/70"}`}>
-                <span className="text-[10px]">{s.icon}</span> {s.label}
-              </motion.button>
-            ))}
-          </div>
+        <div>
+          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+            {es ? "Apariencia" : "Appearance"}
+          </h1>
+          <p className="text-sm text-slate-500 font-medium mt-1.5">
+            {es ? "50+ opciones para personalizar cada detalle visual" : "50+ options to customize every visual detail"}
+          </p>
         </div>
       </motion.div>
 

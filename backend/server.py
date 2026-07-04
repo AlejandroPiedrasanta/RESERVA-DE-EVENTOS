@@ -2273,19 +2273,24 @@ async def get_latest_update():
 
 
 # Caché en memoria del historial de tags de GitHub (evita llamadas lentas repetidas)
-_gh_history_cache = {"data": None, "ts": 0.0}
+_gh_history_cache = {"data": None, "ts": 0.0, "loading": False}
 _GH_HISTORY_TTL = 300  # segundos (5 min)
+
+
+def _gh_cache_is_fresh() -> bool:
+    import time as _time
+    return _gh_history_cache["data"] is not None and (_time.time() - _gh_history_cache["ts"]) < _GH_HISTORY_TTL
 
 
 async def _fetch_github_tag_records(owner: str, repo: str, token: str) -> list:
     """Trae los tags de GitHub + fecha/nota de cada commit EN PARALELO.
-    Cacheado 5 min para que el historial cargue al instante en visitas repetidas."""
+    Cacheado 5 min. Se ejecuta en segundo plano para que el historial sea inmediato."""
     import time as _time
     import urllib.request, json as _json
 
-    now = _time.time()
-    if _gh_history_cache["data"] is not None and (now - _gh_history_cache["ts"]) < _GH_HISTORY_TTL:
+    if _gh_cache_is_fresh():
         return _gh_history_cache["data"]
+    _gh_history_cache["loading"] = True
 
     headers = {"User-Agent": "cinema-productions", "Accept": "application/vnd.github+json"}
     if token:
@@ -2302,6 +2307,7 @@ async def _fetch_github_tag_records(owner: str, repo: str, token: str) -> list:
         )
     except Exception as e:
         logger.warning(f"No se pudo leer tags de GitHub: {e}")
+        _gh_history_cache["loading"] = False
         return _gh_history_cache["data"] or []
 
     tags_data = tags_data[:20]  # límite razonable para mantenerlo rápido
@@ -2334,10 +2340,13 @@ async def _fetch_github_tag_records(owner: str, repo: str, token: str) -> list:
             "branch": "main",
         }
 
-    gh_records = list(await asyncio.gather(*[_one(t) for t in tags_data]))
-    _gh_history_cache["data"] = gh_records
-    _gh_history_cache["ts"] = now
-    return gh_records
+    try:
+        gh_records = list(await asyncio.gather(*[_one(t) for t in tags_data]))
+        _gh_history_cache["data"] = gh_records
+        _gh_history_cache["ts"] = _time.time()
+        return gh_records
+    finally:
+        _gh_history_cache["loading"] = False
 
 
 @api_router.get("/updates/history")
@@ -2370,13 +2379,17 @@ async def get_update_history():
     owner, repo = _parse_github_url(repo_url)
     if owner and repo:
         seen_versions = {r["version"] for r in records}
-        try:
-            gh_records = await _fetch_github_tag_records(owner, repo, token)
-            for gr in gh_records:
-                if gr["version"] not in seen_versions:
-                    records.append(gr)
-        except Exception as e:
-            logger.warning(f"No se pudo combinar tags de GitHub: {e}")
+        # Nunca bloquear: si la caché está fresca la usamos; si no, refrescamos en
+        # segundo plano y devolvemos ya los registros locales (respuesta inmediata).
+        if _gh_cache_is_fresh():
+            gh_records = _gh_history_cache["data"] or []
+        else:
+            if not _gh_history_cache["loading"]:
+                asyncio.create_task(_fetch_github_tag_records(owner, repo, token))
+            gh_records = _gh_history_cache["data"] or []
+        for gr in gh_records:
+            if gr["version"] not in seen_versions:
+                records.append(gr)
 
     # Ordenar y marcar latest
     records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
