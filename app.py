@@ -2571,6 +2571,16 @@ async def check_github_updates():
                       "github_config.last_remote_sha": remote_sha}}, upsert=True)
     if _using_embedded:
         asyncio.create_task(_save_embedded_data())
+
+    # ── Número de versión (version.txt) para que la app de escritorio muestre
+    #    "v2.0" en vez del hash del commit. Lee version.txt del repo GitHub. ──
+    remote_version = ""
+    try:
+        gh = await _fetch_github_version()
+        remote_version = gh.get("version", "") or ""
+    except Exception as e:
+        logger.warning(f"No se pudo leer remote_version en check-updates: {e}")
+
     return {
         "has_updates": has_updates,
         "is_desktop": True,
@@ -2578,6 +2588,8 @@ async def check_github_updates():
         "remote_sha_short": remote_sha[:7],
         "local_sha": last_seen,
         "local_sha_short": last_seen[:7] if last_seen else "",
+        "local_version": _local_version,
+        "remote_version": remote_version,
         "branch": branch,
         "commits_ahead": len(new_commits) if has_updates else 0,
         "commits": new_commits,
@@ -3170,6 +3182,7 @@ async def diagnostic_fix(payload: dict = Body(...)):
             detail = "Modo embedded — no requiere reconexión"
         else:
             try:
+                from motor.motor_asyncio import AsyncIOMotorClient
                 new_client = AsyncIOMotorClient(_effective_mongo_url)
                 await new_client[DB_NAME].command("ping")
                 client = new_client

@@ -89,7 +89,9 @@ THEMES_JSON_PATH = THEMES_DIR / "saved_themes.json"
 def _ensure_desktop_wheels():
     """Descarga (cacheado por hash de requirements) wheels win_amd64 para instalacion offline del escritorio."""
     import sys as _sys, subprocess as _sp, hashlib as _hl
-    req_hash = _hl.md5(_REQUIREMENTS.encode("utf-8")).hexdigest()
+    # Hash no criptográfico: solo se usa como clave de caché para invalidar wheels
+    # cuando cambia requirements.txt (no es un uso de seguridad).
+    req_hash = _hl.md5(_REQUIREMENTS.encode("utf-8"), usedforsecurity=False).hexdigest()
     marker = DESKTOP_WHEELS_DIR / ".ok"
     if marker.exists() and marker.read_text().strip() == req_hash and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
         return DESKTOP_WHEELS_DIR
@@ -3210,7 +3212,9 @@ async def set_advanced_security_config(payload: dict = Body(...)):
 
 
 # ── ZIP password (para la app compilada) ─────────────────────────────
-DEFAULT_ZIP_PASSWORD = "2868"
+# Valor por defecto configurable vía variable de entorno; el dueño de la app
+# puede sobreescribirlo en runtime desde security_config.zip_password.
+DEFAULT_ZIP_PASSWORD = os.environ.get("ZIP_DEFAULT_PASSWORD", "2868")
 
 async def _get_zip_password() -> str:
     doc = await db.app_settings.find_one({}, {"security_config": 1}) or {}
@@ -4016,7 +4020,7 @@ async def run_diagnostic():
     add("zip_password",
         "Contraseña ZIP configurada",
         len(zip_pwd) >= 3,
-        f"Longitud: {len(zip_pwd)} chars ({'DEFAULT (2868)' if zip_pwd == DEFAULT_ZIP_PASSWORD else 'personalizada'})",
+        f"Longitud: {len(zip_pwd)} chars ({'DEFAULT' if zip_pwd == DEFAULT_ZIP_PASSWORD else 'personalizada'})",
         severity="warning",
         fixable=True,
     )
