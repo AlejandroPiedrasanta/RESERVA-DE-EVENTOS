@@ -1,21 +1,9 @@
 {
   "app": "Cinema Productions — Reserva de Eventos",
   "kind": "saved_themes_backup",
-  "generated_at": "2026-07-04T04:24:10.650927+00:00",
-  "count": 2,
+  "generated_at": "2026-07-04T04:24:12.718013+00:00",
+  "count": 1,
   "themes": [
-    {
-      "id": "6a488ae4c87404407a97104a",
-      "name": "Test Sync",
-      "snapshot": {
-        "sidebar_style": "island",
-        "custom_accent": "#00aa88",
-        "note": "reguardado"
-      },
-      "created_at": "2026-07-04T04:24:04.534370+00:00",
-      "updated_at": "2026-07-04T04:24:07.610009+00:00",
-      "is_default": true
-    },
     {
       "id": "6a488789fbfc2e23b111f27d",
       "name": "Minimalista",
