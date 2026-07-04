@@ -2621,22 +2621,141 @@ async def delete_update(update_id: str):
     return {"message": "Actualización eliminada"}
 
 
+async def _read_local_version() -> str:
+    try:
+        for candidate in (ROOT_DIR / "version.txt", ROOT_DIR.parent / "version.txt"):
+            if candidate.exists():
+                return candidate.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _version_tuple(v: str):
+    v = (v or "").strip().lstrip("v")
+    parts = []
+    for p in v.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            parts.append(-1)
+    return tuple(parts) if parts else (0,)
+
+
+def _is_newer_version(remote: str, local: str) -> bool:
+    if not remote or remote == local:
+        return False
+    try:
+        return _version_tuple(remote) > _version_tuple(local)
+    except Exception:
+        return remote != local
+
+
+_gh_version_cache_srv: dict = {"ts": 0.0, "version": "", "source_url": ""}
+
+
+async def _fetch_github_version_txt() -> dict:
+    """Lee version.txt del repo GitHub configurado. Cachea 60s.
+    Devuelve {version, source_url}. Si falla, version == ''."""
+    import time as _t
+    if _t.time() - _gh_version_cache_srv["ts"] < 60 and _gh_version_cache_srv["version"]:
+        return {
+            "version": _gh_version_cache_srv["version"],
+            "source_url": _gh_version_cache_srv["source_url"],
+        }
+
+    result = {"version": "", "source_url": ""}
+    try:
+        cfg = await _get_github_config()
+        repo_url = cfg.get("repo_url", "")
+        owner, repo = _parse_github_url(repo_url)
+        if not owner or not repo:
+            return result
+        branch = cfg.get("branch") or "main"
+        token = cfg.get("token", "")
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        candidate_branches = []
+        for b in (branch, "main", "master"):
+            if b and b not in candidate_branches:
+                candidate_branches.append(b)
+
+        async with httpx.AsyncClient(timeout=8) as http:
+            for b in candidate_branches:
+                raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{b}/version.txt"
+                try:
+                    rv = await http.get(raw_url, headers=headers)
+                    if rv.status_code == 200:
+                        v = (rv.text or "").strip().splitlines()[0].strip().lstrip("v")
+                        if v:
+                            result["version"] = v
+                            result["source_url"] = raw_url
+                            break
+                except Exception:
+                    continue
+
+        _gh_version_cache_srv["ts"] = _t.time()
+        _gh_version_cache_srv["version"] = result["version"]
+        _gh_version_cache_srv["source_url"] = result["source_url"]
+    except Exception as e:
+        logger.warning(f"GitHub version fetch failed: {e}")
+    return result
+
+
 @api_router.get("/updates/check")
-async def check_updates_cloud():
-    """Cloud version is always the source of truth → always up to date."""
+async def check_updates_cloud(refresh: bool = False):
+    """Combina versión GitHub (version.txt del repo) + paquete MongoDB.
+    La app de escritorio compara su version.txt local con la versión de GitHub."""
+    if refresh:
+        _gh_version_cache_srv["ts"] = 0.0
+
+    local_version = await _read_local_version()
+    gh = await _fetch_github_version_txt()
+    github_version = gh.get("version", "")
+
     doc = await db.app_updates.find_one({"is_latest": True}, sort=[("created_at", -1)])
-    if not doc:
-        return {"checked": True, "has_update": False, "is_cloud": True, "remote_version": None}
-    return {
+    mongo_version = doc.get("version", "") if doc else ""
+
+    # Elegir la más reciente entre GitHub y Mongo como remote_version
+    candidates = [v for v in (github_version, mongo_version) if v]
+    remote_version = max(candidates, key=_version_tuple) if candidates else ""
+    has_update = _is_newer_version(remote_version, local_version) if local_version else False
+
+    payload = {
         "checked": True,
-        "has_update": False,
+        "has_update": has_update,
         "is_cloud": True,
-        "id": str(doc["_id"]),
-        "remote_version": doc.get("version", ""),
-        "local_version": doc.get("version", ""),
-        "filename": doc.get("filename", ""),
-        "notes": doc.get("notes", ""),
-        "created_at": doc.get("created_at", ""),
+        "local_version": local_version,
+        "github_version": github_version,
+        "github_source_url": gh.get("source_url", ""),
+        "remote_version": remote_version or None,
+    }
+    if doc:
+        payload.update({
+            "id": str(doc["_id"]),
+            "filename": doc.get("filename", ""),
+            "notes": doc.get("notes", ""),
+            "created_at": doc.get("created_at", ""),
+            "mongo_version": mongo_version,
+        })
+    return payload
+
+
+@api_router.get("/updates/github-version")
+async def get_github_version(refresh: bool = False):
+    """Devuelve la versión leída directamente desde version.txt del repositorio
+    GitHub configurado. Usado por la app de escritorio para saber qué versión
+    subiste al repo."""
+    if refresh:
+        _gh_version_cache_srv["ts"] = 0.0
+    local_version = await _read_local_version()
+    gh = await _fetch_github_version_txt()
+    github_version = gh.get("version", "")
+    return {
+        "local_version": local_version,
+        "github_version": github_version,
+        "has_update": _is_newer_version(github_version, local_version) if local_version else False,
+        "source_url": gh.get("source_url", ""),
     }
 
 

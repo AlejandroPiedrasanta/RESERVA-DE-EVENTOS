@@ -10,7 +10,15 @@ import {
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
+  Lock, LifeBuoy,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+const SOPORTE_FACTORY_PASSWORD = "286811";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -145,6 +153,38 @@ export default function DatabasePage() {
   const [openBlocks, setOpenBlocks] = useState({ backup: false, conn: false, github: false, diagnostic: false, cleanup: false, updates: false, options: false, danger: false });
   const toggleBlock = (k) => setOpenBlocks(p => ({ ...p, [k]: !p[k] }));
   const [clearLoading, setClearLoading] = useState(false);
+
+  // ── Soporte avanzado (antes GitHub) — bloqueado por contraseña de fábrica ──
+  const [soporteUnlocked, setSoporteUnlocked] = useState(false);
+  const [pwdModalOpen, setPwdModalOpen] = useState(false);
+  const [pwdInput, setPwdInput] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  const [pwdShow, setPwdShow] = useState(false);
+
+  const handleSoporteHeaderClick = () => {
+    if (soporteUnlocked) {
+      toggleBlock("github");
+      return;
+    }
+    setPwdInput("");
+    setPwdError("");
+    setPwdShow(false);
+    setPwdModalOpen(true);
+  };
+
+  const handlePwdSubmit = (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    if (pwdInput === SOPORTE_FACTORY_PASSWORD) {
+      setSoporteUnlocked(true);
+      setPwdModalOpen(false);
+      setPwdInput("");
+      setPwdError("");
+      setOpenBlocks((p) => ({ ...p, github: true }));
+      toast({ title: "Acceso concedido", description: "Soporte avanzado desbloqueado" });
+    } else {
+      setPwdError("Contraseña incorrecta");
+    }
+  };
 
   // ── GitHub Integration & AI Context ────────────────────────────────
   const [ghConfig, setGhConfig] = useState({ repo_url: "", branch: "main", has_token: false, last_commit_sha: "", last_check_at: "" });
@@ -1562,32 +1602,44 @@ export default function DatabasePage() {
           <div className={`glass rounded-3xl overflow-hidden transition-all duration-300 ${ghConfig.repo_url ? "ring-2 ring-slate-800/30" : ""}`}
             style={{ background: ghConfig.repo_url ? "linear-gradient(135deg,rgba(30,41,59,0.05),rgba(15,23,42,0.03))" : undefined }}>
 
-            <div onClick={() => toggleBlock("github")} data-testid="db-block-toggle-github"
+            <div onClick={handleSoporteHeaderClick} data-testid="db-block-toggle-github"
               className="flex items-center justify-between px-5 py-4 border-b border-white/40 cursor-pointer select-none">
               <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${ghConfig.repo_url ? "bg-slate-900" : "bg-slate-100"}`}>
-                  <Github size={16} className={ghConfig.repo_url ? "text-white" : "text-slate-400"} />
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${ghConfig.repo_url && soporteUnlocked ? "bg-slate-900" : "bg-slate-100"}`}>
+                  {soporteUnlocked ? (
+                    <LifeBuoy size={16} className={ghConfig.repo_url ? "text-white" : "text-slate-500"} />
+                  ) : (
+                    <Lock size={16} className="text-slate-500" />
+                  )}
                 </div>
                 <div>
                   <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                    Base de datos GitHub actualizaciones
+                    Soporte avanzado
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    {ghConfig.repo_url ? "Repositorio conectado ✓" : "Conecta tu repositorio para sincronizar"}
+                    {!soporteUnlocked
+                      ? "Sección protegida — requiere contraseña"
+                      : ghConfig.repo_url
+                        ? "Repositorio conectado ✓"
+                        : "Conecta tu repositorio para sincronizar"}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {ghConfig.repo_url && (
+                {!soporteUnlocked ? (
+                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 flex items-center gap-1">
+                    <Lock size={10} /> Bloqueado
+                  </span>
+                ) : ghConfig.repo_url && (
                   <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
                     Activo
                   </span>
                 )}
-                <BlockChevron open={openBlocks.github} />
+                <BlockChevron open={openBlocks.github && soporteUnlocked} />
               </div>
             </div>
 
-            <CollapseBody open={openBlocks.github}>
+            <CollapseBody open={openBlocks.github && soporteUnlocked}>
               <div className="p-4 space-y-3">
 
                 {/* ── Conectar con GitHub (1 clic) ── */}
@@ -2104,6 +2156,83 @@ export default function DatabasePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Modal de contraseña — Soporte avanzado ── */}
+      <Dialog open={pwdModalOpen} onOpenChange={(o) => {
+        setPwdModalOpen(o);
+        if (!o) { setPwdInput(""); setPwdError(""); setPwdShow(false); }
+      }}>
+        <DialogContent className="sm:max-w-md" data-testid="soporte-pwd-modal">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-1">
+              <div className="w-11 h-11 rounded-2xl bg-slate-900 flex items-center justify-center">
+                <Lock size={20} className="text-white" />
+              </div>
+              <div>
+                <DialogTitle style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                  Soporte avanzado
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Sección protegida. Introduce la contraseña para continuar.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <form onSubmit={handlePwdSubmit} className="space-y-3 pt-2">
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1 mb-1">
+                <Key size={11} /> Contraseña de soporte
+              </label>
+              <div className="relative">
+                <Input
+                  type={pwdShow ? "text" : "password"}
+                  value={pwdInput}
+                  onChange={(e) => { setPwdInput(e.target.value); if (pwdError) setPwdError(""); }}
+                  placeholder="••••••"
+                  autoFocus
+                  data-testid="soporte-pwd-input"
+                  className={`pr-10 ${pwdError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPwdShow((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  tabIndex={-1}
+                >
+                  {pwdShow ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+              {pwdError && (
+                <p className="text-[11px] text-red-600 font-semibold mt-1 flex items-center gap-1">
+                  <AlertCircle size={11} /> {pwdError}
+                </p>
+              )}
+              <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1">
+                <ShieldCheck size={10} /> Contraseña de fábrica — no se puede cambiar.
+              </p>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPwdModalOpen(false)}
+                data-testid="soporte-pwd-cancel"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                className="bg-slate-900 hover:bg-slate-800 text-white"
+                data-testid="soporte-pwd-submit"
+              >
+                Desbloquear
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
