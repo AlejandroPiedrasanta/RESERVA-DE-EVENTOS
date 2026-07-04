@@ -4177,12 +4177,34 @@ async def check_github_updates():
         upsert=True
     )
 
+    # Leer versión local (archivo version.txt) y versión remota (via GitHub raw)
+    local_version = ""
+    try:
+        for candidate in (ROOT_DIR / "version.txt", ROOT_DIR.parent / "version.txt"):
+            if candidate.exists():
+                local_version = candidate.read_text(encoding="utf-8").strip()
+                break
+    except Exception:
+        local_version = ""
+
+    remote_version = ""
+    try:
+        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/version.txt"
+        async with httpx.AsyncClient(timeout=8) as http:
+            rv = await http.get(raw_url, headers={"Authorization": f"Bearer {token}"} if token else {})
+            if rv.status_code == 200:
+                remote_version = (rv.text or "").strip()
+    except Exception:
+        remote_version = ""
+
     return {
         "has_updates": has_updates,
         "local_sha": local_sha,
         "local_sha_short": local_sha[:7] if local_sha else "",
         "remote_sha": remote_sha,
         "remote_sha_short": remote_sha[:7],
+        "local_version": local_version,
+        "remote_version": remote_version,
         "branch": branch,
         "commits_ahead": len(new_commits),
         "commits": new_commits,
