@@ -1751,33 +1751,6 @@ export default function DatabasePage() {
                   </div>
                 )}
 
-                {/* Separador */}
-                <div className="border-t border-slate-200/60 pt-4">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center shrink-0">
-                      <Brain size={16} className="text-indigo-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                        Contexto para la próxima IA
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Documento oculto con toda la lógica, arquitectura, endpoints e integraciones. Cuando otra IA se conecte al repositorio, leerá este contexto para entender todo sin errores.
-                      </p>
-                    </div>
-                  </div>
-
-                  <motion.button
-                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={handleOpenContext}
-                    data-testid="open-ai-context-btn"
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-indigo-700 bg-gradient-to-r from-purple-50 to-indigo-50 hover:from-purple-100 hover:to-indigo-100 border border-indigo-200 transition-all"
-                  >
-                    <BookOpen size={14} />
-                    Ver / Editar contexto IA
-                  </motion.button>
-                </div>
-
               </div>
             </CollapseBody>
           </div>
