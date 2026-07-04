@@ -30,7 +30,7 @@ export function Section({ icon: Icon, title, desc, children, badge, isNew, keywo
         onClick={() => setOpen(o => !o)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
         data-testid={`section-toggle-${slug}`}
-        className="w-full flex items-center justify-between p-7 cursor-pointer select-none hover:bg-white/20 transition-colors group"
+        className="w-full flex items-center justify-between px-5 py-4 cursor-pointer select-none hover:bg-white/20 transition-colors group"
       >
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 rounded-2xl btn-primary flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6">
@@ -61,7 +61,7 @@ export function Section({ icon: Icon, title, desc, children, badge, isNew, keywo
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <div className="px-7 pb-7">{children}</div>
+            <div className="px-5 pb-5">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>

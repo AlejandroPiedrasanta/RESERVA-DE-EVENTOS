@@ -254,7 +254,7 @@ export default function AppearancePage() {
       />
 
       <SectionSearchContext.Provider value={searchQuery}>
-      <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-5">
+      <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-3">
 
         {/* ═══════════════════════════════════════════════════════════════
             NUEVAS SECCIONES: TEMAS · MENÚ · TUTORIAL
