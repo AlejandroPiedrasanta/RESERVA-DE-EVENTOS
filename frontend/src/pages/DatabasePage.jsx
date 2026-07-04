@@ -1553,7 +1553,7 @@ export default function DatabasePage() {
                 </div>
                 <div>
                   <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                    GitHub & Contexto IA
+                    Base de datos GitHub actualizaciones
                   </p>
                   <p className="text-[11px] text-slate-400">
                     {ghConfig.repo_url ? "Repositorio conectado ✓" : "Conecta tu repositorio para sincronizar"}
@@ -1571,10 +1571,10 @@ export default function DatabasePage() {
             </div>
 
             <CollapseBody open={openBlocks.github}>
-              <div className="p-5 space-y-5">
+              <div className="p-4 space-y-3">
 
                 {/* ── Conectar con GitHub (1 clic) ── */}
-                <div className={`rounded-2xl border p-4 ${ghConfig.username ? "bg-emerald-50/70 border-emerald-200" : "bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 text-white"}`}>
+                <div className={`rounded-2xl border p-3 ${ghConfig.username ? "bg-emerald-50/70 border-emerald-200" : "bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 text-white"}`}>
                   {ghConfig.username ? (
                     <div className="flex items-center gap-3">
                       {ghConfig.avatar_url ? (
@@ -1624,7 +1624,7 @@ export default function DatabasePage() {
                 </div>
 
                 {/* URL del repositorio */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
                     <Link2 size={12} /> URL del repositorio GitHub
                   </label>
@@ -1636,46 +1636,6 @@ export default function DatabasePage() {
                     data-testid="github-repo-url-input"
                     className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition-all"
                   />
-                </div>
-
-                {/* Branch */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
-                    <Network size={12} /> Rama
-                  </label>
-                  <input
-                    type="text"
-                    value={ghBranchInput}
-                    onChange={(e) => setGhBranchInput(e.target.value)}
-                    placeholder="main"
-                    data-testid="github-branch-input"
-                    className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition-all"
-                  />
-                </div>
-
-                {/* Token opcional */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
-                    <Key size={12} /> Token de acceso (opcional, para repos privados)
-                    {ghConfig.has_token && <span className="ml-1 text-emerald-600">● Token guardado</span>}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={ghShowToken ? "text" : "password"}
-                      value={ghTokenInput}
-                      onChange={(e) => setGhTokenInput(e.target.value)}
-                      placeholder={ghConfig.has_token ? "•••••••••••••• (deja vacío para conservar)" : "ghp_xxxxxxxxxxxxxxxxxxxx"}
-                      data-testid="github-token-input"
-                      className="w-full pr-10 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setGhShowToken(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                    >
-                      {ghShowToken ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
                 </div>
 
                 {/* Estado */}
