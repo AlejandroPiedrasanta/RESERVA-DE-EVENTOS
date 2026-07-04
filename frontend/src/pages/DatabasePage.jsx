@@ -385,8 +385,13 @@ export default function DatabasePage() {
     setGhPushMsg("Iniciando…");
     if (ghPushPollRef.current) clearInterval(ghPushPollRef.current);
 
+    // Guard: garantiza que el cierre (y el confeti) se ejecute UNA sola vez.
+    let finished = false;
+
     // Función que finaliza el flujo cuando el polling detecta done/error
     const finish = (kind, payload) => {
+      if (finished) return;
+      finished = true;
       if (ghPushPollRef.current) {
         clearInterval(ghPushPollRef.current);
         ghPushPollRef.current = null;
@@ -422,8 +427,10 @@ export default function DatabasePage() {
 
     // Polling del progreso + detección de fin
     ghPushPollRef.current = setInterval(async () => {
+      if (finished) return;
       try {
         const st = await getGithubPushStatus();
+        if (finished) return;
         if (typeof st.progress === "number") setGhPushProgress(st.progress);
         if (st.message) setGhPushMsg(st.message);
         if (st.status === "done") finish("done", st.result || {});
