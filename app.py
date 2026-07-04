@@ -1330,6 +1330,88 @@ async def delete_saved_theme(theme_id: str):
     return {"message": "Tema eliminado"}
 
 
+@api_router.put("/themes/{theme_id}")
+async def update_saved_theme(theme_id: str, payload: dict = Body(...)):
+    try:
+        oid = ObjectId(theme_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    update = {}
+    if "snapshot" in payload:
+        update["snapshot"] = payload.get("snapshot") or {}
+    if payload.get("name"):
+        update["name"] = str(payload["name"]).strip()
+    if not update:
+        raise HTTPException(status_code=400, detail="Sin cambios")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.saved_themes.update_one({"_id": oid}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Tema no encontrado")
+    doc = await db.saved_themes.find_one({"_id": oid})
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name", ""),
+        "snapshot": doc.get("snapshot", {}),
+        "updated_at": doc.get("updated_at", ""),
+    }
+
+
+@api_router.post("/themes/{theme_id}/set-default")
+async def set_default_theme(theme_id: str):
+    try:
+        oid = ObjectId(theme_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    doc = await db.saved_themes.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Tema no encontrado")
+    await db.app_settings.update_one(
+        {},
+        {"$set": {
+            "default_theme_id": str(oid),
+            "default_theme_name": doc.get("name", ""),
+            "appearance_snapshot": doc.get("snapshot", {}),
+            "appearance_updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "default_theme_id": str(oid), "name": doc.get("name", "")}
+
+
+@api_router.post("/themes/sync")
+async def themes_sync_now():
+    """Desktop: sync is local-only (no GitHub). Persist embedded data if applicable."""
+    if _using_embedded:
+        await _save_embedded_data()
+    return {
+        "success": True,
+        "local": {"ok": True},
+        "github": {"ok": False, "reason": "desktop_no_github"},
+    }
+
+
+@api_router.get("/themes/sync/status")
+async def themes_sync_status():
+    doc = await db.app_settings.find_one({}, {"default_theme_id": 1, "default_theme_name": 1}) or {}
+    return {
+        "local_path": "",
+        "local_exists": True,
+        "local_mtime": datetime.now(timezone.utc).isoformat(),
+        "last_github_at": None,
+        "last_github_sha": None,
+        "last_github_commit": None,
+        "last_status": "local_only",
+        "last_error": None,
+        "github_configured": False,
+        "default_theme_id": str(doc.get("default_theme_id") or ""),
+        "default_theme_name": doc.get("default_theme_name", ""),
+    }
+
+
 # ── APP SECURITY (password lock + page protection) ──────────────────────────
 
 PBKDF2_ITERATIONS = 260000
