@@ -2530,12 +2530,31 @@ async def get_update_history():
             if gr["version"] not in seen_versions:
                 records.append(gr)
 
-    # Ordenar y marcar latest
-    records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    # Ordenar y marcar latest (defensivo ante created_at None/datetime/str mezclados)
+    def _sort_key(r):
+        v = r.get("created_at", "")
+        if v is None:
+            return ""
+        if hasattr(v, "isoformat"):
+            try:
+                return v.isoformat()
+            except Exception:
+                return ""
+        return str(v)
+    records.sort(key=_sort_key, reverse=True)
     if records:
         for r in records:
             r["is_latest"] = False
         records[0]["is_latest"] = True
+
+    # Serializar cualquier datetime restante a ISO string
+    for r in records:
+        v = r.get("created_at")
+        if hasattr(v, "isoformat"):
+            try:
+                r["created_at"] = v.isoformat()
+            except Exception:
+                r["created_at"] = str(v)
 
     return records
 
