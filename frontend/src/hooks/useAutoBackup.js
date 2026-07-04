@@ -69,7 +69,7 @@ function buildFilename() {
 const DEFAULT_CONFIG = {
   enabled:         false,
   intervalMinutes: 60,   // 30 | 60 | 120 | 360 | 720 | 1440
-  mode:            "downloads", // "downloads" | "folder"
+  mode:            "app_folder", // "app_folder" (server ./backups) | "folder" (user pick) | "downloads" (browser)
   folderName:      null,
 };
 
@@ -78,7 +78,10 @@ export function useAutoBackup(backupApiUrl) {
   const [config, setConfig] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      return { ...DEFAULT_CONFIG, ...(stored || {}) };
+      const merged = { ...DEFAULT_CONFIG, ...(stored || {}) };
+      // Migrate legacy "downloads" mode to new "app_folder" default
+      if (merged.mode === "downloads") merged.mode = "app_folder";
+      return merged;
     } catch { return DEFAULT_CONFIG; }
   });
 
@@ -116,6 +119,21 @@ export function useAutoBackup(backupApiUrl) {
     setIsBacking(true);
     setLastError(null);
     try {
+      // ── Modo "app_folder" (default): guarda en el servidor / ruta de la app ──
+      // Usa el endpoint POST /api/backup/create que graba en {ruta_de_la_app}/backups/
+      // Funciona igual en la app de escritorio (guarda al disco del usuario) y en la web.
+      if (config.mode === "app_folder") {
+        const apiBase = backupApiUrl.replace(/\/backup\/download\/?$/, "");
+        const createUrl = `${apiBase}/backup/create`;
+        const r = await fetch(createUrl, { method: "POST" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const now = new Date();
+        setLastBackup(now);
+        setNextBackup(new Date(now.getTime() + config.intervalMinutes * 60_000));
+        setBackupCount((c) => c + 1);
+        return;
+      }
+
       const res = await fetch(backupApiUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
@@ -189,7 +207,7 @@ export function useAutoBackup(backupApiUrl) {
     setDirHandle(null);
     setFolderPerm("unknown");
     await deleteDirHandle();
-    setConfig((prev) => ({ ...prev, folderName: null, mode: "downloads" }));
+    setConfig((prev) => ({ ...prev, folderName: null, mode: "app_folder" }));
   }, []);
 
   const updateConfig = useCallback((updates) => {

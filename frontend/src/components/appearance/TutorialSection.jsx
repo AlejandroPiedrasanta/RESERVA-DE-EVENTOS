@@ -17,7 +17,7 @@ export function TutorialSection() {
       isNew
       id="tutorial-section"
       title={es ? "Tutorial de Bienvenida" : "Welcome Tutorial"}
-      desc={es ? "Guía interactiva de 18 pasos por todas las páginas" : "18-step interactive guide across all pages"}
+      desc={es ? "Guía interactiva de 7 pasos por lo esencial" : "7-step interactive guide covering the essentials"}
       keywords="tutorial bienvenida guia pasos ayuda onboarding aprender desactivar tour"
     >
       <div className="space-y-4">

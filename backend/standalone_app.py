@@ -41,8 +41,11 @@ DB_NAME = os.environ.get('DB_NAME', 'cinema_productions')
 MONGO_URL = os.environ.get('MONGO_URL', 'embedded')
 DATA_FILE = ROOT_DIR / 'cinema_data.json'
 CUSTOM_DB_FILE = ROOT_DIR / '.db_override'
-BACKUP_DIR = ROOT_DIR / 'backups'
-BACKUP_DIR.mkdir(exist_ok=True)
+# Cuando app.py está dentro de "_sistema (NO TOCAR)/", los backups deben quedar
+# VISIBLES en el directorio superior (la carpeta raíz de la app de escritorio).
+_VISIBLE_ROOT = ROOT_DIR.parent if ROOT_DIR.name.startswith('_sistema') else ROOT_DIR
+BACKUP_DIR = _VISIBLE_ROOT / 'backups'
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 UPDATES_DIR = ROOT_DIR / 'uploads' / 'updates'
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 BACKUP_COLLECTIONS = ['reservations', 'socios', 'app_settings']

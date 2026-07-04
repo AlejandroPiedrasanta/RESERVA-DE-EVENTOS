@@ -981,19 +981,19 @@ export default function DatabasePage() {
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Destino del respaldo</p>
                 <div className="grid grid-cols-2 gap-2.5">
 
-                  {/* Downloads folder */}
+                  {/* App folder (default) — saves to {ruta de la app}/backups/ */}
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                     data-testid="mode-downloads"
-                    onClick={() => autoBackup.updateConfig({ mode: "downloads" })}
-                    className={`flex flex-col items-start gap-2 p-4 rounded-2xl border-2 transition-all text-left ${autoBackup.config.mode === "downloads" ? "border-emerald-400 bg-emerald-50/60" : "border-slate-200/70 bg-white/50 hover:border-slate-300"}`}>
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${autoBackup.config.mode === "downloads" ? "bg-emerald-200" : "bg-slate-100"}`}>
-                      <Download size={14} className={autoBackup.config.mode === "downloads" ? "text-emerald-700" : "text-slate-400"} />
+                    onClick={() => autoBackup.updateConfig({ mode: "app_folder" })}
+                    className={`flex flex-col items-start gap-2 p-4 rounded-2xl border-2 transition-all text-left ${autoBackup.config.mode === "app_folder" ? "border-emerald-400 bg-emerald-50/60" : "border-slate-200/70 bg-white/50 hover:border-slate-300"}`}>
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${autoBackup.config.mode === "app_folder" ? "bg-emerald-200" : "bg-slate-100"}`}>
+                      <Download size={14} className={autoBackup.config.mode === "app_folder" ? "text-emerald-700" : "text-slate-400"} />
                     </div>
                     <div>
-                      <p className={`text-xs font-black ${autoBackup.config.mode === "downloads" ? "text-emerald-800" : "text-slate-700"}`}>Carpeta Descargas</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Descarga automática a tu carpeta Descargas del sistema</p>
+                      <p className={`text-xs font-black ${autoBackup.config.mode === "app_folder" ? "text-emerald-800" : "text-slate-700"}`}>Carpeta de la app</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Se guarda en <code>backups/</code> junto a la app de escritorio</p>
                     </div>
-                    {autoBackup.config.mode === "downloads" && (
+                    {autoBackup.config.mode === "app_folder" && (
                       <span className="text-[10px] font-black text-emerald-600 flex items-center gap-1">
                         <CheckCircle size={10} /> Seleccionado
                       </span>

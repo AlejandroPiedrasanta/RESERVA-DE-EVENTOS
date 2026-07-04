@@ -410,12 +410,14 @@ if __name__ == "__main__":
 
 
 _INICIAR_VBS = r"""' Cinema Productions - Iniciar SIN ventana de consola (recomendado)
+' Este archivo vive en la raiz del paquete; el motor real esta en "_sistema (NO TOCAR)".
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
-d = fso.GetParentFolderName(WScript.ScriptFullName)
-sh.CurrentDirectory = d
+root = fso.GetParentFolderName(WScript.ScriptFullName)
+sysdir = root & "\_sistema (NO TOCAR)"
+sh.CurrentDirectory = sysdir
 q = Chr(34)
-target = q & d & "\launcher.pyw" & q
+target = q & sysdir & "\launcher.pyw" & q
 On Error Resume Next
 sh.Run "pythonw " & target, 0, False
 If Err.Number <> 0 Then
@@ -426,6 +428,76 @@ If Err.Number <> 0 Then
   Err.Clear
   sh.Run "python " & target, 0, False
 End If
+"""
+
+
+# ── VBS que crea un acceso directo (.lnk) en el Escritorio con el icono de la app ──
+_CREATE_SHORTCUT_VBS = r"""' Cinema Productions - Crear acceso directo con icono en el Escritorio
+Set sh  = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+root    = fso.GetParentFolderName(WScript.ScriptFullName)
+target  = root & "\INICIAR APP.vbs"
+icon    = root & "\icono.ico"
+desktop = sh.SpecialFolders("Desktop")
+Set link = sh.CreateShortcut(desktop & "\Cinema Productions.lnk")
+link.TargetPath       = target
+link.WorkingDirectory = root
+link.IconLocation     = icon & ",0"
+link.Description      = "Cinema Productions - Gestor de Reservas"
+link.Save
+MsgBox "Acceso directo creado en el Escritorio.", 64, "Cinema Productions"
+"""
+
+
+# ── LEEME.txt simple para el usuario final ──
+_LEEME_TXT = """CINEMA PRODUCTIONS - Gestor de Reservas de Eventos
+====================================================
+
+COMO USAR (facil):
+
+  1) Doble clic en  ►  INICIAR APP.vbs
+     La app se abre sola en tu navegador (la primera vez tarda 1-3 min
+     instalando; despues arranca en segundos).
+
+  2) Para cerrarla: doble clic en  ■  DETENER APP.bat
+
+  3) (Opcional) Doble clic en  Crear acceso directo.vbs
+     Crea un icono en tu Escritorio para abrir la app con un clic.
+
+
+TUS DATOS
+---------
+  * Los respaldos automaticos se guardan en la carpeta  backups\\
+    (misma carpeta que este LEEME).
+  * Puedes copiar la carpeta  backups\\  a un USB o a la nube cuando quieras.
+
+
+NO TOCAR
+--------
+  La carpeta  "_sistema (NO TOCAR)"  contiene el motor de la app
+  (Python, dependencias, base de datos local, configuracion .env,
+  frontend compilado, etc). NO borres ni muevas archivos de ahi;
+  la app dejaria de funcionar.
+
+  Toda la configuracion se hace DENTRO de la app: abre la app y
+  ve a  Ajustes -> Base de Datos  para conectar tu MongoDB, o
+  a  Ajustes -> Apariencia  para personalizarla.
+
+
+REQUISITO
+---------
+  Necesitas Python 3.11, 3.12 o 3.13 instalado en el sistema.
+  Descargalo aqui:  https://www.python.org/downloads/
+  IMPORTANTE: marca la casilla "Add Python to PATH" al instalar.
+
+
+SI ALGO FALLA
+-------------
+  Abre "_sistema (NO TOCAR)" y revisa los archivos  error_log.txt
+  y  server_log.txt : contienen el detalle del problema.
+
+
+Cinema Productions - Sistema de Gestion de Reservas
 """
 
 

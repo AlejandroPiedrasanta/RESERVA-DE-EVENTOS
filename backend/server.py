@@ -1923,6 +1923,7 @@ async def trigger_reminders_manual():
 from desktop_package import (
     _ENV_TEMPLATE, _CONFIG_PY, _CONFIG_BAT, _LAUNCHER_PYW, _START_BAT,
     _START_BAT_LEGACY, _START_SH, _REQUIREMENTS, _README, _INICIAR_VBS, _STOP_BAT,
+    _CREATE_SHORTCUT_VBS, _LEEME_TXT,
 )
 
 
@@ -2275,19 +2276,84 @@ async def download_package(request: Request):
     def _win_lines(s: str) -> str:
         return s.replace('\r\n', '\n').replace('\n', '\r\n')
 
-    # Recolectamos los archivos primero, luego los escribimos con o sin cifrado.
+    # ── Generar icono .ico desde el logo.png del frontend ────────────────
+    # Se usa Pillow (ya en requirements) para producir un ICO multi-tamaño
+    # que Windows muestre en el .lnk del escritorio. Como el logo.png es
+    # una banner ancha (587x77), lo pegamos centrado en un canvas cuadrado
+    # con degradado indigo para que se vea como un icono de app real.
+    icon_bytes = b""
+    try:
+        from PIL import Image, ImageDraw
+        logo_png = frontend_dir / "public" / "logo.png"
+        canvas_size = 256
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+        # Fondo redondeado con degradado indigo → violeta
+        draw = ImageDraw.Draw(canvas)
+        for y in range(canvas_size):
+            t = y / canvas_size
+            r = int(79 + (139 - 79) * t)   # 4f → 8b
+            g = int(70 + (92 - 70) * t)    # 46 → 5c
+            b = int(229 + (246 - 229) * t) # e5 → f6
+            draw.line([(0, y), (canvas_size, y)], fill=(r, g, b, 255))
+        # Máscara redondeada
+        mask = Image.new("L", (canvas_size, canvas_size), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, canvas_size, canvas_size), radius=48, fill=255
+        )
+        canvas.putalpha(mask)
+        # Pegar el logo escalado y centrado
+        if logo_png.exists():
+            with Image.open(logo_png) as logo:
+                logo = logo.convert("RGBA")
+                # Escalar el logo para que quepa dentro del 78% del canvas
+                target_w = int(canvas_size * 0.78)
+                ratio = target_w / logo.width
+                target_h = int(logo.height * ratio)
+                logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
+                px = (canvas_size - target_w) // 2
+                py = (canvas_size - target_h) // 2
+                canvas.paste(logo_resized, (px, py), logo_resized)
+        ico_buf = io.BytesIO()
+        canvas.save(ico_buf, format="ICO",
+                    sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        icon_bytes = ico_buf.getvalue()
+    except Exception as _ico_err:
+        logger.warning(f"No se pudo generar icono.ico: {_ico_err}")
+
+    # ── Estructura NUEVA del ZIP ─────────────────────────────────────────
+    #   cinema-productions/
+    #     ├── INICIAR APP.vbs          <- arranque (usuario)
+    #     ├── DETENER APP.bat          <- parada  (usuario)
+    #     ├── Crear acceso directo.vbs <- crea .lnk con icono en Escritorio
+    #     ├── LEEME.txt                <- instrucciones simples
+    #     ├── icono.ico                <- icono de la app
+    #     ├── backups/  (se crea sola cuando la app corre)
+    #     └── _sistema (NO TOCAR)/     <- motor tecnico (app.py, launcher, libs, build, .env)
+    SYS = 'cinema-productions/_sistema (NO TOCAR)/'
+
     files_to_add = [
-        ('cinema-productions/app.py', standalone_py.encode('utf-8')),
-        ('cinema-productions/.env', _win_lines(_ENV_TEMPLATE).encode('utf-8')),
-        ('cinema-productions/requirements.txt', _REQUIREMENTS.encode('utf-8')),
-        ('cinema-productions/start.bat', _win_lines(_START_BAT).encode('utf-8')),
-        ('cinema-productions/Detener.bat', _win_lines(_STOP_BAT).encode('utf-8')),
-        ('cinema-productions/Iniciar.vbs', _win_lines(_INICIAR_VBS).encode('utf-8')),
-        ('cinema-productions/launcher.pyw', _LAUNCHER_PYW.encode('utf-8')),
-        ('cinema-productions/start.sh', _START_SH.encode('utf-8')),
-        ('cinema-productions/README.txt', _win_lines(_README).encode('utf-8')),
-        ('cinema-productions/version.txt', auto_version.encode('utf-8')),
+        # -- Nivel raíz: solo lo que el usuario debe ver/tocar --
+        ('cinema-productions/INICIAR APP.vbs',           _win_lines(_INICIAR_VBS).encode('utf-8')),
+        ('cinema-productions/DETENER APP.bat',           _win_lines(_STOP_BAT).encode('utf-8')),
+        ('cinema-productions/Crear acceso directo.vbs',  _win_lines(_CREATE_SHORTCUT_VBS).encode('utf-8')),
+        ('cinema-productions/LEEME.txt',                 _win_lines(_LEEME_TXT).encode('utf-8')),
+
+        # -- _sistema (NO TOCAR): motor técnico --
+        (SYS + 'app.py',            standalone_py.encode('utf-8')),
+        (SYS + '.env',              _win_lines(_ENV_TEMPLATE).encode('utf-8')),
+        (SYS + 'requirements.txt',  _REQUIREMENTS.encode('utf-8')),
+        (SYS + 'start.bat',         _win_lines(_START_BAT).encode('utf-8')),
+        (SYS + 'start.sh',          _START_SH.encode('utf-8')),
+        (SYS + 'launcher.pyw',      _LAUNCHER_PYW.encode('utf-8')),
+        (SYS + 'config.py',         _CONFIG_PY.encode('utf-8')),
+        (SYS + 'config.bat',        _win_lines(_CONFIG_BAT).encode('utf-8')),
+        (SYS + 'README-tecnico.txt', _win_lines(_README).encode('utf-8')),
+        (SYS + 'version.txt',       auto_version.encode('utf-8')),
     ]
+
+    # Icono binario (si Pillow lo generó)
+    if icon_bytes:
+        files_to_add.append(('cinema-productions/icono.ico', icon_bytes))
 
     # Adjuntar el mirror actual de saved_themes.json (contiene "Minimalista"
     # como is_default) para que la app de escritorio arranque con el mismo
@@ -2296,7 +2362,7 @@ async def download_package(request: Request):
         themes_payload = await _themes_snapshot_payload()
         themes_json_bytes = json.dumps(themes_payload, indent=2, ensure_ascii=False).encode('utf-8')
         files_to_add.append(
-            ('cinema-productions/themes/saved_themes.json', themes_json_bytes)
+            (SYS + 'themes/saved_themes.json', themes_json_bytes)
         )
     except Exception as _themes_err:
         logger.warning(f"No se pudo adjuntar themes/saved_themes.json al ZIP: {_themes_err}")
@@ -2313,9 +2379,9 @@ async def download_package(request: Request):
             for arc_name, content in files_to_add:
                 zf.writestr(arc_name, content)
             for whl in wheel_files:
-                zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
+                zf.write(str(whl), SYS + 'libs/' + whl.name)
             for file_path in build_files:
-                arc_name = 'cinema-productions/build/' + str(file_path.relative_to(build_dir))
+                arc_name = SYS + 'build/' + str(file_path.relative_to(build_dir))
                 zf.write(str(file_path), arc_name)
             # Nota informativa dentro del ZIP (sin cifrar sería útil, pero por consistencia
             # dejamos todo cifrado y ponemos la ayuda en README.txt).
@@ -2325,9 +2391,9 @@ async def download_package(request: Request):
             for arc_name, content in files_to_add:
                 zf.writestr(arc_name, content)
             for whl in wheel_files:
-                zf.write(str(whl), 'cinema-productions/libs/' + whl.name)
+                zf.write(str(whl), SYS + 'libs/' + whl.name)
             for file_path in build_files:
-                arc_name = 'cinema-productions/build/' + str(file_path.relative_to(build_dir))
+                arc_name = SYS + 'build/' + str(file_path.relative_to(build_dir))
                 zf.write(str(file_path), arc_name)
 
     zip_bytes = buf.getvalue()
