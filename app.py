@@ -1243,7 +1243,7 @@ async def _check_for_updates():
             _update_status = {"checked": True, "has_update": False}
             return
 
-        has_update = latest["version"] != _local_version
+        has_update = latest.get("version") != _local_version
 
         dl_url = ""
         if _update_server_url:
@@ -1252,15 +1252,15 @@ async def _check_for_updates():
         _update_status = {
             "checked": True,
             "has_update": has_update,
-            "remote_version": latest["version"],
+            "remote_version": latest.get("version", ""),
             "local_version": _local_version,
-            "filename": latest["filename"],
+            "filename": latest.get("filename", ""),
             "notes": latest.get("notes", ""),
             "file_size": latest.get("file_size", 0),
             "download_url": dl_url,
         }
         if has_update:
-            logger.warning(f"Update available: {_local_version} → {latest['version']}")
+            logger.warning(f"Update available: {_local_version} → {latest.get('version')}")
     except Exception as e:
         logger.warning(f"Update check failed: {e}")
         _update_status = {"checked": True, "has_update": False}
@@ -1643,15 +1643,84 @@ async def get_latest_update_local():
             "file_size": doc["file_size"], "created_at": doc["created_at"]}
 
 
+_gh_hist_cache = {"data": None, "ts": 0.0, "loading": False}
+_GH_HIST_TTL = 300  # 5 min
+
+
+def _gh_hist_fresh() -> bool:
+    import time as _t
+    return _gh_hist_cache["data"] is not None and (_t.time() - _gh_hist_cache["ts"]) < _GH_HIST_TTL
+
+
+async def _fetch_gh_tag_records_local(owner: str, repo: str, token: str) -> list:
+    """Tags de GitHub + fecha/nota de cada commit EN PARALELO. Cacheado 5 min."""
+    import time as _t, urllib.request, json as _json
+    if _gh_hist_fresh():
+        return _gh_hist_cache["data"]
+    _gh_hist_cache["loading"] = True
+
+    headers = {"User-Agent": "cinema-productions", "Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def _get_json(url, timeout):
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode())
+
+    try:
+        tags_data = await asyncio.to_thread(
+            _get_json, f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=30", 6
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo leer tags de GitHub: {e}")
+        _gh_hist_cache["loading"] = False
+        return _gh_hist_cache["data"] or []
+
+    tags_data = tags_data[:20]
+
+    async def _one(tag):
+        tag_name = tag.get("name", "")
+        version = tag_name.lstrip("v")
+        commit_sha = tag.get("commit", {}).get("sha", "")
+        commit_url = tag.get("commit", {}).get("url", "")
+        created_at, notes = "", ""
+        if commit_url:
+            try:
+                cdata = await asyncio.to_thread(_get_json, commit_url, 5)
+                created_at = cdata.get("commit", {}).get("author", {}).get("date", "")
+                notes = cdata.get("commit", {}).get("message", "")[:200]
+            except Exception:
+                pass
+        return {
+            "id": f"gh:{tag_name}",
+            "version": version,
+            "filename": "",
+            "notes": notes,
+            "channel": "github",
+            "file_size": 0,
+            "created_at": created_at,
+            "is_latest": False,
+            "source": "github_tag",
+            "commit_short": commit_sha[:7],
+            "author": "",
+            "branch": "main",
+        }
+
+    try:
+        recs = list(await asyncio.gather(*[_one(t) for t in tags_data]))
+        _gh_hist_cache["data"] = recs
+        _gh_hist_cache["ts"] = _t.time()
+        return recs
+    finally:
+        _gh_hist_cache["loading"] = False
+
+
 @api_router.get("/updates/history")
 async def get_update_history_local():
-    """Historial de versiones. Combina:
-      1. Registros locales en la BD (paquetes descargados)
-      2. Tags de GitHub (versiones publicadas remotamente)
-    Así en la app de escritorio SIEMPRE se ve todo el historial, aunque
-    la BD local esté vacía."""
-    import urllib.request, json as _json
-
+    """Historial de versiones (local + tags de GitHub). Respuesta INMEDIATA:
+    los registros locales se devuelven al instante y los tags de GitHub se
+    cachean (5 min) y se refrescan en segundo plano, sin bloquear nunca."""
     # 1) Registros locales
     cursor = db.app_updates.find({}, sort=[("created_at", -1)])
     docs = await cursor.to_list(200)
@@ -1670,76 +1739,26 @@ async def get_update_history_local():
         "branch": d.get("branch", ""),
     } for d in docs]
 
-    # 2) Tags de GitHub
+    # 2) Tags de GitHub — desde caché; refresco en segundo plano si hace falta
     cfg = await _get_github_cfg()
     repo_url = cfg.get("repo_url", "")
     token = cfg.get("token", "")
     owner, repo = _parse_github_url(repo_url)
-    github_records = []
     if owner and repo:
-        try:
-            headers = {
-                "User-Agent": "cinema-productions",
-                "Accept": "application/vnd.github+json",
-            }
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            # Obtenemos hasta 50 tags
-            req = urllib.request.Request(
-                f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=50",
-                headers=headers,
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                tags_data = _json.loads(resp.read().decode())
+        if _gh_hist_fresh():
+            github_records = _gh_hist_cache["data"] or []
+        else:
+            if not _gh_hist_cache["loading"]:
+                asyncio.create_task(_fetch_gh_tag_records_local(owner, repo, token))
+            github_records = _gh_hist_cache["data"] or []
+        seen_versions = {r["version"] for r in local_records}
+        for gr in github_records:
+            if gr["version"] not in seen_versions:
+                local_records.append(gr)
+                seen_versions.add(gr["version"])
 
-            for tag in tags_data:
-                tag_name = tag.get("name", "")
-                # Solo tags con formato vX.Y
-                version = tag_name.lstrip("v")
-                commit_sha = tag.get("commit", {}).get("sha", "")
-
-                # Obtener detalles del commit del tag (fecha, mensaje)
-                commit_url = tag.get("commit", {}).get("url", "")
-                created_at = ""
-                notes = ""
-                if commit_url:
-                    try:
-                        req2 = urllib.request.Request(commit_url, headers=headers)
-                        with urllib.request.urlopen(req2, timeout=5) as r2:
-                            cdata = _json.loads(r2.read().decode())
-                        created_at = cdata.get("commit", {}).get("author", {}).get("date", "")
-                        notes = cdata.get("commit", {}).get("message", "")[:200]
-                    except Exception:
-                        pass
-
-                github_records.append({
-                    "id": f"gh:{tag_name}",
-                    "version": version,
-                    "filename": "",
-                    "notes": notes,
-                    "channel": "github",
-                    "file_size": 0,
-                    "created_at": created_at,
-                    "is_latest": False,  # se calcula luego
-                    "source": "github_tag",
-                    "commit_short": commit_sha[:7],
-                    "author": "",
-                    "branch": "main",
-                })
-        except Exception as e:
-            logger.warning(f"No se pudo leer tags de GitHub: {e}")
-
-    # 3) Combinar deduplicando por version
-    seen_versions = {r["version"] for r in local_records}
-    for gr in github_records:
-        if gr["version"] not in seen_versions:
-            local_records.append(gr)
-            seen_versions.add(gr["version"])
-
-    # 4) Ordenar por created_at descendente
+    # 3) Ordenar por created_at descendente y marcar la primera como is_latest
     local_records.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-
-    # 5) Marcar la primera como is_latest
     if local_records:
         for r in local_records:
             r["is_latest"] = False
