@@ -35,6 +35,15 @@ export const uploadSocioPhoto = (id, file) => {
 export const deleteSocioPhoto = (id) => api.delete(`/socios/${id}/photo`).then(r => r.data);
 export const getFinancials = () => api.get("/financials").then(r => r.data);
 
+// Metas (Goals)
+export const getMetas = (year, type) => api.get(`/metas?year=${year}&type=${type}`).then(r => r.data);
+export const upsertMeta = (data) => api.put("/metas", data).then(r => r.data);
+export const deleteMeta = (year, type, month) => {
+  const q = month == null ? `year=${year}&type=${type}` : `year=${year}&type=${type}&month=${month}`;
+  return api.delete(`/metas?${q}`).then(r => r.data);
+};
+export const getMetasProgress = (year, type) => api.get(`/metas/progress?year=${year}&type=${type}`).then(r => r.data);
+
 // App Settings
 export const getAppSettings = () => api.get("/settings").then(r => r.data);
 export const updateAppSettings = (data) => api.put("/settings", data).then(r => r.data);

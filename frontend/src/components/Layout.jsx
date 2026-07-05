@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, CalendarDays, List, Menu, X, SlidersHorizontal, Users, Database, Palette, RefreshCw, ArrowRight } from "lucide-react";
+import { LayoutDashboard, CalendarDays, List, Menu, X, SlidersHorizontal, Users, Database, Palette, RefreshCw, ArrowRight, Target } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, PRESETS } from "@/context/SettingsContext";
@@ -91,6 +91,7 @@ export default function Layout({ children }) {
     "/reservaciones":   { label: tr.nav.reservations,                icon: List },
     "/calendario":      { label: tr.nav.calendar,                    icon: CalendarDays },
     "/socios":          { label: tr.nav.socios || "Socios",          icon: Users },
+    "/metas":           { label: tr.nav.metas || "Metas",            icon: Target },
     "/base-de-datos":   { label: tr.nav.database || "Base de Datos", icon: Database },
     "/apariencia":      { label: tr.nav.appearance || "Apariencia",  icon: Palette },
     "/ajustes":         { label: tr.nav.settings,                    icon: SlidersHorizontal },

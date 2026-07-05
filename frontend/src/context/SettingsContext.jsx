@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { setEventConfigOverrides } from "@/lib/eventConfig";
 import { getCloudAppearance, saveCloudAppearance, getSecurityStatus } from "@/lib/api";
 
-export const NAV_PATHS = ["/dashboard", "/reservaciones", "/calendario", "/socios", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
+export const NAV_PATHS = ["/dashboard", "/reservaciones", "/calendario", "/socios", "/metas", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
 
 export const APPEARANCE_KEYS = [
   "theme", "preset", "animations", "radius", "pdf_theme", "dark_mode", "font_scale", "bg_intensity",
@@ -77,7 +77,7 @@ export const STATUS_COLOR_CLASSES = {
 
 const T = {
   es: {
-    nav: { dashboard: "Dashboard", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", database: "Base de Datos", appearance: "Apariencia" },
+    nav: { dashboard: "Dashboard", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", database: "Base de Datos", appearance: "Apariencia" },
     common: { newReservation: "Nueva Reserva", cancel: "Cancelar", save: "Guardar cambios", create: "Crear reserva", saving: "Guardando...", edit: "Editar", viewAll: "Ver todas" },
     statuses: { Pendiente: "Pendiente", Confirmado: "Confirmado", Completado: "Completado", Cancelado: "Cancelado" },
     months: ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"],
@@ -154,7 +154,7 @@ const T = {
     },
   },
   en: {
-    nav: { dashboard: "Dashboard", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", database: "Database", appearance: "Appearance" },
+    nav: { dashboard: "Dashboard", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", metas: "Goals", database: "Database", appearance: "Appearance" },
     common: { newReservation: "New Reservation", cancel: "Cancel", save: "Save changes", create: "Create reservation", saving: "Saving...", edit: "Edit", viewAll: "View all" },
     statuses: { Pendiente: "Pending", Confirmado: "Confirmed", Completado: "Completed", Cancelado: "Cancelled" },
     months: ["January","February","March","April","May","June","July","August","September","October","November","December"],
@@ -482,8 +482,22 @@ export function SettingsProvider({ children }) {
       const saved = JSON.parse(localStorage.getItem("nav_config") || "null");
       if (!saved) return NAV_PATHS.map(p => ({ path: p, custom: "" }));
       const known = saved.filter(i => NAV_PATHS.includes(i.path));
-      const missing = NAV_PATHS.filter(p => !known.find(i => i.path === p)).map(p => ({ path: p, custom: "" }));
-      return [...known, ...missing];
+      const missing = NAV_PATHS.filter(p => !known.find(i => i.path === p));
+      if (missing.length === 0) return known;
+      // Insert each missing path in the canonical position relative to existing ones
+      const result = [...known];
+      missing.forEach(p => {
+        const canonIdx = NAV_PATHS.indexOf(p);
+        // Find nearest previous canonical path already in result
+        let insertAt = result.length;
+        for (let i = canonIdx - 1; i >= 0; i--) {
+          const prevPath = NAV_PATHS[i];
+          const pos = result.findIndex(r => r.path === prevPath);
+          if (pos !== -1) { insertAt = pos + 1; break; }
+        }
+        result.splice(insertAt, 0, { path: p, custom: "" });
+      });
+      return result;
     } catch { return NAV_PATHS.map(p => ({ path: p, custom: "" })); }
   });
   const changeNavConfig = (next) => { setNavConfig(next); localStorage.setItem("nav_config", JSON.stringify(next)); };

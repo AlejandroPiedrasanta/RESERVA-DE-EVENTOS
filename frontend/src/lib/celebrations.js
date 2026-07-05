@@ -127,3 +127,51 @@ export const celebrateUpdate = () => {
 export const celebrateTutorial = () => {
   fireEpic("tutorial");
 };
+
+// ══════════════ Money rain — para logros de metas ══════════════
+// Dispara una lluvia de billetes/monedas simulada usando emojis en shapes
+export const fireMoneyRain = (durationMs = 4200) => {
+  if (isReducedMotion()) return;
+  const end = Date.now() + durationMs;
+  const moneyColors = ["#10b981", "#059669", "#34d399", "#fbbf24", "#f59e0b", "#84cc16"];
+
+  const interval = setInterval(() => {
+    if (Date.now() > end) { clearInterval(interval); return; }
+    // Lluvia principal
+    safeConfetti({
+      particleCount: 6,
+      startVelocity: 15,
+      gravity: 1.1,
+      ticks: 300,
+      origin: { x: Math.random(), y: -0.15 },
+      colors: moneyColors,
+      shapes: ["square"],
+      scalar: 1.4,
+      drift: (Math.random() - 0.5) * 0.6,
+    });
+    // Monedas doradas ocasionales
+    if (Math.random() < 0.5) {
+      safeConfetti({
+        particleCount: 2,
+        startVelocity: 10,
+        gravity: 1.3,
+        ticks: 260,
+        origin: { x: Math.random(), y: -0.1 },
+        colors: ["#fbbf24", "#f59e0b", "#fde68a"],
+        shapes: ["circle"],
+        scalar: 1.1,
+      });
+    }
+  }, 90);
+
+  // Explosión épica final
+  setTimeout(() => {
+    fireEpic("payment");
+  }, 400);
+};
+
+// Celebración específica de meta alcanzada
+export const celebrateGoalReached = () => {
+  fireMoneyRain(4500);
+  triggerSidebarSweep("emerald");
+};
