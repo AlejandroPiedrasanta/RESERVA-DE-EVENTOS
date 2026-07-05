@@ -1,309 +1,194 @@
 #!/usr/bin/env python3
 """
-Backend API Testing Script for Code Review Fixes
-Tests two specific fixes:
-1. Desktop app (standalone_app.py) - AsyncIOMotorClient import fix in diagnostic_fix
-2. Live backend (server.py) - MD5 usedforsecurity=False and ZIP password env var
+Backend Test - Security State Verification After Password Reset
+Tests the app-lock/security state after a forgotten password was removed from DB.
 """
 
 import requests
 import json
 import sys
 
-# Test configuration
-STANDALONE_URL = "http://localhost:8055"
-LIVE_BACKEND_URL = "https://13b9f50d-f7c4-4e37-b47f-d057cc55e1ba.preview.emergentagent.com/api"
+# Read backend URL from frontend .env
+BASE_URL = "https://event-booking-77.preview.emergentagent.com/api"
 
-def test_task_a_desktop_diagnostic():
+def print_test_header(test_name):
+    print(f"\n{'='*80}")
+    print(f"TEST: {test_name}")
+    print(f"{'='*80}")
+
+def print_response(response):
+    print(f"Status Code: {response.status_code}")
+    print(f"Response Headers: {dict(response.headers)}")
+    try:
+        print(f"Response Body: {json.dumps(response.json(), indent=2)}")
+    except:
+        print(f"Response Text: {response.text}")
+
+def test_security_status():
     """
-    TASK A: Test desktop app diagnostic endpoints
-    Verifies the AsyncIOMotorClient import fix in mongo_conn self-heal branch
+    Test 1: GET /api/security/status
+    Expected: password_enabled=false, failed_attempts=0, locked_until=""
     """
-    print("\n" + "="*80)
-    print("TASK A: Desktop App Diagnostic Fix (standalone_app.py)")
+    print_test_header("GET /api/security/status - Verify no password is set")
+    
+    url = f"{BASE_URL}/security/status"
+    print(f"URL: {url}")
+    
+    try:
+        response = requests.get(url, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Check critical fields
+            password_enabled = data.get('password_enabled')
+            failed_attempts = data.get('failed_attempts')
+            locked_until = data.get('locked_until')
+            
+            print(f"\n✓ Status Code: 200 ✅")
+            
+            if password_enabled == False:
+                print(f"✓ password_enabled: {password_enabled} ✅ (CORRECT - no password set)")
+            else:
+                print(f"✗ password_enabled: {password_enabled} ❌ (EXPECTED: false)")
+                return False
+            
+            if failed_attempts == 0:
+                print(f"✓ failed_attempts: {failed_attempts} ✅ (CORRECT - no failed attempts)")
+            else:
+                print(f"⚠ failed_attempts: {failed_attempts} (EXPECTED: 0)")
+            
+            if locked_until == "":
+                print(f"✓ locked_until: '{locked_until}' ✅ (CORRECT - not locked)")
+            else:
+                print(f"⚠ locked_until: '{locked_until}' (EXPECTED: empty string)")
+            
+            return password_enabled == False
+        else:
+            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
+            return False
+            
+    except Exception as e:
+        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        return False
+
+def test_verify_with_password():
+    """
+    Test 2: POST /api/security/verify with {"password":"anything"}
+    Expected: 200 {"valid": true} because no password is configured
+    """
+    print_test_header("POST /api/security/verify with password - Should return valid:true")
+    
+    url = f"{BASE_URL}/security/verify"
+    payload = {"password": "anything"}
+    print(f"URL: {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            data = response.json()
+            valid = data.get('valid')
+            
+            print(f"\n✓ Status Code: 200 ✅")
+            
+            if valid == True:
+                print(f"✓ valid: {valid} ✅ (CORRECT - no password configured, should unlock)")
+                return True
+            else:
+                print(f"✗ valid: {valid} ❌ (EXPECTED: true)")
+                return False
+        else:
+            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
+            return False
+            
+    except Exception as e:
+        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        return False
+
+def test_verify_empty():
+    """
+    Test 3: POST /api/security/verify with {} (empty body)
+    Expected: 200 {"valid": true}
+    """
+    print_test_header("POST /api/security/verify with empty body - Should return valid:true")
+    
+    url = f"{BASE_URL}/security/verify"
+    payload = {}
+    print(f"URL: {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            data = response.json()
+            valid = data.get('valid')
+            
+            print(f"\n✓ Status Code: 200 ✅")
+            
+            if valid == True:
+                print(f"✓ valid: {valid} ✅ (CORRECT - no password configured, should unlock)")
+                return True
+            else:
+                print(f"✗ valid: {valid} ❌ (EXPECTED: true)")
+                return False
+        else:
+            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
+            return False
+            
+    except Exception as e:
+        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        return False
+
+def main():
+    print("="*80)
+    print("BACKEND SECURITY STATE VERIFICATION - POST PASSWORD RESET")
+    print("="*80)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Context: User was locked out by LockScreen, forgot password.")
+    print(f"         Password hash was removed from DB, lockout cleared.")
+    print(f"         Verifying app is now unlocked and no password required.")
     print("="*80)
     
-    results = {
-        "task": "Fix undefined name AsyncIOMotorClient in desktop diagnostic_fix",
-        "tests": []
-    }
+    results = {}
     
-    # Test 1: GET /api/diagnostic
-    print("\n[Test 1] GET /api/diagnostic")
-    try:
-        response = requests.get(f"{STANDALONE_URL}/api/diagnostic", timeout=10)
-        print(f"  Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"  Response: {json.dumps(data, indent=2)[:500]}")
-            results["tests"].append({
-                "name": "GET /api/diagnostic",
-                "status": "PASS",
-                "http_code": 200,
-                "detail": "Diagnostic endpoint returns 200 with checks"
-            })
-        else:
-            print(f"  ERROR: Expected 200, got {response.status_code}")
-            results["tests"].append({
-                "name": "GET /api/diagnostic",
-                "status": "FAIL",
-                "http_code": response.status_code,
-                "detail": f"Expected 200, got {response.status_code}"
-            })
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["tests"].append({
-            "name": "GET /api/diagnostic",
-            "status": "FAIL",
-            "detail": f"Exception: {str(e)}"
-        })
+    # Test 1: Security Status
+    results['test_1_status'] = test_security_status()
     
-    # Test 2: POST /api/diagnostic/fix with mongo_conn
-    print("\n[Test 2] POST /api/diagnostic/fix (mongo_conn)")
-    print("  CRITICAL: Must NOT return HTTP 500 with NameError about AsyncIOMotorClient")
-    try:
-        response = requests.post(
-            f"{STANDALONE_URL}/api/diagnostic/fix",
-            json={"id": "mongo_conn"},
-            timeout=15
-        )
-        print(f"  Status: {response.status_code}")
-        
-        if response.status_code == 500:
-            error_text = response.text
-            print(f"  ERROR RESPONSE: {error_text[:500]}")
-            
-            if "NameError" in error_text and "AsyncIOMotorClient" in error_text:
-                print("  ❌ CRITICAL FAILURE: NameError with AsyncIOMotorClient detected!")
-                results["tests"].append({
-                    "name": "POST /api/diagnostic/fix (mongo_conn)",
-                    "status": "FAIL",
-                    "http_code": 500,
-                    "detail": "CRITICAL: NameError about AsyncIOMotorClient - import missing!"
-                })
-            else:
-                print("  ⚠️  HTTP 500 but not the NameError we're testing for")
-                results["tests"].append({
-                    "name": "POST /api/diagnostic/fix (mongo_conn)",
-                    "status": "WARN",
-                    "http_code": 500,
-                    "detail": f"HTTP 500 but different error: {error_text[:200]}"
-                })
-        elif response.status_code == 200:
-            data = response.json()
-            print(f"  ✓ Response: {json.dumps(data, indent=2)}")
-            
-            # Check if it has expected fields
-            if "fixed" in data or "success" in data:
-                results["tests"].append({
-                    "name": "POST /api/diagnostic/fix (mongo_conn)",
-                    "status": "PASS",
-                    "http_code": 200,
-                    "detail": f"No NameError crash. Response: {data.get('detail', 'OK')}"
-                })
-            else:
-                results["tests"].append({
-                    "name": "POST /api/diagnostic/fix (mongo_conn)",
-                    "status": "PASS",
-                    "http_code": 200,
-                    "detail": "HTTP 200 returned, no crash"
-                })
-        else:
-            print(f"  Unexpected status: {response.status_code}")
-            results["tests"].append({
-                "name": "POST /api/diagnostic/fix (mongo_conn)",
-                "status": "WARN",
-                "http_code": response.status_code,
-                "detail": f"Unexpected status code: {response.status_code}"
-            })
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["tests"].append({
-            "name": "POST /api/diagnostic/fix (mongo_conn)",
-            "status": "FAIL",
-            "detail": f"Exception: {str(e)}"
-        })
+    # Test 2: Verify with password
+    results['test_2_verify_password'] = test_verify_with_password()
     
-    return results
-
-
-def test_task_b_live_backend():
-    """
-    TASK B: Test live backend regression
-    Verifies MD5 usedforsecurity=False and ZIP password env var changes
-    """
-    print("\n" + "="*80)
-    print("TASK B: Live Backend Hardening (server.py)")
-    print("="*80)
+    # Test 3: Verify empty
+    results['test_3_verify_empty'] = test_verify_empty()
     
-    results = {
-        "task": "Backend hardening: MD5 usedforsecurity=False + ZIP default password via env",
-        "tests": []
-    }
-    
-    # Test 1: GET /api/
-    print("\n[Test 1] GET /api/")
-    try:
-        response = requests.get(f"{LIVE_BACKEND_URL}/", timeout=10)
-        print(f"  Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"  Response: {json.dumps(data, indent=2)}")
-            results["tests"].append({
-                "name": "GET /api/",
-                "status": "PASS",
-                "http_code": 200,
-                "detail": f"Backend root endpoint working: {data.get('message', 'OK')}"
-            })
-        else:
-            print(f"  ERROR: Expected 200, got {response.status_code}")
-            results["tests"].append({
-                "name": "GET /api/",
-                "status": "FAIL",
-                "http_code": response.status_code,
-                "detail": f"Expected 200, got {response.status_code}"
-            })
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["tests"].append({
-            "name": "GET /api/",
-            "status": "FAIL",
-            "detail": f"Exception: {str(e)}"
-        })
-    
-    # Test 2: GET /api/security/zip-password
-    print("\n[Test 2] GET /api/security/zip-password")
-    try:
-        response = requests.get(f"{LIVE_BACKEND_URL}/security/zip-password", timeout=10)
-        print(f"  Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"  Response: {json.dumps(data, indent=2)}")
-            
-            if "password" in data:
-                pwd = data.get("password")
-                print(f"  ✓ Password field present: {pwd}")
-                results["tests"].append({
-                    "name": "GET /api/security/zip-password",
-                    "status": "PASS",
-                    "http_code": 200,
-                    "detail": f"Returns password string: {pwd} (is_default: {data.get('is_default', 'N/A')})"
-                })
-            else:
-                print(f"  ⚠️  Response missing 'password' field")
-                results["tests"].append({
-                    "name": "GET /api/security/zip-password",
-                    "status": "WARN",
-                    "http_code": 200,
-                    "detail": "Response missing 'password' field"
-                })
-        else:
-            print(f"  ERROR: Expected 200, got {response.status_code}")
-            results["tests"].append({
-                "name": "GET /api/security/zip-password",
-                "status": "FAIL",
-                "http_code": response.status_code,
-                "detail": f"Expected 200, got {response.status_code}"
-            })
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["tests"].append({
-            "name": "GET /api/security/zip-password",
-            "status": "FAIL",
-            "detail": f"Exception: {str(e)}"
-        })
-    
-    # Test 3: Verify no 500s on startup (check backend logs)
-    print("\n[Test 3] Backend startup check")
-    print("  Checking if backend started without errors...")
-    try:
-        # If we got here and previous tests passed, backend is running fine
-        if all(t["status"] == "PASS" for t in results["tests"]):
-            print("  ✓ Backend is running and responding correctly")
-            results["tests"].append({
-                "name": "Backend startup verification",
-                "status": "PASS",
-                "detail": "Backend started successfully, no 500 errors on tested endpoints"
-            })
-        else:
-            print("  ⚠️  Some endpoints failed, but backend is running")
-            results["tests"].append({
-                "name": "Backend startup verification",
-                "status": "WARN",
-                "detail": "Backend running but some endpoints had issues"
-            })
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["tests"].append({
-            "name": "Backend startup verification",
-            "status": "FAIL",
-            "detail": f"Exception: {str(e)}"
-        })
-    
-    return results
-
-
-def print_summary(task_a_results, task_b_results):
-    """Print test summary"""
+    # Summary
     print("\n" + "="*80)
     print("TEST SUMMARY")
     print("="*80)
     
-    all_results = [task_a_results, task_b_results]
+    all_passed = True
+    for test_name, passed in results.items():
+        status = "✅ PASS" if passed else "❌ FAIL"
+        print(f"{test_name}: {status}")
+        if not passed:
+            all_passed = False
     
-    for task_result in all_results:
-        print(f"\n{task_result['task']}")
-        print("-" * 80)
-        
-        for test in task_result["tests"]:
-            status_icon = {
-                "PASS": "✅",
-                "FAIL": "❌",
-                "WARN": "⚠️"
-            }.get(test["status"], "❓")
-            
-            print(f"  {status_icon} {test['name']}: {test['status']}")
-            if test.get("http_code"):
-                print(f"     HTTP {test['http_code']}")
-            print(f"     {test['detail']}")
+    print("="*80)
     
-    # Overall status
-    print("\n" + "="*80)
-    all_tests = []
-    for task_result in all_results:
-        all_tests.extend(task_result["tests"])
-    
-    passed = sum(1 for t in all_tests if t["status"] == "PASS")
-    failed = sum(1 for t in all_tests if t["status"] == "FAIL")
-    warned = sum(1 for t in all_tests if t["status"] == "WARN")
-    total = len(all_tests)
-    
-    print(f"TOTAL: {passed}/{total} PASSED, {failed} FAILED, {warned} WARNINGS")
-    
-    if failed > 0:
-        print("\n❌ SOME TESTS FAILED - Review required")
-        return 1
-    elif warned > 0:
-        print("\n⚠️  ALL CRITICAL TESTS PASSED - Some warnings present")
+    if all_passed:
+        print("\n🎉 ALL TESTS PASSED - APP IS UNLOCKED, NO PASSWORD REQUIRED")
+        print("✅ password_enabled = false")
+        print("✅ /security/verify returns valid:true (LockScreen will unlock)")
+        print("✅ App is accessible without password")
         return 0
     else:
-        print("\n✅ ALL TESTS PASSED")
-        return 0
-
+        print("\n❌ SOME TESTS FAILED - REVIEW RESULTS ABOVE")
+        return 1
 
 if __name__ == "__main__":
-    print("="*80)
-    print("Backend Code Review Fixes - Testing Script")
-    print("="*80)
-    
-    # Run tests
-    task_a_results = test_task_a_desktop_diagnostic()
-    task_b_results = test_task_b_live_backend()
-    
-    # Print summary
-    exit_code = print_summary(task_a_results, task_b_results)
-    
-    sys.exit(exit_code)
+    sys.exit(main())

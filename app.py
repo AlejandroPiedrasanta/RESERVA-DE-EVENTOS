@@ -2778,6 +2778,110 @@ async def apply_github_update(payload: dict = Body(default={})):
         raise HTTPException(status_code=500, detail=f"Error inesperado al aplicar update: {type(e).__name__}: {e}")
 
 
+# ─── GitHub: conectar cuenta / push (paridad con la nube) ─────────────────────
+# En escritorio la cuenta de GitHub sirve para AUTENTICAR la descarga de
+# actualizaciones (repos privados / mayor rate limit). Validamos el token contra
+# la API de GitHub y guardamos usuario/avatar. NO usamos `git` (puede no estar
+# instalado en la PC del usuario).
+@api_router.post("/github/connect")
+async def github_connect(payload: dict = Body(...)):
+    """Valida un Personal Access Token de GitHub y guarda la cuenta conectada."""
+    import urllib.request, urllib.error, json as _json
+
+    token = (payload.get("token") or "").strip()
+    repo_url = (payload.get("repo_url") or DEFAULT_GITHUB_REPO).strip()
+    branch = (payload.get("branch") or DEFAULT_GITHUB_BRANCH).strip()
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Token requerido. Crea uno en https://github.com/settings/tokens con scope 'repo'.")
+
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "cinema-productions",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            user_data = _json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = "Token inválido o expirado" if e.code == 401 else f"GitHub API error: {e.code}"
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar GitHub: {e}")
+
+    username = user_data.get("login", "")
+    avatar = user_data.get("avatar_url", "")
+
+    await db.app_settings.update_one(
+        {},
+        {"$set": {
+            "github_config.token": token,
+            "github_config.repo_url": repo_url,
+            "github_config.branch": branch,
+            "github_config.username": username,
+            "github_config.avatar_url": avatar,
+            "github_config.connected_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+
+    return {
+        "success": True,
+        "username": username,
+        "avatar_url": avatar,
+        "repo_url": repo_url,
+        "branch": branch,
+    }
+
+
+@api_router.post("/github/disconnect")
+async def github_disconnect():
+    """Desconecta la cuenta de GitHub (borra token/usuario/avatar). Conserva repo_url."""
+    await db.app_settings.update_one(
+        {},
+        {"$unset": {
+            "github_config.token": "",
+            "github_config.username": "",
+            "github_config.avatar_url": "",
+            "github_config.connected_at": "",
+        }},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True}
+
+
+@api_router.post("/github/push-all")
+async def github_push_all(payload: dict = Body(default={})):
+    """No disponible en escritorio: subir el código fuente al repositorio requiere
+    un entorno git de desarrollo. En la app de escritorio, GitHub se usa solo para
+    RECIBIR actualizaciones (Actualizaciones → Buscar/Aplicar)."""
+    return {
+        "status": "unavailable",
+        "is_desktop": True,
+        "message": "Subir cambios al repositorio no está disponible en la app de escritorio. "
+                   "Usa esta función desde la versión en la nube. Aquí puedes RECIBIR actualizaciones "
+                   "desde 'Actualizaciones'.",
+    }
+
+
+@api_router.get("/github/push-status")
+async def github_push_status():
+    """Estado de push (siempre inactivo en escritorio)."""
+    return {
+        "status": "idle",
+        "is_desktop": True,
+        "progress": 0,
+        "message": "El push al repositorio no está disponible en la app de escritorio.",
+    }
+
+
 # ─── Metas (Goals) ────────────────────────────────────────
 
 class MetaUpsert(BaseModel):
@@ -2971,6 +3075,54 @@ async def set_advanced_security_config(payload: dict = Body(...)):
         if _using_embedded:
             asyncio.create_task(_save_embedded_data())
     return {"success": True, "updated_keys": list(update.keys())}
+
+
+# ─── Contraseña del ZIP (cifrado AES-256 de backups) ──────────────────────────
+# Paridad con la versión en la nube: el frontend compartido (SecuritySection)
+# consume estos endpoints para ver/cambiar/restaurar la contraseña con la que se
+# cifran los backups .zip. En escritorio el valor por defecto es 2868.
+@api_router.get("/security/zip-password")
+async def get_zip_password():
+    """Devuelve la contraseña actual del ZIP (visible para el dueño de la app)."""
+    doc = await db.app_settings.find_one({}, {"security_config": 1}) or {}
+    cfg = doc.get("security_config") or {}
+    pwd = cfg.get("zip_password") or DEFAULT_ZIP_PASSWORD_STANDALONE
+    return {
+        "password": pwd,
+        "is_default": pwd == DEFAULT_ZIP_PASSWORD_STANDALONE,
+        "enabled": bool(cfg.get("zip_password_enabled", True)),
+    }
+
+
+@api_router.post("/security/zip-password")
+async def set_zip_password(payload: dict = Body(...)):
+    """Cambia la contraseña usada al cifrar los backups .zip."""
+    new_pwd = (payload.get("new_password") or "").strip()
+    if len(new_pwd) < 3:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 3 caracteres")
+    if len(new_pwd) > 64:
+        raise HTTPException(status_code=400, detail="La contraseña no puede exceder 64 caracteres")
+    await db.app_settings.update_one(
+        {},
+        {"$set": {"security_config.zip_password": new_pwd}},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "password": new_pwd}
+
+
+@api_router.post("/security/zip-password/reset")
+async def reset_zip_password():
+    """Restaura la contraseña ZIP al valor de fábrica (2868)."""
+    await db.app_settings.update_one(
+        {},
+        {"$set": {"security_config.zip_password": DEFAULT_ZIP_PASSWORD_STANDALONE}},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"success": True, "password": DEFAULT_ZIP_PASSWORD_STANDALONE}
 
 
 # ─── Notificaciones (endpoints de prueba / pendientes) ────────────────────────
