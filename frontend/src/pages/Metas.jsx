@@ -536,41 +536,52 @@ export default function Metas() {
   const [savingAnnual, setSavingAnnual]  = useState(false);
   const [modal,        setModal]         = useState(null); // { monthLabel, amount }
   const [milestone,    setMilestone]     = useState(null);
-  const celebratedRef = useRef(new Set()); // months already celebrated in this session
-  const milestonesShownRef = useRef(new Set()); // pct milestones shown for annual
-  const streakBadgeRef = useRef(new Set()); // badges already celebrated this session
+  // ── Persistencia entre sesiones (localStorage) ────────────────────────────
+  // Guarda qué celebraciones ya se dispararon "para siempre" en este dispositivo.
+  const LS_KEY = "cp:metas:celebrated:v1";
+  const loadCelebratedLS = () => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  };
+  const saveCelebratedLS = (set) => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(Array.from(set))); } catch { /* noop */ }
+  };
+  const persistedRef = useRef(loadCelebratedLS());
+  const markCelebrated = (key) => {
+    persistedRef.current.add(key);
+    saveCelebratedLS(persistedRef.current);
+  };
+  const isCelebrated  = (key) => persistedRef.current.has(key);
+
+  const celebratedRef      = useRef(new Set()); // meses ya celebrados en esta sesión
+  const milestonesShownRef = useRef(new Set()); // hitos anuales mostrados
+  const streakBadgeRef     = useRef(new Set()); // badges de racha mostrados
   const { formatCurrency } = useSettings();
   const { toast } = useToast();
 
-  // Marca que la primera carga (o carga tras cambiar year/type) ya "sembró" los refs
-  // con el estado ya alcanzado, para NO relanzar confeti por metas ya cumplidas.
-  const seededRef = useRef(false);
-
-  const load = useCallback(async (opts = {}) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const p = await getMetasProgress(year, type);
 
-      // En la primera carga tras cambiar de contexto (year/type/mount), sembramos
-      // los refs con lo ya conquistado para evitar disparar confeti al montar.
-      if (opts.seed) {
-        (p.months || []).forEach(m => {
-          if (m.reached) celebratedRef.current.add(`${type}-${year}-${m.month}`);
-        });
-        if (p.annual_reached) {
-          celebratedRef.current.add(`${type}-${year}-annual-reached`);
-        }
-        // Hitos anuales ya alcanzados: marcar como mostrados
-        const initialPct = Math.min(100, p.annual_percent || 0);
-        MOTIVATIONAL_MILESTONES.forEach(m => {
-          if (initialPct >= m.pct) milestonesShownRef.current.add(`${type}-${year}-${m.pct}`);
-        });
-        // Badge de racha ya desbloqueado: marcar como mostrado
-        const streak = computeStreaks(p.months || []);
-        const badge = getBadgeForStreak(streak.best);
-        if (badge) streakBadgeRef.current.add(`${type}-${year}-badge-${badge.min}`);
-        seededRef.current = true;
+      // Siembra: cualquier meta YA cumplida al cargar, la marcamos como
+      // "no debe celebrarse". Cubre tanto sesiones nuevas como recargas.
+      (p.months || []).forEach(m => {
+        if (m.reached) celebratedRef.current.add(`${type}-${year}-${m.month}`);
+      });
+      if (p.annual_reached) {
+        celebratedRef.current.add(`${type}-${year}-annual-reached`);
       }
+      const initialPct = Math.min(100, p.annual_percent || 0);
+      MOTIVATIONAL_MILESTONES.forEach(m => {
+        if (initialPct >= m.pct) milestonesShownRef.current.add(`${type}-${year}-${m.pct}`);
+      });
+      const streak = computeStreaks(p.months || []);
+      const badge = getBadgeForStreak(streak.best);
+      if (badge) streakBadgeRef.current.add(`${type}-${year}-badge-${badge.min}`);
 
       setData(p);
       setAnnualDraft(String(p.annual_goal || ""));
@@ -581,11 +592,10 @@ export default function Metas() {
   }, [year, type, toast]);
 
   useEffect(() => {
-    celebratedRef.current = new Set();
+    celebratedRef.current      = new Set();
     milestonesShownRef.current = new Set();
-    streakBadgeRef.current = new Set();
-    seededRef.current = false;
-    load({ seed: true });
+    streakBadgeRef.current     = new Set();
+    load();
   }, [year, type, load]);
 
   const typeCfg = TYPES.find(t => t.key === type) || TYPES[0];
@@ -599,8 +609,9 @@ export default function Metas() {
     if (type === "gastos") return; // Gastos: sin celebraciones ni milestones
     MOTIVATIONAL_MILESTONES.forEach(m => {
       const key = `${type}-${year}-${m.pct}`;
-      if (annualPct >= m.pct && !milestonesShownRef.current.has(key)) {
+      if (annualPct >= m.pct && !milestonesShownRef.current.has(key) && !isCelebrated(key)) {
         milestonesShownRef.current.add(key);
+        markCelebrated(key);
         // Only pop the toast (not the ones triggered instantly on first load if already reached)
         if (m.pct < 100) {
           setMilestone(m);
@@ -609,8 +620,9 @@ export default function Metas() {
     });
     // Annual meta reached (full 100%)
     const annualKey = `${type}-${year}-annual-reached`;
-    if (data.annual_reached && !celebratedRef.current.has(annualKey)) {
+    if (data.annual_reached && !celebratedRef.current.has(annualKey) && !isCelebrated(annualKey)) {
       celebratedRef.current.add(annualKey);
+      markCelebrated(annualKey);
       celebrateGoalReached();
       setModal({ monthLabel: `Meta Anual ${year}`, amount: data.annual_actual });
     }
@@ -619,8 +631,9 @@ export default function Metas() {
     const badge = getBadgeForStreak(streak.best);
     if (badge) {
       const badgeKey = `${type}-${year}-badge-${badge.min}`;
-      if (!streakBadgeRef.current.has(badgeKey)) {
+      if (!streakBadgeRef.current.has(badgeKey) && !isCelebrated(badgeKey)) {
         streakBadgeRef.current.add(badgeKey);
+        markCelebrated(badgeKey);
         fireConfetti("payment", { x: 0.5, y: 0.4 });
         triggerSidebarSweep("amber");
         setMilestone({ emoji: badge.emoji, msg: `¡${badge.label}! ${streak.best} meses seguidos` });
@@ -652,7 +665,9 @@ export default function Metas() {
   const handleMonthCelebrate = useCallback((month, amount) => {
     const key = `${type}-${year}-${month}`;
     if (celebratedRef.current.has(key)) return;
+    if (isCelebrated(key)) { celebratedRef.current.add(key); return; }
     celebratedRef.current.add(key);
+    markCelebrated(key);
     // Delay so it doesn't fire during initial paint
     setTimeout(() => {
       celebrateGoalReached();
