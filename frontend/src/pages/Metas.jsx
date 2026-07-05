@@ -188,16 +188,20 @@ function StreakCard({ streak, formatCurrency }) {
 }
 
 function useCountUp(target, duration = 900) {
-  const [val, setVal] = useState(0);
+  const [val, setVal] = useState(target || 0);
   const raf = useRef();
+  const prev = useRef(target || 0);
   useEffect(() => {
     const start = performance.now();
-    const from = 0;
+    const from = prev.current;
+    const to = target || 0;
     const step = (t) => {
       const p = Math.min(1, (t - start) / duration);
       const eased = 1 - Math.pow(1 - p, 3);
-      setVal(from + (target - from) * eased);
+      const v = from + (to - from) * eased;
+      setVal(v);
       if (p < 1) raf.current = requestAnimationFrame(step);
+      else prev.current = to;
     };
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
@@ -323,7 +327,7 @@ function MilestoneToast({ milestone, onDone }) {
   );
 }
 
-function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrated, onCelebrate }) {
+function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrated, onCelebrate, isPast, isCurrent, mode }) {
   const [editing, setEditing]     = useState(false);
   const [draft, setDraft]         = useState(String(data.goal || ""));
   const [saving, setSaving]       = useState(false);
@@ -331,20 +335,30 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
   const pct = Math.min(100, data.percent || 0);
   const reached = data.reached;
   const animPct = useCountUp(pct, 700);
+  const isGastos = mode === "gastos";
 
   useEffect(() => { setDraft(String(data.goal || "")); }, [data.goal]);
 
-  // Fire celebration once per month achievement
+  // Fire celebration once per month achievement (no aplica a gastos: no hay meta objetivo)
   useEffect(() => {
+    if (isGastos) return;
     if (reached && !celebrated) {
       onCelebrate(month, data.actual);
     }
-  }, [reached, celebrated, month, data.actual, onCelebrate]);
+  }, [reached, celebrated, month, data.actual, onCelebrate, isGastos]);
 
   const save = async () => {
     setSaving(true);
     try {
       await onSave(month, parseFloat(draft) || 0);
+      setEditing(false);
+    } finally { setSaving(false); }
+  };
+
+  const clearCustom = async () => {
+    setSaving(true);
+    try {
+      await onSave(month, 0);
       setEditing(false);
     } finally { setSaving(false); }
   };
@@ -356,17 +370,21 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
     : pct >= 25 ? "linear-gradient(90deg,#3b82f6,#8b5cf6)"
     : "linear-gradient(90deg,#94a3b8,#cbd5e1)";
 
+  // Barra visual para gastos: proceso continuo (proporcional al mayor gasto del año, pasado por prop indirectamente via data.percent que viene 0 sin meta).
+  // Para no depender del backend, usamos un tinte fijo para gastos.
+  const gastosBar = "linear-gradient(90deg,#f59e0b,#f97316,#ef4444)";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 22, scale: 0.94 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
+      animate={{ opacity: isPast ? 0.5 : 1, y: 0, scale: 1 }}
       transition={{ delay: index * 0.04, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      whileHover={{ y: -4, scale: 1.015 }}
+      whileHover={{ y: -4, scale: 1.015, opacity: 1 }}
       data-testid={`meta-month-${month}`}
-      className={`relative glass rounded-3xl p-4 overflow-hidden transition-all ${reached ? `ring-2 ${typeCfg.ring} shadow-lg` : ""}`}
+      className={`relative glass rounded-3xl p-4 overflow-hidden transition-all ${reached ? `ring-2 ${typeCfg.ring} shadow-lg` : ""} ${isCurrent ? "ring-2 ring-indigo-300/70 shadow-md" : ""}`}
     >
-      {/* Reached shine */}
-      {reached && (
+      {/* Reached shine (no aplica en gastos) */}
+      {!isGastos && reached && (
         <motion.div
           className="absolute inset-0 pointer-events-none opacity-40"
           animate={{ background: [
@@ -382,11 +400,22 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
             <span className="text-[10px] font-black text-white tracking-wider">{MONTHS_SHORT[month - 1]}</span>
           </div>
           <div>
-            <p className="text-xs font-black text-slate-900 leading-tight">{MONTHS_ES[month - 1]}</p>
-            <p className="text-[10px] text-slate-400 font-medium">{Math.round(animPct)}% completado</p>
+            <p className="text-xs font-black text-slate-900 leading-tight flex items-center gap-1">
+              {MONTHS_ES[month - 1]}
+              {isCurrent && (
+                <span className="text-[8px] font-black uppercase tracking-wider bg-indigo-500 text-white rounded-full px-1.5 py-0.5">Hoy</span>
+              )}
+            </p>
+            {isGastos ? (
+              <p className="text-[10px] text-slate-400 font-medium">
+                {isPast ? "mes cerrado" : isCurrent ? "en curso" : "próximo"}
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-400 font-medium">{Math.round(animPct)}% completado</p>
+            )}
           </div>
         </div>
-        {reached && (
+        {!isGastos && reached && (
           <motion.div
             initial={{ scale: 0, rotate: -180 }}
             animate={{ scale: 1, rotate: 0 }}
@@ -397,64 +426,101 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
             <span className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">Meta!</span>
           </motion.div>
         )}
-      </div>
-
-      {/* Progress bar */}
-      <div className="relative h-2.5 bg-slate-200/60 rounded-full overflow-hidden mb-3">
-        <motion.div
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{ background: barColor, boxShadow: reached ? "0 0 12px rgba(52,211,153,0.6)" : "none" }}
-          initial={{ width: 0 }}
-          animate={{ width: `${Math.min(100, pct)}%` }}
-          transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: index * 0.04 + 0.15 }}
-        />
-        {reached && (
-          <motion.div
-            className="absolute inset-y-0 w-8 rounded-full pointer-events-none"
-            style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,0.9),transparent)" }}
-            animate={{ x: ["-100%", "1200%"] }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: "linear" }}
-          />
+        {!isGastos && !reached && data.is_auto && (
+          <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 rounded-full px-2 py-0.5" title="Meta derivada del objetivo anual / 12">
+            auto
+          </span>
+        )}
+        {!isGastos && data.is_custom && !reached && (
+          <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-600 rounded-full px-2 py-0.5">
+            custom
+          </span>
         )}
       </div>
 
+      {/* Progress bar */}
+      {isGastos ? (
+        <div className="relative h-2.5 bg-slate-200/60 rounded-full overflow-hidden mb-3">
+          <motion.div
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{ background: gastosBar }}
+            initial={{ width: 0 }}
+            animate={{ width: data.actual > 0 ? "100%" : "0%" }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: index * 0.04 + 0.15 }}
+          />
+        </div>
+      ) : (
+        <div className="relative h-2.5 bg-slate-200/60 rounded-full overflow-hidden mb-3">
+          <motion.div
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{ background: barColor, boxShadow: reached ? "0 0 12px rgba(52,211,153,0.6)" : "none" }}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.min(100, pct)}%` }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: index * 0.04 + 0.15 }}
+          />
+          {reached && (
+            <motion.div
+              className="absolute inset-y-0 w-8 rounded-full pointer-events-none"
+              style={{ background: "linear-gradient(90deg,transparent,rgba(255,255,255,0.9),transparent)" }}
+              animate={{ x: ["-100%", "1200%"] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "linear" }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Values */}
-      <div className="grid grid-cols-2 gap-2 mb-3">
+      {isGastos ? (
         <div>
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Real</p>
-          <p className={`text-sm font-black ${reached ? "text-emerald-600" : "text-slate-800"}`} style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Gastado este mes</p>
+          <p className="text-lg font-black text-orange-600" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid={`meta-actual-${month}`}>
             {formatCurrency(data.actual)}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Meta</p>
-          {editing ? (
-            <div className="flex items-center gap-1 justify-end">
-              <input
-                type="number"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-                data-testid={`meta-input-${month}`}
-                min="0" step="0.01"
-                className="w-24 text-right bg-white border border-indigo-300 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              />
-              <button onClick={save} disabled={saving} data-testid={`meta-save-${month}`}
-                      className="p-1 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-40">
-                <Check size={11} />
+      ) : (
+        <div className="grid grid-cols-2 gap-2 mb-1">
+          <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Real</p>
+            <p className={`text-sm font-black ${reached ? "text-emerald-600" : "text-slate-800"}`} style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid={`meta-actual-${month}`}>
+              {formatCurrency(data.actual)}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Meta {data.is_auto ? "· auto" : data.is_custom ? "· custom" : ""}</p>
+            {editing ? (
+              <div className="flex items-center gap-1 justify-end">
+                <input
+                  type="number"
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+                  data-testid={`meta-input-${month}`}
+                  min="0" step="0.01"
+                  className="w-24 text-right bg-white border border-indigo-300 rounded-lg px-2 py-1 text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button onClick={save} disabled={saving} data-testid={`meta-save-${month}`}
+                        className="p-1 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-40">
+                  <Check size={11} />
+                </button>
+                {data.is_custom && (
+                  <button onClick={clearCustom} disabled={saving} data-testid={`meta-clear-${month}`} title="Restaurar auto (anual/12)"
+                          className="p-1 rounded-lg bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors disabled:opacity-40">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button onClick={() => setEditing(true)} data-testid={`meta-edit-${month}`}
+                      className="group inline-flex items-center gap-1 text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors"
+                      style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                {data.goal > 0 ? formatCurrency(data.goal) : "— establecer —"}
+                <Edit3 size={9} className="opacity-40 group-hover:opacity-100 transition-opacity" />
               </button>
-            </div>
-          ) : (
-            <button onClick={() => setEditing(true)} data-testid={`meta-edit-${month}`}
-                    className="group inline-flex items-center gap-1 text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors"
-                    style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-              {data.goal > 0 ? formatCurrency(data.goal) : "— establecer —"}
-              <Edit3 size={9} className="opacity-40 group-hover:opacity-100 transition-opacity" />
-            </button>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </motion.div>
   );
 }
@@ -503,6 +569,7 @@ export default function Metas() {
   // Track annual milestones
   useEffect(() => {
     if (!data) return;
+    if (type === "gastos") return; // Gastos: sin celebraciones ni milestones
     MOTIVATIONAL_MILESTONES.forEach(m => {
       const key = `${type}-${year}-${m.pct}`;
       if (annualPct >= m.pct && !milestonesShownRef.current.has(key)) {
@@ -567,6 +634,10 @@ export default function Metas() {
   }, [type, year]);
 
   const reachedCount = data?.months?.filter(m => m.reached).length || 0;
+  const totalActual  = data?.months?.reduce((s, m) => s + (m.actual || 0), 0) || 0;
+  const isGastos     = type === "gastos";
+  const nowDate      = new Date();
+  const currentMonth = (year === nowDate.getFullYear()) ? (nowDate.getMonth() + 1) : (year < nowDate.getFullYear() ? 13 : 0);
 
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto" data-testid="metas-page">
@@ -589,7 +660,9 @@ export default function Metas() {
             <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Metas</h1>
           </div>
           <p className="text-sm text-slate-500 font-medium mt-1 ml-1">
-            {typeCfg.desc} · {reachedCount} de 12 meses conquistados
+            {isGastos
+              ? `${typeCfg.desc} · Total del año: ${formatCurrency(totalActual)}`
+              : `${typeCfg.desc} · ${reachedCount} de 12 meses conquistados`}
           </p>
         </div>
 
@@ -664,6 +737,41 @@ export default function Metas() {
       </motion.div>
 
       {/* Annual goal hero card */}
+      {isGastos ? (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="relative overflow-hidden rounded-3xl p-6 mb-6 shadow-xl"
+          style={{
+            background: "linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.6))",
+            backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.6)",
+          }}
+          data-testid="annual-gastos-card"
+        >
+          <motion.div
+            className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-20 pointer-events-none"
+            animate={{ scale: [1, 1.2, 1], rotate: [0, 45, 0] }}
+            transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <div className={`w-full h-full rounded-full bg-gradient-to-br ${typeCfg.grad} blur-2xl`} />
+          </motion.div>
+          <div className="relative flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${typeCfg.grad} flex items-center justify-center shadow-lg shrink-0`}>
+              <Wallet size={24} className="text-white" strokeWidth={2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-1">Gastos totales · {year}</p>
+              <p className="text-5xl font-black text-slate-900 tracking-tight leading-none" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="annual-actual">
+                {formatCurrency(animAnnualVal)}
+              </p>
+              <p className="text-xs text-slate-500 font-medium mt-2">
+                En este apartado solo se registra el proceso mensual. Los gastos no requieren meta.
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      ) : (
       <motion.div
         initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
@@ -730,12 +838,82 @@ export default function Metas() {
                 )}
               </div>
             </div>
-            <p className="text-xs text-slate-500 font-medium mt-2">
-              {data?.annual_reached
-                ? "🏆 ¡Superaste tu meta anual! Eres imparable."
-                : data?.annual_goal > 0
-                  ? `Te faltan ${formatCurrency(Math.max(0, (data.annual_goal - data.annual_actual)))} para alcanzar el sueño`
-                  : "Define tu meta anual y comienza a conquistarla"}
+            <p className="text-xs text-slate-500 font-medium mt-2 flex items-center gap-2 flex-wrap">
+              <span>
+                {data?.annual_reached
+                  ? "🏆 ¡Superaste tu meta anual! Eres imparable."
+                  : data?.annual_goal > 0
+                    ? `Te faltan ${formatCurrency(Math.max(0, (data.annual_goal - data.annual_actual)))} para alcanzar el sueño`
+                    : "Define tu meta anual y comienza a conquistarla"}
+              </span>
+              {data && (() => {
+                const streak = computeStreaks(data.months);
+                const badge = getBadgeForStreak(Math.max(streak.best, streak.current));
+                return (
+                  <span
+                    data-testid="streak-chip"
+                    className="group relative inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wider shadow-sm cursor-help"
+                    style={{
+                      background: badge ? `linear-gradient(90deg, ${badge.glow.replace("0.55","0.95").replace("0.6","0.95")}, rgba(255,255,255,0.5))` : "rgba(148,163,184,0.18)",
+                      color: badge ? "#fff" : "#475569",
+                      border: badge ? "1px solid rgba(255,255,255,0.5)" : "1px solid rgba(148,163,184,0.35)",
+                      textShadow: badge ? "0 1px 2px rgba(0,0,0,0.2)" : "none",
+                    }}
+                  >
+                    <Flame size={11} className={badge ? "text-white" : "text-slate-500"} strokeWidth={2.4} fill={badge ? "white" : "none"} />
+                    <span data-testid="streak-current">{streak.current}</span>
+                    <span className="opacity-70">·</span>
+                    <span>mejor <span data-testid="streak-best">{streak.best}</span></span>
+                    {badge && <span className="ml-0.5">{badge.emoji}</span>}
+
+                    {/* Tooltip: línea temporal 12 puntitos (posicionado a la derecha para no chocar con bordes) */}
+                    <span
+                      role="tooltip"
+                      data-testid="streak-timeline-tooltip"
+                      className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-30 whitespace-nowrap rounded-2xl px-3 py-2 shadow-2xl"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(15,23,42,0.96), rgba(30,41,59,0.96))",
+                        border: "1px solid rgba(148,163,184,0.35)",
+                        backdropFilter: "blur(12px)",
+                      }}
+                    >
+                      {/* Flechita apuntando al chip */}
+                      <span
+                        aria-hidden
+                        className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0"
+                        style={{
+                          borderTop: "6px solid transparent",
+                          borderBottom: "6px solid transparent",
+                          borderRight: "6px solid rgba(15,23,42,0.96)",
+                        }}
+                      />
+                      <span className="block text-[9px] font-black text-slate-300 uppercase tracking-widest mb-1.5 text-center normal-case">
+                        Línea del año · {streak.total}/12 conquistados
+                      </span>
+                      <span className="flex items-center gap-1">
+                        {data.months.map((mm) => (
+                          <span
+                            key={mm.month}
+                            title={`${MONTHS_ES[mm.month - 1]}: ${mm.reached ? "cumplido" : "pendiente"}`}
+                            className="w-2.5 h-2.5 rounded-full inline-block"
+                            style={{
+                              background: mm.reached
+                                ? "linear-gradient(135deg,#34d399,#10b981)"
+                                : "rgba(148,163,184,0.35)",
+                              boxShadow: mm.reached ? "0 0 6px rgba(52,211,153,0.7)" : "none",
+                              border: mm.reached ? "none" : "1px solid rgba(148,163,184,0.5)",
+                            }}
+                          />
+                        ))}
+                      </span>
+                      <span className="flex items-center justify-between gap-2 mt-1.5 text-[8px] font-bold text-slate-400 tracking-wider">
+                        <span>ENE</span>
+                        <span>DIC</span>
+                      </span>
+                    </span>
+                  </span>
+                );
+              })()}
             </p>
           </div>
 
@@ -776,9 +954,8 @@ export default function Metas() {
           </div>
         </div>
       </motion.div>
+      )}
 
-      {/* Streak card — racha consecutiva de meses cumplidos */}
-      {data && <StreakCard streak={computeStreaks(data.months)} formatCurrency={formatCurrency} />}
       <div className="h-6" />
 
       {/* Months grid */}
@@ -799,6 +976,9 @@ export default function Metas() {
               onSave={handleSaveMonth}
               celebrated={celebratedRef.current.has(`${type}-${year}-${m.month}`)}
               onCelebrate={handleMonthCelebrate}
+              isPast={currentMonth > 0 && m.month < currentMonth}
+              isCurrent={currentMonth > 0 && m.month === currentMonth}
+              mode={type}
             />
           ))}
         </div>

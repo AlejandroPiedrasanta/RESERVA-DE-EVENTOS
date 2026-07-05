@@ -2875,10 +2875,20 @@ async def metas_progress(year: int, type: str):
 
     months_out = []
     annual_actual = 0.0
+    # Meta mensual derivada de la anual (ventas/ganancias). En gastos NO se auto-deriva.
+    auto_monthly = 0.0
+    if type != "gastos" and annual_goal > 0:
+        auto_monthly = round(annual_goal / 12.0, 2)
+
     for m in range(1, 13):
         act = actual_for(m)
         annual_actual += act
-        goal = goal_by_month.get(m, 0.0)
+        custom = goal_by_month.get(m)
+        is_custom = custom is not None
+        if is_custom:
+            goal = float(custom)
+        else:
+            goal = auto_monthly
         pct = (act / goal * 100) if goal > 0 else 0.0
         months_out.append({
             "month": m,
@@ -2886,6 +2896,8 @@ async def metas_progress(year: int, type: str):
             "goal": round(goal, 2),
             "percent": round(pct, 2),
             "reached": goal > 0 and act >= goal,
+            "is_custom": is_custom,
+            "is_auto": (not is_custom) and goal > 0,
         })
 
     ann_pct = (annual_actual / annual_goal * 100) if annual_goal > 0 else 0.0
@@ -2897,6 +2909,7 @@ async def metas_progress(year: int, type: str):
         "annual_actual": round(annual_actual, 2),
         "annual_percent": round(ann_pct, 2),
         "annual_reached": annual_goal > 0 and annual_actual >= annual_goal,
+        "auto_monthly": auto_monthly,
     }
 
 
