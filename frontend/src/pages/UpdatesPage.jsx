@@ -74,10 +74,6 @@ export default function UpdatesPage() {
   }, []);
 
   const handleCheckGithub = async () => {
-    if (!ghConfig.repo_url) {
-      toast({ title: "No hay repositorio configurado", description: "Ve a Base de Datos → GitHub para conectarlo", variant: "destructive" });
-      return;
-    }
     setGhChecking(true);
     setGhResult(null);
     setCheckResult(null);
@@ -88,11 +84,18 @@ export default function UpdatesPage() {
         toast({ title: `Nueva versión disponible`, description: `${res.commits_ahead} cambio(s) nuevo(s). Pulsa "Aplicar" para instalarla.` });
       } else {
         // Banner prominente: ya estás al día
-        setCheckResult({ status: "latest", version: "" });
+        setCheckResult({ status: "latest", version: res.remote_version || res.local_version || "" });
         toast({ title: "Ya tienes la versión más actual ✓", description: "Tu app está al día con el repositorio de GitHub" });
       }
     } catch (err) {
-      toast({ title: "Error al verificar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+      const isTimeout = err?.code === "ECONNABORTED" || /timeout/i.test(err?.message || "");
+      toast({
+        title: isTimeout ? "Sin respuesta de GitHub" : "Error al verificar",
+        description: isTimeout
+          ? "GitHub tardó demasiado en responder. Verifica tu conexión e intenta de nuevo."
+          : (err?.response?.data?.detail || String(err)),
+        variant: "destructive",
+      });
     } finally {
       setGhChecking(false);
     }
@@ -268,6 +271,43 @@ export default function UpdatesPage() {
 
         {/* Check result */}
         <AnimatePresence mode="wait">
+          {ghResult?.has_updates && (
+            <motion.div key="gh-update"
+              initial={{ opacity: 0, scale: 0.92, y: -8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20 }}
+              data-testid="github-update-available-banner"
+              className="relative overflow-hidden rounded-3xl p-5 mt-4 text-white"
+              style={{ background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #db2777 100%)" }}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4 relative z-10">
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                  className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                  <RefreshCw size={26} />
+                </motion.div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg font-black leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                    Nueva versión disponible{ghResult.remote_version ? `: v${ghResult.remote_version}` : ""}
+                  </p>
+                  <p className="text-sm text-white/85">
+                    {ghResult.commits_ahead
+                      ? `${ghResult.commits_ahead} cambio(s) nuevo(s) en la rama ${ghResult.branch || "main"}.`
+                      : "Hay una versión nueva en GitHub."}
+                    {ghResult.local_version ? ` Tienes v${ghResult.local_version}.` : ""}
+                  </p>
+                </div>
+                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                  onClick={handleApplyGithub}
+                  disabled={ghApplying}
+                  data-testid="apply-github-update-btn"
+                  className="flex items-center justify-center gap-1.5 bg-white text-indigo-700 hover:bg-white/90 px-5 py-2.5 rounded-full text-xs font-black transition-colors flex-shrink-0 disabled:opacity-60">
+                  {ghApplying
+                    ? <><Loader2 size={14} className="animate-spin" /> Aplicando…</>
+                    : <><ArrowDownCircle size={14} /> Aplicar ahora</>}
+                </motion.button>
+              </div>
+            </motion.div>
+          )}
           {(checkResult?.status === "latest" || checkResult?.status === "installed") && (
             <motion.div key="latest"
               initial={{ opacity: 0, scale: 0.92, y: -8 }}

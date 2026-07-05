@@ -2,7 +2,9 @@ import axios from "axios";
 
 const BASE = `${window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL}/api`;
 
-export const api = axios.create({ baseURL: BASE });
+// Timeout global (30s) para que si un endpoint tarda demasiado (ej. GitHub API
+// caído en la app de escritorio) el frontend no se quede colgado en spinners.
+export const api = axios.create({ baseURL: BASE, timeout: 30000 });
 
 export const getStats = () => api.get("/stats").then(r => r.data);
 export const getReservations = () => api.get("/reservations").then(r => r.data);

@@ -2545,12 +2545,25 @@ async def check_github_updates():
     headers = {"Accept": "application/vnd.github+json"}
     if cfg.get("token"):
         headers["Authorization"] = f"Bearer {cfg['token']}"
-    try:
-        async with httpx.AsyncClient(timeout=15) as http:
-            r = await http.get(
+
+    # Ejecutar en paralelo el fetch de commits y version.txt para responder rápido
+    async def _fetch_commits():
+        async with httpx.AsyncClient(timeout=6) as http:
+            return await http.get(
                 f"https://api.github.com/repos/{owner}/{repo}/commits",
                 headers=headers, params={"sha": branch, "per_page": 10},
             )
+
+    async def _fetch_ver():
+        try:
+            gh = await _fetch_github_version()
+            return gh.get("version", "") or ""
+        except Exception as e:
+            logger.warning(f"No se pudo leer remote_version en check-updates: {e}")
+            return ""
+
+    try:
+        r, remote_version = await asyncio.gather(_fetch_commits(), _fetch_ver())
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Sin conexión a GitHub: {e}")
     if r.status_code == 404:
@@ -2560,7 +2573,17 @@ async def check_github_updates():
     commits = r.json() or []
     remote_sha = commits[0]["sha"] if commits else ""
     last_seen = cfg.get("last_commit_sha", "")
-    has_updates = bool(remote_sha) and remote_sha != last_seen
+
+    # Decisión de "hay actualizaciones":
+    # 1) Si podemos comparar versiones (version.txt local y remoto), la versión manda:
+    #    remote_version > local_version → hay update; en caso contrario NO hay update
+    #    (aunque el SHA sea distinto, si la versión no subió es solo commits internos).
+    # 2) Si no hay info de versiones, se compara SHA con last_seen (comportamiento previo).
+    if remote_version and _local_version:
+        has_updates = _is_newer(remote_version, _local_version)
+    else:
+        has_updates = bool(remote_sha) and remote_sha != last_seen
+
     new_commits = [{
         "sha": c["sha"][:7],
         "full_sha": c["sha"],
@@ -2569,20 +2592,18 @@ async def check_github_updates():
         "date": c.get("commit", {}).get("author", {}).get("date", ""),
         "url": c.get("html_url", ""),
     } for c in commits[:5]]
-    await db.app_settings.update_one(
-        {}, {"$set": {"github_config.last_check_at": datetime.now(timezone.utc).isoformat(),
-                      "github_config.last_remote_sha": remote_sha}}, upsert=True)
+
+    # Persistir estado. Si estamos al día por versión, sincronizamos last_commit_sha
+    # con remote_sha para que futuros chequeos por SHA también respondan "al día".
+    set_fields = {
+        "github_config.last_check_at": datetime.now(timezone.utc).isoformat(),
+        "github_config.last_remote_sha": remote_sha,
+    }
+    if not has_updates and remote_sha:
+        set_fields["github_config.last_commit_sha"] = remote_sha
+    await db.app_settings.update_one({}, {"$set": set_fields}, upsert=True)
     if _using_embedded:
         asyncio.create_task(_save_embedded_data())
-
-    # ── Número de versión (version.txt) para que la app de escritorio muestre
-    #    "v2.0" en vez del hash del commit. Lee version.txt del repo GitHub. ──
-    remote_version = ""
-    try:
-        gh = await _fetch_github_version()
-        remote_version = gh.get("version", "") or ""
-    except Exception as e:
-        logger.warning(f"No se pudo leer remote_version en check-updates: {e}")
 
     return {
         "has_updates": has_updates,
