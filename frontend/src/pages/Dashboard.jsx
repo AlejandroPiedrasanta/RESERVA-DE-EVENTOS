@@ -6,6 +6,9 @@ import { motion } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
 import { getEventConfig } from "@/lib/eventConfig";
+import MonthlyEventsBanner from "@/components/MonthlyEventsBanner";
+import EventNotificationPopup from "@/components/EventNotificationPopup";
+import AnimatedEventTypeCard from "@/components/AnimatedEventTypeCard";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
@@ -184,6 +187,17 @@ export default function Dashboard() {
   };
 
   const currentMonthName = tr.months[new Date().getMonth()];
+  const nextMonthName = tr.months[(new Date().getMonth() + 1) % 12];
+
+  // Future pending events: active (non-cancelled/completed) events dated AFTER end of current month
+  const _now = new Date();
+  const _endCurrent = new Date(_now.getFullYear(), _now.getMonth() + 1, 1); // 1st of next month
+  const futurePendingEvents = all.filter(r => {
+    if (!r.event_date) return false;
+    if (r.status === "Cancelado" || r.status === "Completado") return false;
+    const d = new Date(r.event_date + "T00:00:00");
+    return d >= _endCurrent;
+  });
 
   useEffect(() => { load(); }, []);
 
@@ -224,48 +238,40 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="flex items-center justify-between mb-8"
+        className="mb-8"
       >
-        <div>
-          <h1
-            className="text-5xl font-black gradient-text tracking-tight"
-            style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-          >
-            Dashboard
-          </h1>
-          <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>
-        </div>
-        <motion.button
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setShowForm(true)}
-          data-testid="new-reservation-btn"
-          className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold"
+        <h1
+          className="text-5xl font-black gradient-text tracking-tight"
+          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
         >
-          <Plus size={16} /> {tr.common.newReservation}
-        </motion.button>
+          Dashboard
+        </h1>
+        <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>
       </motion.div>
 
-      {/* Stat cards */}
+      {/* Animated banner: month events + future pending events (replaces stat cards) */}
       {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-32 glass rounded-3xl animate-pulse" />
-          ))}
-        </div>
+        <div className="h-72 glass rounded-[32px] animate-pulse mb-8" />
       ) : (
-        <motion.div
-          variants={container}
-          initial="hidden"
-          animate="show"
-          className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
-          data-testid="stats-grid"
-        >
-          {visibleWidgets.map(w => {
-            const cfg = WIDGET_DATA[w.id];
-            return <StatCard key={w.id} icon={cfg.icon} label={cfg.label} value={cfg.value} sub={cfg.sub} gradient={cfg.gradient} />;
-          })}
-        </motion.div>
+        <MonthlyEventsBanner
+          monthEvents={recent}
+          pendingEvents={futurePendingEvents}
+          nextMonthName={nextMonthName}
+          monthName={currentMonthName}
+          language={language}
+          onCreate={() => setShowForm(true)}
+          onViewAll={() => navigate("/reservaciones")}
+        />
+      )}
+
+      {/* Popup notification (only fires once per month via sessionStorage) */}
+      {!loading && recent.length > 0 && (
+        <EventNotificationPopup
+          events={recent}
+          monthName={currentMonthName}
+          language={language}
+          onView={() => navigate("/reservaciones")}
+        />
       )}
 
       {/* Recent reservations */}
@@ -521,36 +527,101 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* Event Types Breakdown */}
+      {/* Event Types Breakdown — Clean, readable, animated */}
       {!loading && typeEntries.length > 0 && (
         <motion.div
-          initial={{ opacity: 0, y: 28 }}
+          initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.5 }}
-          className="glass rounded-3xl p-7 mt-5"
+          transition={{ duration: 0.55, delay: 0.4 }}
+          className="glass rounded-[32px] p-7 mt-5 relative overflow-hidden"
           data-testid="charts-section"
         >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-9 h-9 rounded-2xl btn-primary flex items-center justify-center">
-              <BarChart2 size={15} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+          {/* Soft color accent in background */}
+          <motion.div
+            className="absolute -right-20 -top-20 w-72 h-72 rounded-full pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(236,72,153,0.14), transparent 70%)",
+            }}
+            animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+          />
+          <motion.div
+            className="absolute -left-16 -bottom-16 w-64 h-64 rounded-full pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%)",
+            }}
+            animate={{ scale: [1, 1.2, 1], opacity: [0.6, 0.9, 0.6] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+          />
+
+          {/* Header */}
+          <div className="relative z-10 flex items-center gap-4 mb-6">
+            <motion.div
+              initial={{ scale: 0, rotate: -20 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.55 }}
+              className="relative w-11 h-11 rounded-2xl flex items-center justify-center"
+              style={{
+                background: "linear-gradient(135deg,#ec4899,#a855f7)",
+                boxShadow: "0 8px 20px -6px rgba(168,85,247,0.55)",
+              }}
+            >
+              <motion.span
+                className="absolute inset-0 rounded-2xl"
+                style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
+                animate={{ scale: [1, 1.4], opacity: [0.4, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
+              />
+              <BarChart2 size={18} className="text-white relative" strokeWidth={2.2} />
+            </motion.div>
+            <div className="flex-1">
+              <h2
+                className="text-xl font-black text-slate-900 leading-tight"
+                style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+              >
                 {language === "es" ? "Tipos de Evento" : "Event Types"}
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500 font-semibold flex items-center gap-1.5 mt-0.5">
+                <motion.span
+                  className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"
+                  animate={{ opacity: [1, 0.3, 1], scale: [1, 1.3, 1] }}
+                  transition={{ duration: 1.6, repeat: Infinity }}
+                />
                 {active.length} {language === "es" ? "reservas activas" : "active reservations"}
+                <span className="text-slate-300 mx-1">·</span>
+                {typeEntries.length} {language === "es" ? "categorías" : "categories"}
               </p>
             </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.9, type: "spring", stiffness: 220, damping: 14 }}
+              className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full"
+              style={{
+                background: "linear-gradient(135deg,rgba(236,72,153,0.12),rgba(168,85,247,0.12))",
+                border: "1px solid rgba(168,85,247,0.2)",
+              }}
+            >
+              <span className="text-[10px] uppercase tracking-widest font-black text-slate-500">
+                {language === "es" ? "Top" : "Top"}
+              </span>
+              <span className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                {typeEntries[0]?.[0]}
+              </span>
+            </motion.div>
           </div>
+
+          {/* Grid of animated cards */}
           <motion.div
             variants={container}
             initial="hidden"
             animate="show"
-            className="grid grid-cols-2 sm:grid-cols-3 gap-4"
+            className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
           >
             {typeEntries.map(([type, count], idx) => (
-              <EventTypeCard key={type} type={type} count={count} total={active.length} index={idx} />
+              <AnimatedEventTypeCard key={type} type={type} count={count} total={active.length} index={idx} />
             ))}
           </motion.div>
         </motion.div>
