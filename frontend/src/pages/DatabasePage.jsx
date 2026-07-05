@@ -33,6 +33,7 @@ import {
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
+import { DesktopAppSection } from "@/components/DesktopAppSection";
 
 const BASE = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL;
 
@@ -1787,6 +1788,15 @@ export default function DatabasePage() {
                     <span>{new Date(ghConfig.last_push_at).toLocaleString("es-GT")}</span>
                   </div>
                 )}
+
+                {/* ── App de Escritorio (movida desde Ajustes) ── */}
+                <motion.div
+                  className="pt-2"
+                  initial="show"
+                  animate="show"
+                >
+                  <DesktopAppSection />
+                </motion.div>
 
               </div>
             </CollapseBody>
