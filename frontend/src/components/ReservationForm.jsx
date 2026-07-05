@@ -140,7 +140,7 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
         key="ultra-overlay"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.25 }}
-        className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden py-4 px-4 ultra-scroll"
+        className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden pt-4 pb-4 px-4 ultra-scroll"
         style={{
           background: "radial-gradient(1200px 700px at 20% 10%, rgba(139,92,246,0.35), transparent 60%), radial-gradient(1000px 600px at 80% 90%, rgba(236,72,153,0.28), transparent 60%), rgba(3, 6, 23, 0.75)",
           backdropFilter: "blur(24px)",
