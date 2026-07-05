@@ -163,7 +163,16 @@ export default function Socios() {
     <div className="px-6 py-8 max-w-7xl mx-auto">
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Socios</h1>
+          <div className="flex items-center gap-3">
+            <motion.div
+              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+            >
+              <Users size={22} className="text-white" strokeWidth={2} />
+            </motion.div>
+            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Socios</h1>
+          </div>
           <p className="text-sm text-slate-500 font-medium mt-1.5">{socios.length} socios — arrastra para reordenar</p>
         </div>
         <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
@@ -183,26 +192,6 @@ export default function Socios() {
           if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
         }}
       />
-
-      {/* Financial summary */}
-      {financials && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: "Total Eventos",  value: formatCurrency(financials.total_event_amount),          icon: DollarSign,  grad: "from-emerald-400 to-emerald-600",  testid: "stat-total-events" },
-            { label: "Costo Equipo",   value: formatCurrency(financials.total_partner_cost),           icon: Users,       grad: "from-amber-400 to-orange-500",      testid: "stat-team-cost"    },
-            { label: "Pagado Equipo",  value: formatCurrency(financials.total_paid_to_partners || 0),  icon: CheckCircle, grad: "from-green-400 to-emerald-500",    testid: "stat-paid"         },
-            { label: "Ingreso Real",   value: formatCurrency(financials.real_income),                  icon: TrendingUp,  grad: "from-indigo-400 to-purple-600",     testid: "stat-real-income"  },
-          ].map(({ label, value, icon: Icon, grad, testid }) => (
-            <div key={label} className="glass rounded-3xl p-5" data-testid={testid}>
-              <div className="flex items-center justify-between mb-3">
-                <div className={`w-9 h-9 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center`}><Icon size={15} className="text-white" /></div>
-                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{label}</span>
-              </div>
-              <p className="text-xl font-black text-slate-900 tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{value}</p>
-            </div>
-          ))}
-        </motion.div>
-      )}
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

@@ -1460,7 +1460,8 @@ async def export_reservations(format: str = "csv"):
 async def get_calendar_events():
     cursor = db.reservations.find(
         {"status": {"$nin": ["Cancelado"]}},
-        {"client_name": 1, "event_date": 1, "event_type": 1, "status": 1, "_id": 1}
+        {"client_name": 1, "client_phone": 1, "event_date": 1, "event_time": 1, "event_type": 1,
+         "venue": 1, "total_amount": 1, "advance_paid": 1, "package_type": 1, "status": 1, "_id": 1}
     )
     docs = await cursor.to_list(1000)
     return [doc_to_dict(d) for d in docs]

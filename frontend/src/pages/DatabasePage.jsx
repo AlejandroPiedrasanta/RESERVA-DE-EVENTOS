@@ -825,9 +825,18 @@ export default function DatabasePage() {
 
       {/* ── Header ── */}
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
-        <h1 className="text-5xl font-black gradient-text" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-          Base de Datos
-        </h1>
+        <div className="flex items-center gap-3">
+          <motion.div
+            animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+          >
+            <Database size={22} className="text-white" strokeWidth={2} />
+          </motion.div>
+          <h1 className="text-5xl font-black gradient-text" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+            Base de Datos
+          </h1>
+        </div>
         <p className="text-sm text-slate-500 font-medium mt-1.5">Respaldos y conexión a la base de datos en la nube</p>
       </motion.div>
 

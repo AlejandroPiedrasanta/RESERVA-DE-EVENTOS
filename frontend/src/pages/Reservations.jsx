@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getReservations, deleteReservation } from "@/lib/api";
-import { Plus, Trash2, Eye, Search, FileDown, ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { Plus, Trash2, Eye, Search, FileDown, ChevronDown, ChevronUp, SlidersHorizontal, CalendarCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
@@ -11,7 +11,7 @@ import { getEventConfig, getEventTypeName } from "@/lib/eventConfig";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
-export default function Reservations() {
+export default function Reservations({ embedded = false }) {
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -96,10 +96,20 @@ export default function Reservations() {
   };
 
   return (
-    <div className="px-6 py-8 max-w-7xl mx-auto">
+    <div className={embedded ? "" : "px-6 py-8 max-w-7xl mx-auto"}>
+      {!embedded && (
       <motion.div initial={{ opacity:0, y:-16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }} className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily:'Cabinet Grotesk, sans-serif' }}>{tr.nav.reservations}</h1>
+          <div className="flex items-center gap-3">
+            <motion.div
+              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+            >
+              <CalendarCheck size={22} className="text-white" strokeWidth={2} />
+            </motion.div>
+            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily:'Cabinet Grotesk, sans-serif' }}>{tr.nav.reservations}</h1>
+          </div>
           <p className="text-sm text-slate-500 font-medium mt-1.5">{reservations.length} {l.colClient === "Client" ? "reservations total" : "reservas en total"}</p>
         </div>
         <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }} onClick={() => setShowForm(true)} data-testid="new-reservation-btn"
@@ -107,6 +117,7 @@ export default function Reservations() {
           <Plus size={16} /> {tr.common.newReservation}
         </motion.button>
       </motion.div>
+      )}
 
       <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-6">
         {/* Fila principal de búsqueda */}

@@ -6,7 +6,7 @@ import {
   Bell, BellRing, Database, CheckCircle, XCircle, RefreshCw,
   Wifi, WifiOff, MessageCircle, Mail, Loader2, Monitor,
   Package, AlertCircle, Zap, Clock, ChevronDown,
-  Github, GitBranch, GitCommit, AlertTriangle, ArrowDownCircle, ExternalLink, CheckCircle2,
+  Github, GitBranch, GitCommit, AlertTriangle, ArrowDownCircle, ExternalLink, CheckCircle2, Cog,
 } from "lucide-react";
 import { useSettings, CURRENCIES } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -569,7 +569,16 @@ export default function Settings() {
   return (
     <div className="px-6 py-8 max-w-2xl mx-auto">
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
-        <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: 'Cabinet Grotesk, sans-serif' }}>{s.title}</h1>
+        <div className="flex items-center gap-3">
+          <motion.div
+            animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+          >
+            <Cog size={22} className="text-white" strokeWidth={2} />
+          </motion.div>
+          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: 'Cabinet Grotesk, sans-serif' }}>{s.title}</h1>
+        </div>
         <p className="text-sm text-slate-500 font-medium mt-1.5">{s.subtitle}</p>
       </motion.div>
 

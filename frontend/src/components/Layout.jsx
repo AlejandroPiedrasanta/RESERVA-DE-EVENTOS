@@ -88,8 +88,7 @@ export default function Layout({ children }) {
 
   const NAV_DEFS = {
     "/dashboard":       { label: tr.nav.dashboard,                   icon: LayoutDashboard },
-    "/reservaciones":   { label: tr.nav.reservations,                icon: List },
-    "/calendario":      { label: tr.nav.calendar,                    icon: CalendarDays },
+    "/calendario":      { label: tr.nav.reservations,                icon: CalendarDays },
     "/socios":          { label: tr.nav.socios || "Socios",          icon: Users },
     "/metas":           { label: tr.nav.metas || "Metas",            icon: Target },
     "/base-de-datos":   { label: tr.nav.database || "Base de Datos", icon: Database },

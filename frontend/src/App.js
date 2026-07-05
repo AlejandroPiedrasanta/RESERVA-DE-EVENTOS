@@ -50,7 +50,7 @@ function AnimatedRoutes() {
         <Routes location={location}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/reservaciones" element={<Reservations />} />
+          <Route path="/reservaciones" element={<Navigate to="/calendario" replace />} />
           <Route path="/reservaciones/:id" element={<ReservationDetail />} />
           <Route path="/calendario" element={<CalendarView />} />
           <Route path="/ajustes" element={<Settings />} />

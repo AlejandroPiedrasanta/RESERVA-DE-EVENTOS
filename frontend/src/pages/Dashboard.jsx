@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getStats, getReservations, getSocios } from "@/lib/api";
-import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle } from "lucide-react";
+import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle, LayoutDashboard } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
@@ -240,12 +240,21 @@ export default function Dashboard() {
         transition={{ duration: 0.4 }}
         className="mb-8"
       >
-        <h1
-          className="text-5xl font-black gradient-text tracking-tight"
-          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-        >
-          Dashboard
-        </h1>
+        <div className="flex items-center gap-3">
+          <motion.div
+            animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+          >
+            <LayoutDashboard size={22} className="text-white" strokeWidth={2} />
+          </motion.div>
+          <h1
+            className="text-5xl font-black gradient-text tracking-tight"
+            style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+          >
+            Dashboard
+          </h1>
+        </div>
         <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>
       </motion.div>
 
