@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import SocioForm from "@/components/SocioForm";
+import PartnerDebtBanner from "@/components/PartnerDebtBanner";
 
 const ROLE_ICONS   = { "Fotógrafo": Camera, "Videógrafo": Video, "Asistente": Users };
 const ROLE_COLORS  = {
@@ -171,6 +172,17 @@ export default function Socios() {
           <Plus size={16} /> Nuevo Socio
         </motion.button>
       </motion.div>
+
+      {/* Dynamic banner — pending payments to partners */}
+      <PartnerDebtBanner
+        socios={socios}
+        reservations={reservations}
+        formatCurrency={formatCurrency}
+        onScrollTo={(socioId) => {
+          const el = document.querySelector(`[data-testid="socio-card-${socioId}"]`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+      />
 
       {/* Financial summary */}
       {financials && (
