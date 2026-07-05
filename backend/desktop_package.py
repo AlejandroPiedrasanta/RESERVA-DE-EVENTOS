@@ -190,20 +190,26 @@ notepad .env
 # de progreso minimalista. Instala dependencias en background y abre el
 # servidor + navegador al terminar.
 # =====================================================================
-_LAUNCHER_PYW = r'''# Cinema Productions - Launcher local (arranque sin consola)
+_LAUNCHER_PYW = r'''# Cinema Productions - Launcher local (arranque grafico moderno, sin consola)
 import os, sys, time, socket, threading, subprocess, webbrowser, traceback
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
+import tkinter.font as tkfont
 
 APP_DIR = Path(__file__).resolve().parent
 os.chdir(APP_DIR)
 PORT = 8001
 URL = "http://127.0.0.1:8001"
 
-BG = "#0b1020"; ACC = "#6d5efc"; OK = "#22c55e"; ERR = "#ef4444"
-TXT = "#eef0fb"; DIM = "#8b90a6"
+# ── Paleta moderna (dark glass / indigo) ──────────────────────────
+BG_TOP = "#080816"; BG_BOT = "#16113a"
+CARD   = "#191634"; CARD_HI = "#221d47"
+ACC    = "#7c6cff"; ACC2 = "#a78bfa"
+OK     = "#34d399"; ERR = "#fb7185"
+TXT    = "#f4f4ff"; DIM = "#8b8fb5"
+TRACK  = "#26234a"
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+W, H = 660, 470
 
 
 def port_open(timeout=0.5):
@@ -222,55 +228,109 @@ def pythonw_exe():
     return sys.executable
 
 
+def _rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _hx(c):
+    return "#%02x%02x%02x" % c
+
+
+def _mix(a, b, t):
+    ca, cb = _rgb(a), _rgb(b)
+    return _hx(tuple(int(ca[i] + (cb[i] - ca[i]) * t) for i in range(3)))
+
+
 class App:
     def __init__(self, root):
         self.root = root
         self.proc = None
+        self._pct = 0.0
+        self._pct_target = 0.0
+        self._bar_color = ACC
         root.title("Cinema Productions")
-        root.configure(bg=BG)
-        w, h = 560, 380
+        root.configure(bg=BG_TOP)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, (sh - h) // 2))
+        root.geometry("%dx%d+%d+%d" % (W, H, (sw - W) // 2, (sh - H) // 2))
         root.resizable(False, False)
+        try:
+            root.iconphoto(True, tk.PhotoImage(width=1, height=1))
+        except Exception:
+            pass
+
+        self.c = tk.Canvas(root, width=W, height=H, highlightthickness=0, bd=0)
+        self.c.pack(fill="both", expand=True)
+        self._build_ui()
+
         try:
             root.attributes("-alpha", 0.0)
             self._fade_in()
         except Exception:
             pass
+        self._animate_bar()
+        self._pulse_glow()
+        root.after(300, self.start)
 
-        self.topbar = tk.Frame(root, bg=ACC, height=4)
-        self.topbar.pack(fill="x")
-        self._pulse_bar()
-        tk.Label(root, text="CINEMA PRODUCTIONS", bg=BG, fg=TXT,
-                 font=("Segoe UI Semibold", 23)).pack(pady=(46, 2))
-        tk.Label(root, text="Gestor de Reservas de Eventos", bg=BG, fg=DIM,
-                 font=("Segoe UI", 11)).pack()
+    # ── construccion visual ───────────────────────────────────────
+    def _round_rect(self, x1, y1, x2, y2, r, **kw):
+        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+               x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return self.c.create_polygon(pts, smooth=True, **kw)
 
-        style = ttk.Style(root)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure("CP.Horizontal.TProgressbar", troughcolor="#1a2036",
-                        background=ACC, bordercolor=BG, lightcolor=ACC,
-                        darkcolor=ACC, thickness=7)
-        self.bar = ttk.Progressbar(root, style="CP.Horizontal.TProgressbar",
-                                   length=420, mode="determinate", maximum=100)
-        self.bar.pack(pady=(52, 12))
-        self.status = tk.Label(root, text="Iniciando...", bg=BG, fg=TXT,
-                               font=("Segoe UI", 11))
-        self.status.pack()
-        self.detail = tk.Label(root, text="", bg=BG, fg=DIM, font=("Consolas", 9))
-        self.detail.pack(pady=(5, 0))
-        self.retry = tk.Button(root, text="Reintentar", command=self.start,
-                               bg=ACC, fg="white", activebackground="#5648e0",
-                               activeforeground="white", relief="flat", bd=0,
-                               padx=22, pady=7, cursor="hand2",
-                               font=("Segoe UI Semibold", 10))
-        root.after(250, self.start)
+    def _build_ui(self):
+        # fondo con degradado vertical
+        for y in range(H):
+            self.c.create_line(0, y, W, y, fill=_mix(BG_TOP, BG_BOT, y / H))
+        cx = W // 2
+
+        # tarjeta central tipo glass con borde de acento
+        self._round_rect(56, 78, W - 56, H - 56, 30, fill=CARD, outline="")
+        self._round_rect(56, 78, W - 56, 86, 6, fill=ACC, outline="")
+
+        # emblema circular con inicial
+        self._round_rect(cx - 34, 108, cx + 34, 176, 34, fill=CARD_HI, outline="")
+        self.c.create_oval(cx - 26, 116, cx + 26, 168, outline=ACC, width=2)
+        self.c.create_text(cx, 142, text="CP", fill=ACC2,
+                           font=("Segoe UI Semibold", 20))
+
+        # marca
+        self.c.create_text(cx, 208, text="CINEMA PRODUCTIONS", fill=TXT,
+                           font=("Segoe UI Semibold", 25))
+        self.c.create_text(cx, 238, text="G E S T O R   D E   R E S E R V A S",
+                           fill=DIM, font=("Segoe UI", 9))
+
+        # barra de progreso redondeada
+        self.bx1, self.bx2, self.by, self.bh = 150, W - 150, 300, 9
+        self._round_rect(self.bx1, self.by - self.bh // 2, self.bx2,
+                         self.by + self.bh // 2, self.bh // 2, fill=TRACK, outline="")
+        self.bar_fill = None
+        # punto glow al final de la barra
+        self.glow = self.c.create_oval(self.bx1 - 6, self.by - 6,
+                                       self.bx1 + 6, self.by + 6, fill=ACC, outline="")
+
+        # textos de estado
+        self.t_status = self.c.create_text(cx, 344, text="Iniciando...", fill=TXT,
+                                           font=("Segoe UI", 13))
+        self.t_detail = self.c.create_text(cx, 372, text="", fill=DIM,
+                                           font=("Consolas", 9))
+
+        # boton reintentar (oculto por defecto)
+        self.btn_bg = self._round_rect(cx - 78, H - 116, cx + 78, H - 76, 20,
+                                       fill=ACC, outline="", state="hidden")
+        self.btn_tx = self.c.create_text(cx, H - 96, text="Reintentar", fill="white",
+                                         font=("Segoe UI Semibold", 11), state="hidden")
+        for tag in (self.btn_bg, self.btn_tx):
+            self.c.tag_bind(tag, "<Button-1>", lambda e: self.start())
+            self.c.tag_bind(tag, "<Enter>",
+                            lambda e: (self.c.itemconfig(self.btn_bg, fill=ACC2),
+                                       self.c.config(cursor="hand2")))
+            self.c.tag_bind(tag, "<Leave>",
+                            lambda e: (self.c.itemconfig(self.btn_bg, fill=ACC),
+                                       self.c.config(cursor="")))
 
     def _fade_in(self, a=0.0):
-        a = min(1.0, a + 0.08)
+        a = min(1.0, a + 0.07)
         try:
             self.root.attributes("-alpha", a)
         except Exception:
@@ -278,25 +338,44 @@ class App:
         if a < 1.0:
             self.root.after(16, lambda: self._fade_in(a))
 
-    _pulse_shades = ["#6d5efc", "#8b7dff", "#a99dff", "#8b7dff"]
-
-    def _pulse_bar(self, i=0):
+    def _animate_bar(self):
+        # interpolacion suave hacia el objetivo
+        self._pct += (self._pct_target - self._pct) * 0.18
+        if abs(self._pct_target - self._pct) < 0.4:
+            self._pct = self._pct_target
         try:
-            self.topbar.config(bg=self._pulse_shades[i % len(self._pulse_shades)])
-            self.root.after(520, lambda: self._pulse_bar(i + 1))
+            if self.bar_fill is not None:
+                self.c.delete(self.bar_fill)
+            w = self.bx1 + (self.bx2 - self.bx1) * max(0.0, min(100.0, self._pct)) / 100.0
+            fx2 = max(self.bx1 + self.bh, w)
+            self.bar_fill = self._round_rect(self.bx1, self.by - self.bh // 2, fx2,
+                                             self.by + self.bh // 2, self.bh // 2,
+                                             fill=self._bar_color, outline="")
+            self.c.coords(self.glow, fx2 - 6, self.by - 6, fx2 + 6, self.by + 6)
+            self.c.tag_raise(self.glow)
+        except Exception:
+            pass
+        self.root.after(16, self._animate_bar)
+
+    def _pulse_glow(self, i=0):
+        try:
+            shades = [ACC, ACC2, "#c4b5fd", ACC2]
+            self.c.itemconfig(self.glow, fill=shades[i % len(shades)])
+            self.root.after(420, lambda: self._pulse_glow(i + 1))
         except Exception:
             pass
 
     def set(self, pct=None, status=None, detail=None, color=None):
         def _do():
             if pct is not None:
-                self.bar["value"] = pct
+                self._pct_target = pct
             if status is not None:
-                self.status.config(text=status)
+                self.c.itemconfig(self.t_status, text=status)
             if detail is not None:
-                self.detail.config(text=str(detail)[:78], fg=DIM)
+                self.c.itemconfig(self.t_detail, text=str(detail)[:82])
             if color is not None:
-                self.status.config(fg=color)
+                self.c.itemconfig(self.t_status, fill=color)
+                self._bar_color = color
         self.root.after(0, _do)
 
     def fail(self, title, log_text=""):
@@ -307,15 +386,21 @@ class App:
             pass
 
         def _do():
-            self.bar["value"] = 100
-            self.status.config(text=title, fg=ERR)
-            self.detail.config(text="Detalle guardado en error_log.txt", fg=DIM)
-            self.retry.pack(pady=(18, 0))
+            self._pct_target = 100
+            self._bar_color = ERR
+            self.c.itemconfig(self.t_status, text=title, fill=ERR)
+            self.c.itemconfig(self.t_detail, text="Detalle guardado en error_log.txt")
+            self.c.itemconfig(self.btn_bg, state="normal")
+            self.c.itemconfig(self.btn_tx, state="normal")
         self.root.after(0, _do)
 
     def start(self):
-        self.retry.pack_forget()
-        self.status.config(fg=TXT)
+        self.c.itemconfig(self.btn_bg, state="hidden")
+        self.c.itemconfig(self.btn_tx, state="hidden")
+        self.c.itemconfig(self.t_status, fill=TXT)
+        self._bar_color = ACC
+        self._pct = 0.0
+        self._pct_target = 0.0
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
@@ -455,33 +540,36 @@ _LEEME_TXT = """CINEMA PRODUCTIONS - Gestor de Reservas de Eventos
 
 COMO USAR (facil):
 
-  1) Doble clic en  ►  INICIAR APP.vbs
+  1) Doble clic en  ►  START.BAT
      La app se abre sola en tu navegador (la primera vez tarda 1-3 min
      instalando; despues arranca en segundos).
 
-  2) Para cerrarla: doble clic en  ■  DETENER APP.bat
+  2) Para cerrarla: doble clic en  ■  DETENER.BAT
 
-  3) (Opcional) Doble clic en  Crear acceso directo.vbs
-     Crea un icono en tu Escritorio para abrir la app con un clic.
+
+ESTRUCTURA DE CARPETAS
+----------------------
+  En la carpeta principal SOLO veras dos archivos:
+
+     START.BAT     -> abrir la aplicacion
+     DETENER.BAT   -> cerrar la aplicacion
+
+  Todo lo demas (el motor de la app) esta dentro de la carpeta:
+
+     SISTEMA\\
+
+  NO borres ni muevas archivos de la carpeta SISTEMA; la app dejaria
+  de funcionar.
 
 
 TUS DATOS
 ---------
-  * Los respaldos automaticos se guardan en la carpeta  backups\\
-    (misma carpeta que este LEEME).
-  * Puedes copiar la carpeta  backups\\  a un USB o a la nube cuando quieras.
+  * Los respaldos automaticos se guardan en la carpeta  SISTEMA\\backups\\
+  * Puedes copiar esa carpeta a un USB o a la nube cuando quieras.
 
-
-NO TOCAR
---------
-  La carpeta  "_sistema (NO TOCAR)"  contiene el motor de la app
-  (Python, dependencias, base de datos local, configuracion .env,
-  frontend compilado, etc). NO borres ni muevas archivos de ahi;
-  la app dejaria de funcionar.
-
-  Toda la configuracion se hace DENTRO de la app: abre la app y
-  ve a  Ajustes -> Base de Datos  para conectar tu MongoDB, o
-  a  Ajustes -> Apariencia  para personalizarla.
+  Toda la configuracion se hace DENTRO de la app: abrela y ve a
+  Ajustes -> Base de Datos  para conectar tu MongoDB, o a
+  Ajustes -> Apariencia  para personalizarla.
 
 
 REQUISITO
@@ -493,7 +581,7 @@ REQUISITO
 
 SI ALGO FALLA
 -------------
-  Abre "_sistema (NO TOCAR)" y revisa los archivos  error_log.txt
+  Abre la carpeta SISTEMA y revisa los archivos  error_log.txt
   y  server_log.txt : contienen el detalle del problema.
 
 
@@ -502,15 +590,31 @@ Cinema Productions - Sistema de Gestion de Reservas
 
 
 _START_BAT = """@echo off
+chcp 65001 >nul
 title Cinema Productions
-cd /d "%~dp0"
+cd /d "%~dp0SISTEMA"
 
 REM =============================================================
-REM  Arranque rapido SIN consola: lanza el launcher grafico
-REM  (ventana con barra de progreso, sin ventana negra).
+REM  START.BAT (raiz) -> lanza el launcher grafico moderno que
+REM  vive dentro de la carpeta SISTEMA. Sin ventana negra.
 REM  La primera vez instala dependencias (1-3 min); despues
 REM  arranca en segundos.
 REM =============================================================
+
+REM -- Habilitar colores ANSI (Windows 10+) --
+for /f %%a in ('echo prompt $E^| cmd') do set "E=%%a"
+
+cls
+echo(
+echo    %E%[38;5;99m╔══════════════════════════════════════════════════════╗%E%[0m
+echo    %E%[38;5;99m║%E%[0m                                                      %E%[38;5;99m║%E%[0m
+echo    %E%[38;5;99m║%E%[0m       %E%[1;97mC I N E M A   P R O D U C T I O N S%E%[0m            %E%[38;5;99m║%E%[0m
+echo    %E%[38;5;99m║%E%[0m       %E%[38;5;147mGestor de Reservas de Eventos%E%[0m                  %E%[38;5;99m║%E%[0m
+echo    %E%[38;5;99m║%E%[0m                                                      %E%[38;5;99m║%E%[0m
+echo    %E%[38;5;99m╚══════════════════════════════════════════════════════╝%E%[0m
+echo(
+echo      %E%[38;5;147m▸%E%[0m  Abriendo la aplicacion...
+echo(
 
 where pythonw >nul 2>&1
 if not errorlevel 1 (
@@ -530,13 +634,11 @@ if not errorlevel 1 (
     exit /b
 )
 
-echo.
-echo  ==========================================================
-echo   Python no esta instalado o no esta en el PATH.
-echo   Descargalo desde: https://www.python.org/downloads/
-echo   IMPORTANTE: marca "Add Python to PATH" al instalar.
-echo  ==========================================================
-echo.
+echo    %E%[38;5;209m✕  Python no esta instalado o no esta en el PATH.%E%[0m
+echo(
+echo       Descargalo desde:  https://www.python.org/downloads/
+echo       IMPORTANTE: marca "Add Python to PATH" al instalar.
+echo(
 pause
 """
 
@@ -545,27 +647,29 @@ _START_BAT_LEGACY = _START_BAT  # alias por compatibilidad
 
 
 _STOP_BAT = """@echo off
+chcp 65001 >nul
 title Cinema Productions - Detener
-color 0C
 cd /d "%~dp0"
 
-echo.
-echo  ==========================================================
-echo    CINEMA PRODUCTIONS - Detener servidor
-echo  ==========================================================
-echo.
-echo  Cerrando todos los procesos relacionados...
-echo.
+for /f %%a in ('echo prompt $E^| cmd') do set "E=%%a"
+
+cls
+echo(
+echo    %E%[38;5;204m╔══════════════════════════════════════════════════════╗%E%[0m
+echo    %E%[38;5;204m║%E%[0m       %E%[1;97mC I N E M A   P R O D U C T I O N S%E%[0m            %E%[38;5;204m║%E%[0m
+echo    %E%[38;5;204m║%E%[0m       %E%[38;5;210mDeteniendo el servidor...%E%[0m                      %E%[38;5;204m║%E%[0m
+echo    %E%[38;5;204m╚══════════════════════════════════════════════════════╝%E%[0m
+echo(
 
 REM ---- 1. Matar procesos escuchando en el puerto 8001 (backend) -----
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8001" ^| findstr LISTENING') do (
-    echo   [+] Cerrando PID %%p ^(puerto 8001^)
+    echo      %E%[38;5;210m▸%E%[0m  Cerrando PID %%p ^(puerto 8001^)
     taskkill /F /PID %%p >nul 2>&1
 )
 
 REM ---- 2. Matar procesos escuchando en el puerto 3000 (frontend dev) --
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3000" ^| findstr LISTENING') do (
-    echo   [+] Cerrando PID %%p ^(puerto 3000^)
+    echo      %E%[38;5;210m▸%E%[0m  Cerrando PID %%p ^(puerto 3000^)
     taskkill /F /PID %%p >nul 2>&1
 )
 
@@ -574,21 +678,14 @@ wmic process where "(name='python.exe' or name='pythonw.exe' or name='py.exe') a
 
 REM ---- 4. Cerrar ventanas con el titulo "Cinema Productions" ---------
 taskkill /F /FI "WINDOWTITLE eq Cinema Productions*" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq Cinema Productions - Launcher*" >nul 2>&1
-
-REM ---- 5. Cerrar el navegador solo si abrio localhost:8001 (opcional)
-REM (Comentado para no afectar otras pestanas del usuario)
-REM taskkill /F /FI "WINDOWTITLE eq *localhost:8001*" >nul 2>&1
 
 timeout /t 2 /nobreak >nul
 
-echo.
-echo  ==========================================================
-echo    Cinema Productions ha sido DETENIDO.
-echo    Para volver a arrancar la app, ejecuta:
-echo         Iniciar.vbs  (o  start.bat)
-echo  ==========================================================
-echo.
+echo(
+echo    %E%[38;5;114m✔  Cinema Productions ha sido DETENIDO.%E%[0m
+echo(
+echo       Para volver a abrir la app, ejecuta:  %E%[1;97mSTART.BAT%E%[0m
+echo(
 timeout /t 3 /nobreak >nul
 exit /b 0
 """
@@ -698,20 +795,26 @@ tzdata>=2023.3
 """
 
 
-_README = """CINEMA PRODUCTIONS - Gestor de Reservas
-=========================================
+_README = """CINEMA PRODUCTIONS - Gestor de Reservas (README tecnico)
+=========================================================
+
+Este archivo vive DENTRO de la carpeta SISTEMA. El usuario final solo
+usa los dos .bat de la carpeta principal:
+
+  START.BAT     -> abrir la app
+  DETENER.BAT   -> cerrar la app
 
 INICIO RAPIDO (Windows):
-  1. Doble clic en  Iniciar.vbs   (recomendado: arranca sin ventana negra)
-     o bien en      start.bat
-  2. La PRIMERA vez instala dependencias desde la carpeta  libs/  (offline, ~15-30 seg).
-     Aparece una ventanita con barra de progreso.
+  1. Doble clic en  START.BAT  (en la carpeta principal).
+     Lanza el launcher grafico (launcher.pyw) sin ventana negra.
+  2. La PRIMERA vez instala dependencias desde la carpeta  libs/  (offline),
+     o descargando online si hace falta. Aparece una ventana con barra de
+     progreso moderna.
   3. La app se abre sola en tu navegador. Las siguientes veces arranca en segundos.
 
 DETENER LA APP:
-  Doble clic en  Detener.bat  para cerrar completamente el servidor.
-  Cerrara todos los procesos python/pythonw relacionados y liberara los
-  puertos 8001 y 3000. Para arrancar de nuevo: ejecuta  Iniciar.vbs.
+  Doble clic en  DETENER.BAT  (carpeta principal). Cierra todos los procesos
+  python/pythonw relacionados y libera los puertos 8001 y 3000.
 
 REQUISITO: Python 3.11, 3.12 o 3.13
   https://www.python.org/downloads/
@@ -731,13 +834,8 @@ DATOS:
   En modo local, todo se guarda en  cinema_data.json  (auto-guardado cada 60 seg
   y al cerrar). Copia ese archivo para respaldar o mover tus datos.
 
-ACTUALIZAR:
-  La app revisa tu repositorio de GitHub e informa si hay una version nueva.
-  Ve a Actualizaciones -> "Aplicar actualizacion" y la app se actualizara y
-  reiniciara automaticamente. Tu  cinema_data.json  y  .env  se conservan.
-
 SI ALGO FALLA:
-  Revisa  error_log.txt  y  server_log.txt  en esta carpeta: contienen el detalle.
+  Revisa  error_log.txt  y  server_log.txt  en esta carpeta (SISTEMA).
 
 Cinema Productions - Sistema de Gestion de Reservas
 """

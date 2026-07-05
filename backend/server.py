@@ -2320,40 +2320,37 @@ async def download_package(request: Request):
     except Exception as _ico_err:
         logger.warning(f"No se pudo generar icono.ico: {_ico_err}")
 
-    # ── Estructura NUEVA del ZIP ─────────────────────────────────────────
+    # ── Estructura del ZIP ───────────────────────────────────────────────
     #   cinema-productions/
-    #     ├── INICIAR APP.vbs          <- arranque (usuario)
-    #     ├── DETENER APP.bat          <- parada  (usuario)
-    #     ├── Crear acceso directo.vbs <- crea .lnk con icono en Escritorio
-    #     ├── LEEME.txt                <- instrucciones simples
-    #     ├── icono.ico                <- icono de la app
-    #     ├── backups/  (se crea sola cuando la app corre)
-    #     └── _sistema (NO TOCAR)/     <- motor tecnico (app.py, launcher, libs, build, .env)
-    SYS = 'cinema-productions/_sistema (NO TOCAR)/'
+    #     ├── START.BAT      <- abrir la app (usuario)
+    #     ├── DETENER.BAT    <- cerrar la app (usuario)
+    #     └── SISTEMA/       <- TODO el motor (app.py, launcher, libs, build,
+    #                            .env, icono, LEEME, backups, etc.)
+    #   En la raiz SOLO existen START.BAT y DETENER.BAT.
+    ROOT = 'cinema-productions/'
+    SYS = 'cinema-productions/SISTEMA/'
 
     files_to_add = [
-        # -- Nivel raíz: solo lo que el usuario debe ver/tocar --
-        ('cinema-productions/INICIAR APP.vbs',           _win_lines(_INICIAR_VBS).encode('utf-8')),
-        ('cinema-productions/DETENER APP.bat',           _win_lines(_STOP_BAT).encode('utf-8')),
-        ('cinema-productions/Crear acceso directo.vbs',  _win_lines(_CREATE_SHORTCUT_VBS).encode('utf-8')),
-        ('cinema-productions/LEEME.txt',                 _win_lines(_LEEME_TXT).encode('utf-8')),
+        # -- Nivel raíz: SOLO los dos .bat que el usuario usa --
+        (ROOT + 'START.BAT',    _win_lines(_START_BAT).encode('utf-8')),
+        (ROOT + 'DETENER.BAT',  _win_lines(_STOP_BAT).encode('utf-8')),
 
-        # -- _sistema (NO TOCAR): motor técnico --
+        # -- SISTEMA: motor técnico completo --
         (SYS + 'app.py',            standalone_py.encode('utf-8')),
         (SYS + '.env',              _win_lines(_ENV_TEMPLATE).encode('utf-8')),
         (SYS + 'requirements.txt',  _REQUIREMENTS.encode('utf-8')),
-        (SYS + 'start.bat',         _win_lines(_START_BAT).encode('utf-8')),
         (SYS + 'start.sh',          _START_SH.encode('utf-8')),
         (SYS + 'launcher.pyw',      _LAUNCHER_PYW.encode('utf-8')),
         (SYS + 'config.py',         _CONFIG_PY.encode('utf-8')),
         (SYS + 'config.bat',        _win_lines(_CONFIG_BAT).encode('utf-8')),
+        (SYS + 'LEEME.txt',         _win_lines(_LEEME_TXT).encode('utf-8')),
         (SYS + 'README-tecnico.txt', _win_lines(_README).encode('utf-8')),
         (SYS + 'version.txt',       auto_version.encode('utf-8')),
     ]
 
-    # Icono binario (si Pillow lo generó)
+    # Icono binario (si Pillow lo generó) -> dentro de SISTEMA
     if icon_bytes:
-        files_to_add.append(('cinema-productions/icono.ico', icon_bytes))
+        files_to_add.append((SYS + 'icono.ico', icon_bytes))
 
     # Adjuntar el mirror actual de saved_themes.json (contiene "Minimalista"
     # como is_default) para que la app de escritorio arranque con el mismo
