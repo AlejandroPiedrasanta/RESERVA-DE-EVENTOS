@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { createSocio, updateSocio, uploadSocioPhoto } from "@/lib/api";
 import {
   ArrowLeft, Camera, Upload, X, Sparkles, User, Phone, Mail, StickyNote,
@@ -95,13 +96,13 @@ export default function SocioForm({ socio, onClose, onSaved }) {
     visible: (i) => ({ opacity: 1, y: 0, transition: { delay: 0.05 * i, duration: 0.4, ease: [0.22, 1, 0.36, 1] } }),
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div
         key="ultra-socio-overlay"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.22 }}
-        className="fixed inset-0 z-50 flex items-center justify-center px-4 py-4 overflow-hidden ultra-scroll"
+        className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6 overflow-y-auto ultra-scroll"
         style={{
           background: "radial-gradient(1000px 600px at 15% 20%, rgba(6,182,212,0.28), transparent 60%), radial-gradient(900px 500px at 85% 80%, rgba(236,72,153,0.28), transparent 60%), rgba(3, 6, 23, 0.75)",
           backdropFilter: "blur(24px)",
@@ -255,7 +256,8 @@ export default function SocioForm({ socio, onClose, onSaved }) {
           </form>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
