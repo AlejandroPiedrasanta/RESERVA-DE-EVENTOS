@@ -542,10 +542,36 @@ export default function Metas() {
   const { formatCurrency } = useSettings();
   const { toast } = useToast();
 
-  const load = useCallback(async () => {
+  // Marca que la primera carga (o carga tras cambiar year/type) ya "sembró" los refs
+  // con el estado ya alcanzado, para NO relanzar confeti por metas ya cumplidas.
+  const seededRef = useRef(false);
+
+  const load = useCallback(async (opts = {}) => {
     setLoading(true);
     try {
       const p = await getMetasProgress(year, type);
+
+      // En la primera carga tras cambiar de contexto (year/type/mount), sembramos
+      // los refs con lo ya conquistado para evitar disparar confeti al montar.
+      if (opts.seed) {
+        (p.months || []).forEach(m => {
+          if (m.reached) celebratedRef.current.add(`${type}-${year}-${m.month}`);
+        });
+        if (p.annual_reached) {
+          celebratedRef.current.add(`${type}-${year}-annual-reached`);
+        }
+        // Hitos anuales ya alcanzados: marcar como mostrados
+        const initialPct = Math.min(100, p.annual_percent || 0);
+        MOTIVATIONAL_MILESTONES.forEach(m => {
+          if (initialPct >= m.pct) milestonesShownRef.current.add(`${type}-${year}-${m.pct}`);
+        });
+        // Badge de racha ya desbloqueado: marcar como mostrado
+        const streak = computeStreaks(p.months || []);
+        const badge = getBadgeForStreak(streak.best);
+        if (badge) streakBadgeRef.current.add(`${type}-${year}-badge-${badge.min}`);
+        seededRef.current = true;
+      }
+
       setData(p);
       setAnnualDraft(String(p.annual_goal || ""));
     } catch (e) {
@@ -558,7 +584,8 @@ export default function Metas() {
     celebratedRef.current = new Set();
     milestonesShownRef.current = new Set();
     streakBadgeRef.current = new Set();
-    load();
+    seededRef.current = false;
+    load({ seed: true });
   }, [year, type, load]);
 
   const typeCfg = TYPES.find(t => t.key === type) || TYPES[0];
