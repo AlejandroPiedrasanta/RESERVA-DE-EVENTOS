@@ -48,7 +48,7 @@ BACKUP_DIR = _VISIBLE_ROOT / 'backups'
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 UPDATES_DIR = ROOT_DIR / 'uploads' / 'updates'
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
-BACKUP_COLLECTIONS = ['reservations', 'socios', 'app_settings']
+BACKUP_COLLECTIONS = ['reservations', 'socios', 'app_settings', 'metas']
 
 # ── Repo de GitHub de fábrica (pre-cargado, independiente de Emergent) ────────
 DEFAULT_GITHUB_REPO = "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
@@ -161,7 +161,7 @@ async def _load_embedded_data():
 async def _save_embedded_data():
     try:
         data = {}
-        for col_name in ['reservations', 'socios', 'app_settings', 'saved_themes']:
+        for col_name in ['reservations', 'socios', 'app_settings', 'saved_themes', 'metas']:
             docs = await db[col_name].find({}).to_list(100000)
             data[col_name] = [_serialize_doc(d) for d in docs]
         DATA_FILE.write_text(
@@ -2776,6 +2776,128 @@ async def apply_github_update(payload: dict = Body(default={})):
         try: shutil.rmtree(str(tmp_dir), ignore_errors=True)
         except Exception: pass
         raise HTTPException(status_code=500, detail=f"Error inesperado al aplicar update: {type(e).__name__}: {e}")
+
+
+# ─── Metas (Goals) ────────────────────────────────────────
+
+class MetaUpsert(BaseModel):
+    year: int
+    month: Optional[int] = None  # 1-12 or None for annual
+    type: str  # "ventas" | "ganancias" | "gastos"
+    amount: float
+
+
+@api_router.get("/metas")
+async def get_metas(year: int, type: str):
+    if type not in ("ventas", "ganancias", "gastos"):
+        raise HTTPException(status_code=400, detail="type inválido")
+    cursor = db.metas.find({"year": year, "type": type}, {"_id": 0})
+    goals = await cursor.to_list(200)
+    return {"year": year, "type": type, "goals": goals}
+
+
+@api_router.put("/metas")
+async def upsert_meta(meta: MetaUpsert):
+    if meta.type not in ("ventas", "ganancias", "gastos"):
+        raise HTTPException(status_code=400, detail="type inválido")
+    key = {"year": meta.year, "type": meta.type, "month": meta.month}
+    payload = {
+        **key,
+        "amount": float(meta.amount or 0),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.metas.update_one(
+        key,
+        {"$set": payload, "$setOnInsert": {"id": str(uuid.uuid4())}},
+        upsert=True,
+    )
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"ok": True, **payload}
+
+
+@api_router.delete("/metas")
+async def delete_meta(year: int, type: str, month: Optional[int] = None):
+    await db.metas.delete_one({"year": year, "type": type, "month": month})
+    if _using_embedded:
+        asyncio.create_task(_save_embedded_data())
+    return {"ok": True}
+
+
+@api_router.get("/metas/progress")
+async def metas_progress(year: int, type: str):
+    """Return per-month actual values + goals + reached flags."""
+    if type not in ("ventas", "ganancias", "gastos"):
+        raise HTTPException(status_code=400, detail="type inválido")
+
+    # Fetch reservations for that year (event_date is 'YYYY-MM-DD' string)
+    start = f"{year}-01-01"
+    end = f"{year}-12-31"
+    cursor = db.reservations.find(
+        {"status": {"$nin": ["Cancelado"]}, "event_date": {"$gte": start, "$lte": end}},
+        {"total_amount": 1, "event_date": 1, "assigned_partners": 1, "_id": 0},
+    )
+    docs = await cursor.to_list(20000)
+
+    # Aggregate by month
+    monthly = {m: {"ventas": 0.0, "gastos": 0.0} for m in range(1, 13)}
+    for d in docs:
+        ed = d.get("event_date") or ""
+        try:
+            m = int(ed.split("-")[1])
+        except Exception:
+            continue
+        if m < 1 or m > 12:
+            continue
+        monthly[m]["ventas"] += float(d.get("total_amount") or 0)
+        for p in (d.get("assigned_partners") or []):
+            monthly[m]["gastos"] += float(p.get("payment") or 0)
+
+    # Fetch goals for year+type
+    goal_cursor = db.metas.find({"year": year, "type": type}, {"_id": 0})
+    goal_docs = await goal_cursor.to_list(200)
+    goal_by_month = {}
+    annual_goal = 0.0
+    for g in goal_docs:
+        if g.get("month") is None:
+            annual_goal = float(g.get("amount") or 0)
+        else:
+            goal_by_month[int(g["month"])] = float(g.get("amount") or 0)
+
+    def actual_for(m):
+        v = monthly[m]
+        if type == "ventas":
+            return round(v["ventas"], 2)
+        if type == "gastos":
+            return round(v["gastos"], 2)
+        # ganancias
+        return round(v["ventas"] - v["gastos"], 2)
+
+    months_out = []
+    annual_actual = 0.0
+    for m in range(1, 13):
+        act = actual_for(m)
+        annual_actual += act
+        goal = goal_by_month.get(m, 0.0)
+        pct = (act / goal * 100) if goal > 0 else 0.0
+        months_out.append({
+            "month": m,
+            "actual": round(act, 2),
+            "goal": round(goal, 2),
+            "percent": round(pct, 2),
+            "reached": goal > 0 and act >= goal,
+        })
+
+    ann_pct = (annual_actual / annual_goal * 100) if annual_goal > 0 else 0.0
+    return {
+        "year": year,
+        "type": type,
+        "months": months_out,
+        "annual_goal": round(annual_goal, 2),
+        "annual_actual": round(annual_actual, 2),
+        "annual_percent": round(ann_pct, 2),
+        "annual_reached": annual_goal > 0 and annual_actual >= annual_goal,
+    }
 
 
 # ─── Contexto para IA (local) ────────────────────────────────────────────────
