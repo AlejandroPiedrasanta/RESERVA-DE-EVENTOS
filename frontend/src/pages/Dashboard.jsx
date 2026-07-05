@@ -568,12 +568,6 @@ export default function Dashboard() {
                 boxShadow: "0 8px 20px -6px rgba(168,85,247,0.55)",
               }}
             >
-              <motion.span
-                className="absolute inset-0 rounded-2xl"
-                style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
-                animate={{ scale: [1, 1.4], opacity: [0.4, 0] }}
-                transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
-              />
               <BarChart2 size={18} className="text-white relative" strokeWidth={2.2} />
             </motion.div>
             <div className="flex-1">

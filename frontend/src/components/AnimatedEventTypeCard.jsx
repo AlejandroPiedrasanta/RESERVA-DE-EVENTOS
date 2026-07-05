@@ -66,10 +66,10 @@ export default function AnimatedEventTypeCard({ type, count, total, index }) {
         transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut", delay: index * 0.3 }}
       />
 
-      {/* Left color stripe */}
+      {/* Top center pill accent */}
       <div
-        className="absolute left-0 top-6 bottom-6 w-1 rounded-r-full"
-        style={{ background: `linear-gradient(180deg, ${cfg.fg}, ${hexA(cfg.fg, 0.4)})` }}
+        className="absolute left-1/2 -translate-x-1/2 top-2 h-1.5 w-14 rounded-full"
+        style={{ background: `linear-gradient(90deg, ${cfg.fg}, ${hexA(cfg.fg, 0.4)})` }}
       />
 
       <div className="relative z-10">
@@ -86,12 +86,6 @@ export default function AnimatedEventTypeCard({ type, count, total, index }) {
               boxShadow: `0 6px 16px -4px ${hexA(cfg.fg, 0.5)}`,
             }}
           >
-            <motion.span
-              className="absolute inset-0 rounded-2xl"
-              style={{ background: cfg.fg }}
-              animate={{ scale: [1, 1.4], opacity: [0.35, 0] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeOut", delay: index * 0.25 }}
-            />
             <Icon size={20} className="text-white relative" strokeWidth={2.1} />
           </motion.div>
           <p
