@@ -24,6 +24,14 @@ export default function SocioForm({ socio, onClose, onSaved }) {
   const [saving, setSaving]             = useState(false);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoFile, setPhotoFile]       = useState(null);
+
+  // Lock body scroll while modal open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const [form, setForm] = useState({
     name: "", role: "Fotógrafo", phone: "", email: "", notes: "", rate_per_event: "",
   });
@@ -93,7 +101,7 @@ export default function SocioForm({ socio, onClose, onSaved }) {
         key="ultra-socio-overlay"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.22 }}
-        className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 overflow-y-auto ultra-scroll"
+        className="fixed inset-0 z-50 flex items-center justify-center px-4 py-4 overflow-hidden ultra-scroll"
         style={{
           background: "radial-gradient(1000px 600px at 15% 20%, rgba(6,182,212,0.28), transparent 60%), radial-gradient(900px 500px at 85% 80%, rgba(236,72,153,0.28), transparent 60%), rgba(3, 6, 23, 0.75)",
           backdropFilter: "blur(24px)",
@@ -107,7 +115,7 @@ export default function SocioForm({ socio, onClose, onSaved }) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.94, y: 16 }}
           transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-          className="relative w-full max-w-3xl rounded-[32px] overflow-hidden my-auto ultra-glow-border"
+          className="relative w-full max-w-3xl max-h-[95vh] flex flex-col rounded-[32px] overflow-hidden ultra-glow-border"
           style={{
             background: "linear-gradient(160deg, rgba(10,12,40,0.94) 0%, rgba(17,24,58,0.94) 50%, rgba(30,15,55,0.94) 100%)",
             boxShadow: "0 40px 90px -20px rgba(6,182,212,0.5), 0 20px 50px -20px rgba(236,72,153,0.35)",
@@ -121,7 +129,7 @@ export default function SocioForm({ socio, onClose, onSaved }) {
           <div className="ultra-grid" />
 
           {/* Header */}
-          <div className="relative z-10 flex items-center justify-between px-8 py-5 border-b border-white/10">
+          <div className="relative z-10 flex items-center justify-between px-6 py-3 border-b border-white/10">
             <div className="flex items-center gap-4">
               <motion.button
                 whileHover={{ scale: 1.05, x: -2 }} whileTap={{ scale: 0.94 }}
@@ -161,8 +169,8 @@ export default function SocioForm({ socio, onClose, onSaved }) {
           </div>
 
           {/* Body */}
-          <form onSubmit={handleSubmit} className="relative z-10 px-8 py-7">
-            <div className="flex flex-col md:flex-row gap-7 items-start">
+          <form onSubmit={handleSubmit} className="relative z-10 px-5 py-3 flex-1 overflow-hidden">
+            <div className="flex flex-col md:flex-row gap-4 items-start">
               {/* PHOTO */}
               {sf.photo !== false && (
                 <motion.div variants={stagger} initial="hidden" animate="visible" custom={0} className="flex flex-col items-center gap-3 flex-shrink-0">
@@ -183,7 +191,7 @@ export default function SocioForm({ socio, onClose, onSaved }) {
               )}
 
               {/* RIGHT */}
-              <div className="flex-1 w-full space-y-5">
+              <div className="flex-1 w-full space-y-3">
                 {/* Name */}
                 <motion.div variants={stagger} initial="hidden" animate="visible" custom={1}>
                   <UField icon={User} label="Nombre completo *">
@@ -218,7 +226,7 @@ export default function SocioForm({ socio, onClose, onSaved }) {
 
                 {/* Phone + Email */}
                 <motion.div variants={stagger} initial="hidden" animate="visible" custom={3}
-                            className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {sf.phone !== false && (
                     <UField icon={Phone} label="Teléfono">
                       <input value={form.phone} onChange={set("phone")} placeholder="+502 1234 5678"

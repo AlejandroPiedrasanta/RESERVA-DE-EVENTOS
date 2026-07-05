@@ -1407,19 +1407,25 @@ body.app-blur-unfocus::after {
   border-radius: 999px;
 }
 
+/* Hidden scrollbar for modal internal scroll */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
 /* Compact variant */
 .ultra-compact .ultra-field input,
 .ultra-compact .ultra-field select,
 .ultra-compact .ultra-field textarea {
-  padding: 10px 14px 10px 40px;
-  font-size: 13px;
-  border-radius: 13px;
+  padding: 7px 12px 7px 36px;
+  font-size: 12px;
+  border-radius: 11px;
 }
-.ultra-compact .ultra-field .ultra-field-icon { left: 13px; }
-.ultra-compact .ultra-label { font-size: 10px; margin-bottom: 6px; }
-.ultra-compact .ultra-choice { padding: 10px 6px; border-radius: 13px; gap: 4px; }
-.ultra-compact .ultra-choice span { font-size: 10px !important; }
-.ultra-compact .ultra-section-header { font-size: 10px; padding: 4px 10px; margin-bottom: 10px; }
+.ultra-compact .ultra-field .ultra-field-icon { left: 12px; }
+.ultra-compact .ultra-label { font-size: 9.5px; margin-bottom: 4px; }
+.ultra-compact .ultra-choice { padding: 7px 5px; border-radius: 11px; gap: 3px; }
+.ultra-compact .ultra-choice svg { width: 18px; height: 18px; }
+.ultra-compact .ultra-choice span { font-size: 9.5px !important; }
+.ultra-compact .ultra-section-header { font-size: 9.5px; padding: 3px 9px; margin-bottom: 6px; }
+.ultra-compact .ultra-datetime-btn { padding: 7px 12px 7px 36px; font-size: 12px; border-radius: 11px; }
 
 /* Pretty datetime button */
 .ultra-datetime-btn {
