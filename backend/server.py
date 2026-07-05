@@ -329,7 +329,7 @@ class ReservationCreate(BaseModel):
     guests_count: Optional[int] = None
     total_amount: float
     advance_paid: float = 0.0
-    status: str = "Pendiente"
+    status: str = "Reservado"
     notes: Optional[str] = None
     package_type: Optional[str] = None
 
@@ -1055,7 +1055,7 @@ async def import_reservations_csv(file: UploadFile = File(...)):
                 "guests_count":  int(get("guests_count")) if get("guests_count").isdigit() else None,
                 "total_amount":  to_float(total_raw),
                 "advance_paid":  to_float(advance_raw),
-                "status":        get("status") or "Pendiente",
+                "status":        get("status") or "Reservado",
                 "notes":         get("notes") or None,
                 "receipts":      [],
                 "locations":     [],

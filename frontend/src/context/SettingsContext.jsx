@@ -56,10 +56,8 @@ export const CURRENCIES = [
 ];
 
 export const DEFAULT_STATUSES = [
-  { key: "Pendiente",  label: "Pendiente",  color: "amber"   },
-  { key: "Confirmado", label: "Confirmado", color: "blue"    },
-  { key: "Completado", label: "Completado", color: "emerald" },
-  { key: "Cancelado",  label: "Cancelado",  color: "red"     },
+  { key: "Reservado", label: "Reservado", color: "blue"    },
+  { key: "Pagado",    label: "Pagado",    color: "emerald" },
 ];
 
 export const STATUS_COLOR_CLASSES = {
@@ -79,7 +77,7 @@ const T = {
   es: {
     nav: { dashboard: "Panel", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", database: "Base de Datos", appearance: "Apariencia" },
     common: { newReservation: "Nueva Reserva", cancel: "Cancelar", save: "Guardar cambios", create: "Crear reserva", saving: "Guardando...", edit: "Editar", viewAll: "Ver todas" },
-    statuses: { Pendiente: "Pendiente", Confirmado: "Confirmado", Completado: "Completado", Cancelado: "Cancelado" },
+    statuses: { Reservado: "Reservado", Pagado: "Pagado" },
     months: ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"],
     days: ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"],
     dashboard: {
@@ -154,9 +152,9 @@ const T = {
     },
   },
   en: {
-    nav: { dashboard: "Dashboard", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", metas: "Goals", database: "Database", appearance: "Appearance" },
+    nav: { dashboard: "Panel", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", metas: "Goals", database: "Database", appearance: "Appearance" },
     common: { newReservation: "New Reservation", cancel: "Cancel", save: "Save changes", create: "Create reservation", saving: "Saving...", edit: "Edit", viewAll: "View all" },
-    statuses: { Pendiente: "Pending", Confirmado: "Confirmed", Completado: "Completed", Cancelado: "Cancelled" },
+    statuses: { Reservado: "Reserved", Pagado: "Paid" },
     months: ["January","February","March","April","May","June","July","August","September","October","November","December"],
     days: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],
     dashboard: {

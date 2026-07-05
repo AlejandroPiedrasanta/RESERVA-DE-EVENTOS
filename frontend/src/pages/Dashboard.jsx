@@ -206,7 +206,7 @@ export default function Dashboard() {
 
   const active = all.filter(r => r.status !== "Cancelado");
   const totalEventAmount = active.reduce((sum, r) => sum + (r.total_amount || 0), 0);
-  const completedIncome  = all.filter(r => r.status === "Completado").reduce((sum, r) => sum + (r.total_amount || 0), 0);
+  const completedIncome  = all.filter(r => r.status === "Pagado").reduce((sum, r) => sum + (r.total_amount || 0), 0);
   const advanceIncome    = active.reduce((sum, r) => sum + (r.advance_paid || 0), 0);
   const pendingBalance   = active.reduce((sum, r) => sum + ((r.total_amount || 0) - (r.advance_paid || 0)), 0);
   const monthlyIncome    = recent.reduce((sum, r) => sum + (r.total_amount || 0), 0);
@@ -252,7 +252,7 @@ export default function Dashboard() {
             className="text-5xl font-black gradient-text tracking-tight"
             style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
           >
-            Dashboard
+            {tr.nav.dashboard}
           </h1>
         </div>
         <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>

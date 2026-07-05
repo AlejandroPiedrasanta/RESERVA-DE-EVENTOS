@@ -397,63 +397,6 @@ export default function AppearancePage() {
         </Section>
 
         {/* ═══════════════════════════════════════════════════════════════
-            3. ANIMACIONES Y MOVIMIENTO
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={Zap} title={es ? "Animaciones y Movimiento" : "Animations & Motion"} desc={es ? "Efectos, velocidad, transiciones y cursor" : "Effects, speed, transitions and cursor"}>
-          <div className="space-y-5">
-
-            <motion.div whileHover={{ scale: 1.005 }} className="flex items-center justify-between bg-white/50 rounded-2xl px-5 py-3.5 cursor-pointer" onClick={() => changeAnimations(!animations)}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: animations ? "var(--t-from)18" : "#f1f5f9" }}>
-                  <Zap size={15} style={{ color: animations ? "var(--t-from)" : "#94a3b8" }} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">{es ? "Efectos y transiciones" : "Effects & transitions"}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{animations ? (es ? "Activadas" : "Enabled") : (es ? "Desactivadas" : "Disabled")}</p>
-                </div>
-              </div>
-              <Toggle value={animations} onChange={changeAnimations} testId="animations-toggle" />
-            </motion.div>
-
-            <OptionRow label={es ? "Velocidad de animaciones" : "Animation Speed"} testPrefix="anim" current={animSpeed} onChange={changeAnimSpeed} cols={4} defaultValue="normal"
-              options={[{id:"slow",label:es?"Lenta":"Slow",preview:<span>🐢</span>},{id:"normal",label:es?"Normal":"Normal",preview:<span>✦</span>},{id:"fast",label:es?"Rápida":"Fast",preview:<span>⚡</span>},{id:"instant",label:es?"Instante":"Instant",preview:<span>⚡⚡</span>}]} />
-
-            <OptionRow label={es ? "Transición de páginas" : "Page Transition"} testPrefix="page-transition" current={pageTransition} onChange={v => { changePageTransition(v); toast({ title: `Transición: ${v}` }); }} cols={4}
-              options={[
-                { id:"fade",  label:"Fade",  preview: <div className="w-8 h-5 rounded bg-gradient-to-br from-[var(--t-from)] to-[var(--t-to)] opacity-50" /> },
-                { id:"slide", label:"Slide", preview: <div className="w-8 h-5 rounded bg-gradient-to-br from-[var(--t-from)] to-[var(--t-to)]" style={{transform:"translateX(5px)"}} /> },
-                { id:"zoom",  label:"Zoom",  preview: <div className="w-8 h-5 rounded bg-gradient-to-br from-[var(--t-from)] to-[var(--t-to)]" style={{transform:"scale(0.82)"}} /> },
-                { id:"none",  label:es?"Ninguna":"None", preview: <div className="w-8 h-5 rounded bg-slate-200" /> },
-              ]} />
-
-            <OptionRow label={es ? "Efecto al pasar el cursor" : "Hover Effect"} testPrefix="hover" current={hoverEffect} onChange={changeHoverEffect} cols={4}
-              options={[{id:"normal",label:"Normal"},{id:"glow",label:"Glow"},{id:"lift",label:es?"Elevar":"Lift"},{id:"scale",label:"Scale"}]} />
-
-            <OptionRow label={es ? "Animación al hacer clic" : "Click Animation"} testPrefix="btn-click"
-              current={as.btnClickAnim || "scale"} onChange={v => cs("btnClickAnim", v)} cols={4}
-              options={[{id:"none",label:"None"},{id:"scale",label:"Scale"},{id:"ripple",label:"Ripple"},{id:"bounce",label:"Bounce"}]} />
-
-            <OptionRow label={es ? "Animación de carga" : "Loading Animation"} testPrefix="loading-anim"
-              current={as.loadingAnim || "spin"} onChange={v => cs("loadingAnim", v)} cols={4}
-              options={[
-                { id:"spin",  label:"Spin",    preview: <div className="w-4 h-4 rounded-full border-2 border-[var(--t-from)] border-t-transparent animate-spin" /> },
-                { id:"dots",  label:"Dots",    preview: <div className="flex gap-0.5">{[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full btn-primary" />)}</div> },
-                { id:"pulse", label:"Pulse",   preview: <div className="w-4 h-4 rounded-full btn-primary animate-pulse" /> },
-                { id:"wave",  label:"Wave",    preview: <div className="flex gap-0.5 items-end">{[2,4,3,5,2].map((h,i)=><div key={i} className="w-1 rounded-full btn-primary" style={{height:h*2}} />)}</div> },
-              ]} />
-
-            <OptionRow label={es ? "Posición de notificaciones toast" : "Toast Position"} testPrefix="toast-pos"
-              current={as.toastPosition || "bottom-right"} onChange={v => cs("toastPosition", v)} cols={4}
-              options={[{id:"top-right",label:es?"Arriba-Der":"Top Right"},{id:"top-left",label:es?"Arriba-Izq":"Top Left"},{id:"bottom-right",label:es?"Abajo-Der":"Bottom Right"},{id:"bottom-center",label:es?"Abajo-C":"Bottom"}]} />
-
-            <OptionRow label={es ? "Cursor del mouse" : "Mouse Cursor"} testPrefix="cursor"
-              current={as.cursorStyle || "default"} onChange={v => cs("cursorStyle", v)} cols={4}
-              options={[{id:"default",label:es?"Normal":"Default"},{id:"large",label:es?"Grande":"Large"},{id:"crosshair",label:"Cross"},{id:"dot",label:"Dot"}]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
             4. FORMAS Y BORDES
         ═══════════════════════════════════════════════════════════════ */}
         <Section icon={Layers} title={es ? "Formas y Bordes" : "Shapes & Borders"} desc={es ? "Bordes, tarjetas, botones, separadores" : "Borders, cards, buttons, dividers"}>
@@ -508,57 +451,6 @@ export default function AppearancePage() {
             <OptionRow label={es ? "Espacio entre tarjetas" : "Card Gap"} testPrefix="card-gap"
               current={as.cardGap || "normal"} onChange={v => cs("cardGap", v)} cols={4}
               options={[{id:"tight",label:es?"Apretado":"Tight"},{id:"normal",label:es?"Normal":"Normal"},{id:"loose",label:es?"Suelto":"Loose"},{id:"xl",label:"XL"}]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            5. FONDO Y COLORES
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={SlidersHorizontal} title={es ? "Fondo y Colores" : "Background & Colors"} desc={es ? "Modo oscuro, fondo, blur de vidrio" : "Dark mode, background, glass blur"}>
-          <div className="space-y-5">
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-black text-slate-800">{es ? "Modo Oscuro" : "Dark Mode"}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{es ? "Fondo oscuro en toda la app" : "Dark background everywhere"}</p>
-              </div>
-              <Toggle value={darkMode} onChange={v => { changeDarkMode(v); toast({ title: v ? "Modo oscuro ✓" : "Modo claro" }); }} testId="dark-mode-toggle" />
-            </div>
-
-            <OptionRow label={es ? "Intensidad de fondo (blobs)" : "Background Intensity"} testPrefix="bg" current={bgIntensity} onChange={changeBgIntensity} cols={4} defaultValue="normal"
-              options={[{id:"off",label:es?"Apagado":"Off"},{id:"subtle",label:es?"Suave":"Subtle"},{id:"normal",label:es?"Normal":"Normal"},{id:"vivid",label:es?"Vivido":"Vivid"}]} />
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-black text-slate-600">{es ? "Gradiente personalizado" : "Custom Gradient"}</p>
-                <Toggle value={customBgEnabled} onChange={() => changeCustomBg(!customBgEnabled)} testId="custom-bg-toggle" />
-              </div>
-              <AnimatePresence>
-                {customBgEnabled && (
-                  <motion.div key="bg-colors" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex items-center gap-3 mt-2">
-                    <div className="flex flex-col items-center gap-1">
-                      <input type="color" value={bgColor1} onChange={e => changeCustomBg(true, e.target.value, bgColor2)} className="w-9 h-9 rounded-xl cursor-pointer border-2 border-slate-200/60" />
-                      <span className="text-[8px] text-slate-400">{es ? "Inicio" : "Start"}</span>
-                    </div>
-                    <div className="flex-1 h-8 rounded-xl border border-slate-200/60" style={{ background: `linear-gradient(135deg, ${bgColor1}, ${bgColor2})` }} />
-                    <div className="flex flex-col items-center gap-1">
-                      <input type="color" value={bgColor2} onChange={e => changeCustomBg(true, bgColor1, e.target.value)} className="w-9 h-9 rounded-xl cursor-pointer border-2 border-slate-200/60" />
-                      <span className="text-[8px] text-slate-400">{es ? "Final" : "End"}</span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div>
-              <p className="text-xs font-black text-slate-600 mb-2">{es ? "Imagen de fondo (URL)" : "Background Image (URL)"}</p>
-              <div className="flex gap-2">
-                <input type="url" value={bgImageInput} onChange={e => setBgImageInput(e.target.value)} placeholder="https://..." data-testid="bg-image-input" className="flex-1 bg-white/60 border border-slate-200/80 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => { changeBgImage(bgImageInput); toast({ title: bgImageInput ? "Imagen aplicada ✓" : "Imagen eliminada" }); }} data-testid="bg-image-apply" className="px-4 py-2 rounded-xl btn-primary text-white text-xs font-bold">{es ? "Aplicar" : "Apply"}</motion.button>
-                {bgImage && <button onClick={() => { changeBgImage(""); setBgImageInput(""); }} data-testid="bg-image-remove" className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200">{es ? "Quitar" : "Remove"}</button>}
-              </div>
-            </div>
 
           </div>
         </Section>
@@ -879,75 +771,6 @@ export default function AppearancePage() {
             <OptionRow label={es ? "Estilo de selectores (dropdowns)" : "Select/Dropdown Style"} testPrefix="select-style"
               current={as.selectStyle || "custom"} onChange={v => cs("selectStyle", v)} cols={3}
               options={[{id:"native",label:"Native"},{id:"custom",label:"Custom"},{id:"glass",label:"Glass"}]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            10. DATOS Y TABLAS  ★ NUEVO
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={BarChart2} isNew title={es ? "Datos y Tablas" : "Data & Tables"} desc={es ? "Estilo de tablas, gráficos, estado y formato" : "Table, chart, status and format styles"}>
-          <div className="space-y-5">
-
-            <OptionRow label={es ? "Estilo de tablas" : "Table Style"} testPrefix="table-style"
-              current={as.tableStyle || "minimal"} onChange={v => cs("tableStyle", v)} cols={5}
-              options={[
-                { id:"minimal",  label:es?"Mínimal":"Minimal", preview: <div className="w-8 h-5 border-b border-slate-300 bg-white" /> },
-                { id:"striped",  label:es?"Rayado":"Striped",  preview: <div className="w-8 h-5 overflow-hidden rounded">{[1,2].map(i=><div key={i} className="h-2.5" style={{background:i%2===0?"#f8fafc":"white"}}/>)}</div> },
-                { id:"bordered", label:es?"Borde":"Bordered",  preview: <div className="w-8 h-5 border border-slate-300 grid grid-cols-2 gap-px">{[1,2,3,4].map(i=><div key={i} className="bg-white border border-slate-200"/>)}</div> },
-                { id:"glass",    label:es?"Vidrio":"Glass",    preview: <div className="w-8 h-5 rounded bg-white/50 backdrop-blur border border-white/60" /> },
-                { id:"card",     label:es?"Tarjeta":"Card",    preview: <div className="w-8 h-5 rounded-md bg-white shadow-sm" /> },
-              ]} />
-
-            <OptionRow label={es ? "Hover en filas de tabla" : "Row Hover Style"} testPrefix="row-hover"
-              current={as.rowHover || "highlight"} onChange={v => cs("rowHover", v)} cols={4}
-              options={[{id:"highlight",label:es?"Resaltar":"Highlight"},{id:"scale",label:"Scale"},{id:"glow",label:"Glow"},{id:"none",label:es?"Ninguno":"None"}]} />
-
-            <OptionRow label={es ? "Estilo de etiquetas de estado" : "Status Badge Style"} testPrefix="status-badge"
-              current={as.statusBadge || "soft"} onChange={v => cs("statusBadge", v)} cols={4}
-              options={[
-                { id:"filled",  label:es?"Relleno":"Filled",  preview: <div className="px-2 py-0.5 rounded-full text-[8px] btn-primary text-white font-bold">OK</div> },
-                { id:"outlined",label:es?"Borde":"Outlined",  preview: <div className="px-2 py-0.5 rounded-full text-[8px] border-2 border-[var(--t-from)] text-[var(--t-from)] font-bold">OK</div> },
-                { id:"soft",    label:es?"Suave":"Soft",      preview: <div className="px-2 py-0.5 rounded-full text-[8px] font-bold" style={{background:"var(--t-from)20",color:"var(--t-from)"}}>OK</div> },
-                { id:"dot",     label:"Dot",                  preview: <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full btn-primary" /><span className="text-[8px] font-bold text-slate-600">OK</span></div> },
-              ]} />
-
-            <OptionRow label={es ? "Paleta de colores en gráficos" : "Chart Color Palette"} testPrefix="chart-palette"
-              current={as.chartPalette || "default"} onChange={v => cs("chartPalette", v)} cols={3}
-              options={[
-                { id:"default",  label:es?"Predeterminado":"Default", preview: <div className="flex gap-0.5">{["bg-indigo-400","bg-rose-400","bg-emerald-400","bg-amber-400"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-                { id:"warm",     label:es?"Cálida":"Warm",            preview: <div className="flex gap-0.5">{["bg-red-400","bg-orange-400","bg-amber-400","bg-yellow-400"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-                { id:"cool",     label:es?"Fría":"Cool",              preview: <div className="flex gap-0.5">{["bg-blue-400","bg-cyan-400","bg-teal-400","bg-indigo-400"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-                { id:"mono",     label:es?"Mono":"Mono",              preview: <div className="flex gap-0.5">{["bg-slate-300","bg-slate-400","bg-slate-500","bg-slate-700"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-                { id:"vivid",    label:es?"Vívida":"Vivid",           preview: <div className="flex gap-0.5">{["bg-fuchsia-500","bg-cyan-400","bg-lime-400","bg-orange-400"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-                { id:"earthy",   label:es?"Terrosa":"Earthy",         preview: <div className="flex gap-0.5">{["bg-stone-400","bg-amber-600","bg-lime-600","bg-teal-600"].map(c=><div key={c} className={`w-2 h-4 rounded-sm ${c}`}/>)}</div> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo de barras de progreso" : "Progress Bar Style"} testPrefix="progress-style"
-              current={as.progressStyle || "rounded"} onChange={v => cs("progressStyle", v)} cols={4}
-              options={[
-                { id:"flat",     label:es?"Plano":"Flat",      preview: <div className="w-12 h-2 bg-slate-200 rounded-none overflow-hidden"><div className="h-full w-2/3 btn-primary rounded-none" /></div> },
-                { id:"rounded",  label:es?"Redondo":"Rounded", preview: <div className="w-12 h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full w-2/3 btn-primary rounded-full" /></div> },
-                { id:"striped",  label:es?"Rayado":"Striped",  preview: <div className="w-12 h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full w-2/3 btn-primary rounded-full" style={{backgroundImage:"repeating-linear-gradient(-45deg,transparent,transparent 4px,rgba(255,255,255,0.3) 4px,rgba(255,255,255,0.3) 8px)"}} /></div> },
-                { id:"gradient", label:es?"Degradado":"Grad",  preview: <div className="w-12 h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full w-2/3 rounded-full" style={{background:"linear-gradient(90deg,var(--t-from),var(--t-to))"}} /></div> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo de tarjetas métricas" : "Metric Card Style"} testPrefix="metric-card"
-              current={as.metricCard || "gradient"} onChange={v => cs("metricCard", v)} cols={4}
-              options={[
-                { id:"gradient", label:es?"Degradado":"Gradient",preview:<div className="w-10 h-7 rounded-xl" style={{background:"linear-gradient(135deg,var(--t-from),var(--t-to))"}} /> },
-                { id:"solid",    label:es?"Sólido":"Solid",      preview:<div className="w-10 h-7 rounded-xl bg-white border border-slate-200" /> },
-                { id:"outlined", label:es?"Borde":"Outlined",    preview:<div className="w-10 h-7 rounded-xl border-2 border-[var(--t-from)] bg-transparent" /> },
-                { id:"minimal",  label:es?"Mínimal":"Minimal",   preview:<div className="w-10 h-7 rounded-xl bg-slate-50" /> },
-              ]} />
-
-            <OptionRow label={es ? "Formato de números" : "Number Format"} testPrefix="number-format"
-              current={as.numberFormat || "comma"} onChange={v => cs("numberFormat", v)} cols={3}
-              options={[
-                { id:"comma", label:es?"Coma (1,234)":"Comma", preview:<span className="text-[9px] font-mono font-bold text-slate-700">1,234.56</span> },
-                { id:"dot",   label:es?"Punto (1.234)":"Dot",  preview:<span className="text-[9px] font-mono font-bold text-slate-700">1.234,56</span> },
-                { id:"space", label:es?"Espacio":"Space",       preview:<span className="text-[9px] font-mono font-bold text-slate-700">1 234.56</span> },
-              ]} />
 
           </div>
         </Section>

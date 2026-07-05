@@ -151,12 +151,6 @@ export default function CalendarView() {
   }, [events]);
   const daysToNext = nextEvent ? Math.round((new Date(nextEvent.event_date + "T00:00:00") - new Date(new Date().setHours(0,0,0,0))) / 86400000) : null;
 
-  const upcoming = useMemo(() => {
-    const t = new Date(); t.setHours(0,0,0,0);
-    return [...events].filter(e => e.event_date && new Date(e.event_date + "T00:00:00") >= t)
-      .sort((a, b) => new Date(a.event_date) - new Date(b.event_date));
-  }, [events]);
-
   const fmtDate = (d) => { if (!d) return "-"; const [y,m,dd] = d.split("-"); return `${dd}/${m}/${y}`; };
   const nextLabel = daysToNext === 0 ? (es ? "¡Hoy!" : "Today!") : daysToNext === 1 ? (es ? "Mañana" : "Tomorrow") : daysToNext != null ? `${es ? "En" : "In"} ${daysToNext} ${es ? "días" : "days"}` : (es ? "Sin eventos" : "No events");
 
@@ -184,7 +178,7 @@ export default function CalendarView() {
         <div className="flex items-center gap-2">
           {/* View toggle */}
           <div className="flex items-center gap-1 glass rounded-full p-1" data-testid="calendar-view-toggle">
-            {[{ id: "month", icon: LayoutGrid, label: es ? "Mes" : "Month" }, { id: "agenda", icon: CalendarClock, label: "Agenda" }, { id: "list", icon: List, label: es ? "Lista" : "List" }].map(v => (
+            {[{ id: "month", icon: LayoutGrid, label: es ? "Mes" : "Month" }, { id: "list", icon: List, label: es ? "Lista" : "List" }].map(v => (
               <motion.button key={v.id} whileTap={{ scale: 0.94 }} onClick={() => setViewMode(v.id)} data-testid={`view-${v.id}-btn`}
                 className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${viewMode === v.id ? "btn-primary text-white shadow" : "text-slate-500 hover:text-slate-700"}`}>
                 <v.icon size={13} /> {v.label}
@@ -321,56 +315,6 @@ export default function CalendarView() {
               })}
             </motion.div>
           </AnimatePresence>
-        </motion.div>
-      )}
-
-      {/* ══ AGENDA VIEW ══ */}
-      {viewMode === "agenda" && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="glass rounded-3xl p-5" data-testid="calendar-agenda">
-          {upcoming.length === 0 ? (
-            <div className="py-16 text-center">
-              <div className="w-16 h-16 rounded-3xl glass flex items-center justify-center mx-auto mb-4 animate-float"><CalendarClock size={24} className="text-slate-300" /></div>
-              <p className="text-slate-500 font-medium">{es ? "No hay eventos próximos" : "No upcoming events"}</p>
-            </div>
-          ) : (
-            <motion.div variants={gridVariants} initial="hidden" animate="show" className="space-y-2.5">
-              {upcoming.map((ev, idx) => {
-                const c = getColor(ev.event_type);
-                const cfg = getEventConfig(ev.event_type);
-                const EvIcon = cfg.icon;
-                const d = new Date(ev.event_date + "T00:00:00");
-                const dayN = d.getDate();
-                const mAbbr = tr.months[d.getMonth()].slice(0, 3);
-                const balance = (ev.total_amount || 0) - (ev.advance_paid || 0);
-                return (
-                  <motion.div key={ev.id} variants={{ hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0 } }}
-                    whileHover={{ x: 4, boxShadow: "0 8px 26px rgba(0,0,0,0.09)" }} onClick={() => navigate(`/reservaciones/${ev.id}`)}
-                    className="flex items-center gap-4 bg-white/50 border border-white/70 rounded-2xl p-3.5 cursor-pointer transition-all" data-testid={`agenda-item-${ev.id}`}>
-                    <div className="flex flex-col items-center justify-center w-14 h-14 rounded-2xl flex-shrink-0" style={{ background: c.fg + "14", border: `1px solid ${c.border}` }}>
-                      <span className="text-lg font-black leading-none" style={{ color: c.fg, fontFamily: "Cabinet Grotesk, sans-serif" }}>{dayN}</span>
-                      <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: c.fg, opacity: 0.7 }}>{mAbbr}</span>
-                    </div>
-                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: c.fg + "18" }}>
-                      <EvIcon size={18} style={{ color: c.fg }} strokeWidth={1.9} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-black text-slate-900 truncate">{ev.event_type || "Evento"}</p>
-                      <div className="flex items-center gap-3 text-[11px] text-slate-500 font-semibold mt-0.5 flex-wrap">
-                        <span className="truncate max-w-[140px]">{ev.client_name}</span>
-                        {ev.event_time && <span className="flex items-center gap-1"><Clock size={10} />{ev.event_time}</span>}
-                        {ev.venue && <span className="flex items-center gap-1 truncate max-w-[140px]"><MapPin size={10} />{ev.venue}</span>}
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      {ev.total_amount > 0 && <p className="text-sm font-black text-slate-800">{formatCurrency(ev.total_amount)}</p>}
-                      {balance > 0 && <p className="text-[10px] font-bold text-amber-600">{es ? "Saldo" : "Balance"}: {formatCurrency(balance)}</p>}
-                    </div>
-                    <ArrowRight size={16} className="text-slate-300 flex-shrink-0" />
-                  </motion.div>
-                );
-              })}
-            </motion.div>
-          )}
         </motion.div>
       )}
 
