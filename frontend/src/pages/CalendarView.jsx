@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getCalendarEvents } from "@/lib/api";
 import {
-  ChevronLeft, ChevronRight, Plus, Search, BarChart2, CalendarDays,
+  ChevronLeft, ChevronRight, Plus, Search, BarChart2, CalendarDays, CalendarCheck,
   LayoutGrid, List, Clock, MapPin, Wallet, Sparkles, CalendarClock, ArrowRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -169,11 +169,15 @@ export default function CalendarView() {
           <div className="flex items-center gap-3">
             <motion.div animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }} transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0">
-              <CalendarDays size={22} className="text-white" strokeWidth={2} />
+              {viewMode === "list"
+                ? <CalendarCheck size={22} className="text-white" strokeWidth={2} />
+                : <CalendarDays size={22} className="text-white" strokeWidth={2} />}
             </motion.div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{tr.nav.calendar}</h1>
+            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{viewMode === "list" ? tr.nav.reservations : tr.nav.calendar}</h1>
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-1.5">{es ? "Reservas y calendario en un solo lugar" : "Reservations & calendar in one place"}</p>
+          <p className="text-sm text-slate-500 font-medium mt-1.5">{viewMode === "list"
+            ? (es ? "Busca por nombre o teléfono y encuéntralo al instante" : "Search by name or phone and find it instantly")
+            : (es ? "Reservas y calendario en un solo lugar" : "Reservations & calendar in one place")}</p>
         </div>
         <div className="flex items-center gap-2">
           {/* View toggle */}
@@ -185,9 +189,10 @@ export default function CalendarView() {
               </motion.button>
             ))}
           </div>
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowSearch(s => !s)} data-testid="calendar-search-toggle"
-            className={`p-2.5 rounded-full text-sm font-bold transition-all ${viewMode !== "month" ? "hidden" : ""} ${showSearch ? "btn-primary text-white" : "glass text-slate-600 hover:bg-white/50"}`}>
-            <Search size={15} />
+          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={() => setViewMode(v => v === "list" ? "month" : "list")} data-testid="calendar-search-toggle"
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-xs font-bold transition-all ${viewMode === "list" ? "btn-primary text-white shadow" : "glass text-slate-600 hover:bg-white/50"}`}>
+            <Search size={14} /> {es ? "Buscar" : "Search"}
           </motion.button>
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowForm(true)} data-testid="new-event-btn"
             className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
@@ -197,6 +202,7 @@ export default function CalendarView() {
       </motion.div>
 
       {/* Summary chips */}
+      {viewMode !== "list" && (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <SummaryChip icon={CalendarClock} label={es ? "Eventos del mes" : "Events this month"} value={monthEvents.length}
           sub={tr.months[month] + " " + year} delay={0.05} grad="linear-gradient(135deg,#6366f1,#8b5cf6)" />
@@ -205,6 +211,7 @@ export default function CalendarView() {
         <SummaryChip icon={Sparkles} label={es ? "Próximo evento" : "Next event"} value={nextLabel}
           sub={nextEvent ? `${nextEvent.event_type || "Evento"} · ${fmtDate(nextEvent.event_date)}` : "—"} delay={0.19} grad="linear-gradient(135deg,#f59e0b,#f97316)" />
       </div>
+      )}
 
       {/* Search bar */}
       <AnimatePresence>

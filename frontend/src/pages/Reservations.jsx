@@ -20,7 +20,7 @@ export default function Reservations({ embedded = false }) {
   const [filterPackage, setFilterPackage] = useState("all");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
-  const [visibleCount, setVisibleCount] = useState(8);
+  const [visibleCount, setVisibleCount] = useState(12);
   const [showExtraFilters, setShowExtraFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const navigate = useNavigate();
@@ -92,7 +92,7 @@ export default function Reservations({ embedded = false }) {
   const resetFilters = () => {
     setSearch(""); setFilterType("all"); setFilterStatus("all");
     setFilterPackage("all"); setFilterDateFrom(""); setFilterDateTo("");
-    setVisibleCount(8);
+    setVisibleCount(12);
   };
 
   return (
@@ -119,22 +119,22 @@ export default function Reservations({ embedded = false }) {
       </motion.div>
       )}
 
-      <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-6">
+      <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-4">
         {/* Fila principal de búsqueda */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={e => { setSearch(e.target.value); setVisibleCount(8); }}
+            <input value={search} onChange={e => { setSearch(e.target.value); setVisibleCount(12); }}
               placeholder={es ? "Buscar por nombre, teléfono, evento, lugar…" : "Search by name, phone, event, venue…"}
               className="w-full pl-10 pr-4 py-2.5 text-sm glass rounded-2xl border-white/50 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 placeholder-slate-400 text-slate-700"
               data-testid="search-input" />
           </div>
-          <select value={filterType} onChange={e => { setFilterType(e.target.value); setVisibleCount(8); }} data-testid="filter-type"
+          <select value={filterType} onChange={e => { setFilterType(e.target.value); setVisibleCount(12); }} data-testid="filter-type"
             className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
             <option value="all" className="bg-white">{l.all}</option>
             {EVENT_TYPES.map(t => <option key={t} value={t} className="bg-white">{getEventTypeName(t)}</option>)}
           </select>
-          <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setVisibleCount(8); }} data-testid="filter-status"
+          <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setVisibleCount(12); }} data-testid="filter-status"
             className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
             <option value="all" className="bg-white">{l.all}</option>
             {activeStatuses.map(s => <option key={s.key} value={s.key} className="bg-white">{s.label}</option>)}
@@ -154,7 +154,7 @@ export default function Reservations({ embedded = false }) {
               <div className="flex flex-col sm:flex-row gap-3 pt-1">
                 <div className="flex flex-col gap-1 flex-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">{es ? "Paquete" : "Package"}</label>
-                  <select value={filterPackage} onChange={e => { setFilterPackage(e.target.value); setVisibleCount(8); }} data-testid="filter-package"
+                  <select value={filterPackage} onChange={e => { setFilterPackage(e.target.value); setVisibleCount(12); }} data-testid="filter-package"
                     className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
                     <option value="all" className="bg-white">{es ? "Todos los paquetes" : "All packages"}</option>
                     {["Básico","Intermedio","Completo"].map(p => <option key={p} value={p} className="bg-white">{p}</option>)}
@@ -162,12 +162,12 @@ export default function Reservations({ embedded = false }) {
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">{es ? "Desde" : "From"}</label>
-                  <input type="date" value={filterDateFrom} onChange={e => { setFilterDateFrom(e.target.value); setVisibleCount(8); }} data-testid="filter-date-from"
+                  <input type="date" value={filterDateFrom} onChange={e => { setFilterDateFrom(e.target.value); setVisibleCount(12); }} data-testid="filter-date-from"
                     className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium" />
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">{es ? "Hasta" : "To"}</label>
-                  <input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setVisibleCount(8); }} data-testid="filter-date-to"
+                  <input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setVisibleCount(12); }} data-testid="filter-date-to"
                     className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium" />
                 </div>
                 <div className="flex flex-col gap-1 justify-end">
@@ -199,7 +199,7 @@ export default function Reservations({ embedded = false }) {
             <thead>
               <tr className="border-b border-white/30">
                 {[l.colClient, l.colType, l.colDate, l.colTotal, l.colAdvance, l.colStatus, ""].map((h,i) => (
-                  <th key={i} className={`text-left px-5 py-4 text-xs font-black text-slate-500 uppercase tracking-widest ${i===1?"hidden sm:table-cell":""} ${i===3||i===4?"hidden md:table-cell":""}`}>{h}</th>
+                  <th key={i} className={`text-left px-4 py-2.5 text-xs font-black text-slate-500 uppercase tracking-widest ${i===1?"hidden sm:table-cell":""} ${i===3||i===4?"hidden md:table-cell":""}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -209,7 +209,7 @@ export default function Reservations({ embedded = false }) {
                   <motion.tr key={r.id} initial={{ opacity:0, x:-10 }} animate={{ opacity:1, x:0 }} transition={{ delay:idx*0.04 }}
                     whileHover={{ backgroundColor:"rgba(255,255,255,0.35)" }} className="cursor-pointer transition-colors"
                     onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`reservation-row-${r.id}`}>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-3">
                         {swapNameEventType ? (
                           (() => {
@@ -240,7 +240,7 @@ export default function Reservations({ embedded = false }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-slate-600 hidden sm:table-cell">
+                    <td className="px-4 py-2.5 text-slate-600 hidden sm:table-cell">
                       {swapNameEventType ? (
                         <span className="font-medium text-slate-700">{r.client_name}</span>
                       ) : (
@@ -258,9 +258,9 @@ export default function Reservations({ embedded = false }) {
                         })()
                       )}
                     </td>
-                    <td className="px-5 py-4 font-bold text-slate-800">{formatDate(r.event_date)}</td>
-                    <td className="px-5 py-4 font-bold text-slate-800 hidden md:table-cell">{formatCurrency(r.total_amount)}</td>
-                    <td className="px-5 py-4 hidden md:table-cell">
+                    <td className="px-4 py-2.5 font-bold text-slate-800">{formatDate(r.event_date)}</td>
+                    <td className="px-4 py-2.5 font-bold text-slate-800 hidden md:table-cell">{formatCurrency(r.total_amount)}</td>
+                    <td className="px-4 py-2.5 hidden md:table-cell">
                       <div>
                         <span className="font-bold text-emerald-600">{formatCurrency(r.advance_paid)}</span>
                         {r.total_amount > 0 && (
@@ -270,10 +270,10 @@ export default function Reservations({ embedded = false }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-2.5">
                       <span className={`text-xs px-3 py-1 rounded-full border font-bold ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status]||r.status}</span>
                     </td>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                         <motion.button whileHover={{ scale:1.1 }} whileTap={{ scale:0.9 }} onClick={() => navigate(`/reservaciones/${r.id}`)}
                           className="p-2 rounded-2xl hover:bg-indigo-100/80 text-slate-400 hover:text-indigo-600 transition-colors" data-testid={`view-btn-${r.id}`}><Eye size={14} /></motion.button>
@@ -290,19 +290,19 @@ export default function Reservations({ embedded = false }) {
           </table>
 
           {/* Botón Mostrar más / Mostrar menos */}
-          {(hasMore || visibleCount > 8) && (
+          {(hasMore || visibleCount > 12) && (
             <div className="flex items-center justify-center gap-4 py-4 border-t border-white/30">
               {hasMore && (
                 <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
-                  onClick={() => setVisibleCount(v => v + 8)} data-testid="show-more-btn"
+                  onClick={() => setVisibleCount(v => v + 12)} data-testid="show-more-btn"
                   className="flex items-center gap-2 px-5 py-2 rounded-full glass text-sm font-bold text-slate-600 hover:bg-white/60 transition-all">
                   <ChevronDown size={16} />
                   {es ? `Mostrar más (${filtered.length - visibleCount} restantes)` : `Show more (${filtered.length - visibleCount} remaining)`}
                 </motion.button>
               )}
-              {visibleCount > 8 && (
+              {visibleCount > 12 && (
                 <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
-                  onClick={() => setVisibleCount(8)} data-testid="show-less-btn"
+                  onClick={() => setVisibleCount(12)} data-testid="show-less-btn"
                   className="flex items-center gap-2 px-5 py-2 rounded-full glass text-sm font-bold text-slate-400 hover:bg-white/60 transition-all">
                   <ChevronUp size={16} />
                   {es ? "Mostrar menos" : "Show less"}
