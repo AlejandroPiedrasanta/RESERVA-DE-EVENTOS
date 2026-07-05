@@ -2575,14 +2575,17 @@ async def check_github_updates():
     last_seen = cfg.get("last_commit_sha", "")
 
     # Decisión de "hay actualizaciones":
-    # 1) Si podemos comparar versiones (version.txt local y remoto), la versión manda:
-    #    remote_version > local_version → hay update; en caso contrario NO hay update
-    #    (aunque el SHA sea distinto, si la versión no subió es solo commits internos).
-    # 2) Si no hay info de versiones, se compara SHA con last_seen (comportamiento previo).
+    # 1) Si sube version.txt en remoto (remote_version > local_version) → HAY UPDATE.
+    # 2) Si version.txt no cambió PERO el SHA remoto difiere del último aplicado
+    #    (last_commit_sha) → también HAY UPDATE (patch / "update rápido").
+    #    Esto evita que la app diga "al día" cuando sí hay commits nuevos sin bump de versión.
+    # 3) Fallback (sin info de versión): comparar SHA con last_seen.
+    sha_differs = bool(remote_sha) and remote_sha != last_seen
     if remote_version and _local_version:
-        has_updates = _is_newer(remote_version, _local_version)
+        version_newer = _is_newer(remote_version, _local_version)
+        has_updates = version_newer or sha_differs
     else:
-        has_updates = bool(remote_sha) and remote_sha != last_seen
+        has_updates = sha_differs
 
     new_commits = [{
         "sha": c["sha"][:7],
@@ -2593,13 +2596,14 @@ async def check_github_updates():
         "url": c.get("html_url", ""),
     } for c in commits[:5]]
 
-    # Persistir estado. Si estamos al día por versión, sincronizamos last_commit_sha
-    # con remote_sha para que futuros chequeos por SHA también respondan "al día".
+    # Persistir estado. SOLO sincronizamos last_commit_sha con el remoto cuando
+    # de verdad NO hay update (mismo SHA que el aplicado). Si hay update pendiente,
+    # NO se sobrescribe last_commit_sha para no "enterrar" los commits pendientes.
     set_fields = {
         "github_config.last_check_at": datetime.now(timezone.utc).isoformat(),
         "github_config.last_remote_sha": remote_sha,
     }
-    if not has_updates and remote_sha:
+    if not has_updates and remote_sha and not sha_differs:
         set_fields["github_config.last_commit_sha"] = remote_sha
     await db.app_settings.update_one({}, {"$set": set_fields}, upsert=True)
     if _using_embedded:
