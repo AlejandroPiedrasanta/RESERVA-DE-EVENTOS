@@ -10,7 +10,7 @@ import {
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
-  Lock, LifeBuoy,
+  Lock, LifeBuoy, Cloud, Laptop, CloudUpload,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -22,7 +22,7 @@ const SOPORTE_FACTORY_PASSWORD = "286811";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {
-  getDbStats, testDbConnection, switchDatabase, resetDatabase, optimizeDatabase,
+  getDbStats, testDbConnection, compareDatabase, switchDatabase, resetDatabase, optimizeDatabase,
   getFactoryPresets,
   getReservations, getBackupHistory, createServerBackup,
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
@@ -143,6 +143,7 @@ export default function DatabasePage() {
 
   const [dbStats, setDbStats]           = useState(null);
   const [dbLoading, setDbLoading]       = useState(true);
+  const [cloudCheck, setCloudCheck]     = useState(null); // { pending_total, current_total, target_total, target_url, target_name, checking }
   const [newDbUrl, setNewDbUrl]         = useState("");
   const [dbTestResult, setDbTestResult] = useState(null);
   const [dbConnecting, setDbConnecting] = useState(false);
@@ -339,6 +340,36 @@ export default function DatabasePage() {
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = () => { loadDbStats(); loadBackupHistory(); loadCleanupPreview(); loadDbUpdates(); loadGithubConfig(); };
+
+  // ── Auto-check pending sync vs. cloud preset ───────────────────────────────
+  const checkCloudSync = async () => {
+    // Solo verificamos si estamos en LOCAL (no en la nube) y hay una preset en la nube disponible.
+    const isOnCloud = dbStats?.is_atlas;
+    if (isOnCloud) { setCloudCheck(null); return; }
+    const cloudPreset = presets.find(p => p.url?.startsWith("mongodb+srv"));
+    if (!cloudPreset) { setCloudCheck(null); return; }
+    setCloudCheck(c => ({ ...(c || {}), checking: true, target_url: cloudPreset.url, target_name: cloudPreset.name }));
+    try {
+      const res = await compareDatabase(cloudPreset.url);
+      setCloudCheck({
+        checking: false,
+        pending_total: res.pending_total || 0,
+        current_total: res.current_total || 0,
+        target_total: res.target_total || 0,
+        target_url: cloudPreset.url,
+        target_name: cloudPreset.name,
+        needs_sync: !!res.needs_sync,
+      });
+    } catch {
+      setCloudCheck({ checking: false, error: true, target_url: cloudPreset.url, target_name: cloudPreset.name });
+    }
+  };
+
+  // Ejecutar comparación cuando cambien dbStats o presets
+  useEffect(() => {
+    if (dbStats && presets.length > 0) checkCloudSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbStats?.is_atlas, dbStats?.objects, presets.length]);
 
   // ── GitHub Config load ──────────────────────────────────
   const loadGithubConfig = async () => {
@@ -646,10 +677,18 @@ export default function DatabasePage() {
         try { await testDbConnection(activeConnUrl.trim()); }
         catch { toast({ title: "La prueba de conexión falló. Intenta igualmente.", variant: "destructive" }); }
       }
-      await switchDatabase(activeConnUrl.trim());
-      toast({ title: "Base de datos conectada ✓ — Actualizando..." });
+      const res = await switchDatabase(activeConnUrl.trim());
+      const uploaded = res?.total_uploaded || 0;
+      if (uploaded > 0) {
+        toast({
+          title: `☁️ Nube conectada · ${uploaded} registros locales subidos`,
+          description: "Los datos locales se fusionaron con la nube antes de cargar. Actualizando...",
+        });
+      } else {
+        toast({ title: "Base de datos conectada ✓ — Actualizando..." });
+      }
       setNewDbUrl(""); setConnFields({ host: "", port: "27017", user: "", pass: "", db: "cinema_events" }); setDbTestResult(null);
-      setTimeout(() => window.location.reload(), 1200);
+      setTimeout(() => window.location.reload(), 1600);
     } catch (err) {
       toast({ title: err.response?.data?.detail || "Error al conectar", variant: "destructive" });
     } finally { setDbConnecting(false); }
@@ -870,10 +909,15 @@ export default function DatabasePage() {
                     data-testid="atlas-onboarding-connect"
                     onClick={async () => {
                       try {
-                        await switchDatabase(factoryPreset.url);
-                        toast({ title: "Conectado a la base de datos en la nube ✓ — Actualizando..." });
+                        const res = await switchDatabase(factoryPreset.url);
+                        const uploaded = res?.total_uploaded || 0;
+                        if (uploaded > 0) {
+                          toast({ title: `☁️ Nube conectada · ${uploaded} registros locales subidos`, description: "Los datos locales se fusionaron con la nube. Actualizando..." });
+                        } else {
+                          toast({ title: "Conectado a la base de datos en la nube ✓ — Actualizando..." });
+                        }
                         try { localStorage.setItem("cp_atlas_banner_dismissed", "1"); } catch {}
-                        setTimeout(() => window.location.reload(), 1200);
+                        setTimeout(() => window.location.reload(), 1600);
                       } catch (e) { toast({ title: e.response?.data?.detail || "Error al conectar", variant: "destructive" }); }
                     }}
                     className="px-4 py-2 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md flex items-center gap-1.5">
@@ -1188,6 +1232,132 @@ export default function DatabasePage() {
           </div>
         </motion.div>
 
+        {/* ── UBICACIÓN DE TUS DATOS (hero) ── */}
+        <motion.div variants={fadeUp} data-testid="data-location-hero">
+          {(() => {
+            const isCloud = !!dbStats?.is_atlas;
+            const objects = dbStats?.objects || 0;
+            const collections = dbStats?.collections || 0;
+            const pending = cloudCheck?.pending_total || 0;
+            const cloudPreset = presets.find(p => p.url?.startsWith("mongodb+srv"));
+            const bg = isCloud
+              ? "linear-gradient(130deg, rgba(224,242,254,0.95), rgba(219,234,254,0.9), rgba(237,233,254,0.85))"
+              : "linear-gradient(130deg, rgba(254,243,199,0.85), rgba(255,247,237,0.9), rgba(254,242,242,0.85))";
+            const iconWrapClass = isCloud
+              ? "w-16 h-16 rounded-3xl bg-white/80 shadow-md flex items-center justify-center shrink-0 border border-sky-200"
+              : "w-16 h-16 rounded-3xl bg-white/80 shadow-md flex items-center justify-center shrink-0 border border-amber-200";
+            const iconClass = isCloud ? "text-sky-600" : "text-amber-600";
+            const pillClass = isCloud
+              ? "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-sky-500 text-white"
+              : "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-500 text-white";
+            const Icon = isCloud ? Cloud : Laptop;
+            return (
+              <div className="relative overflow-hidden rounded-3xl border p-6"
+                style={{ background: bg, borderColor: isCloud ? "rgba(125,211,252,0.35)" : "rgba(252,211,77,0.35)" }}>
+                <div className="flex items-start gap-5">
+                  <motion.div
+                    initial={{ scale: 0.85, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 220, damping: 18 }}
+                    className={iconWrapClass}>
+                    <Icon size={32} className={iconClass} strokeWidth={2} />
+                  </motion.div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className={pillClass}>
+                        {isCloud ? "En la nube" : "En este equipo"}
+                      </span>
+                      {isCloud && <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1"><CheckCircle size={9} /> Sincronizado</span>}
+                    </div>
+                    <p className="text-2xl font-black text-slate-900 leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                      {isCloud ? "Tus datos están en la NUBE ☁️" : "Tus datos están LOCALES 💻"}
+                    </p>
+                    <p className="text-xs font-semibold text-slate-500 mt-1.5">
+                      {isCloud
+                        ? "Accesibles desde cualquier dispositivo con respaldo automático."
+                        : "Solo en este equipo. Conecta la nube para acceder desde cualquier lugar."}
+                    </p>
+
+                    <div className="flex flex-wrap gap-3 mt-4">
+                      <div className="bg-white/70 rounded-2xl px-3.5 py-2 border border-white/80">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Registros</div>
+                        <div className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{objects.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-white/70 rounded-2xl px-3.5 py-2 border border-white/80">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Colecciones</div>
+                        <div className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{collections}</div>
+                      </div>
+                      <div className="bg-white/70 rounded-2xl px-3.5 py-2 border border-white/80">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Tamaño</div>
+                        <div className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{dbStats?.total_size || "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Aviso de sincronización pendiente */}
+                {!isCloud && cloudCheck && !cloudCheck.checking && !cloudCheck.error && pending > 0 && cloudPreset && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-5 flex items-center gap-4 bg-white/85 backdrop-blur rounded-2xl px-4 py-3 border border-orange-300/60"
+                    data-testid="cloud-sync-pending-banner">
+                    <div className="w-10 h-10 rounded-2xl bg-orange-100 flex items-center justify-center shrink-0">
+                      <CloudUpload size={18} className="text-orange-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                        {pending} {pending === 1 ? "registro local pendiente" : "registros locales pendientes"} de subir a la nube
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Local: <b>{cloudCheck.current_total}</b> · Nube "{cloudCheck.target_name}": <b>{cloudCheck.target_total}</b> · Actualiza para no perder cambios.
+                      </p>
+                    </div>
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      data-testid="cloud-sync-now-btn"
+                      onClick={async () => {
+                        try {
+                          const res = await switchDatabase(cloudPreset.url);
+                          const uploaded = res?.total_uploaded || 0;
+                          toast({
+                            title: `☁️ Nube actualizada · ${uploaded} registros subidos`,
+                            description: "Tus datos locales se fusionaron con la nube. Actualizando...",
+                          });
+                          setTimeout(() => window.location.reload(), 1600);
+                        } catch (e) { toast({ title: e.response?.data?.detail || "Error al sincronizar", variant: "destructive" }); }
+                      }}
+                      className="px-4 py-2 rounded-2xl text-xs font-black bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-md flex items-center gap-1.5 shrink-0">
+                      <CloudUpload size={13} /> Sincronizar ahora
+                    </motion.button>
+                  </motion.div>
+                )}
+
+                {/* Todo al día */}
+                {!isCloud && cloudCheck && !cloudCheck.checking && !cloudCheck.error && pending === 0 && cloudCheck.target_total > 0 && (
+                  <div className="mt-5 flex items-center gap-3 bg-white/80 rounded-2xl px-4 py-2.5 border border-emerald-200/60" data-testid="cloud-sync-uptodate-banner">
+                    <CheckCircle size={14} className="text-emerald-600 shrink-0" />
+                    <p className="text-[11px] font-bold text-slate-600">
+                      Nube "{cloudCheck.target_name}" al día ({cloudCheck.target_total} registros). Puedes conectarla cuando quieras.
+                    </p>
+                  </div>
+                )}
+
+                {/* Sin nube configurada */}
+                {!isCloud && (!cloudPreset || (cloudCheck && cloudCheck.error)) && (
+                  <div className="mt-5 flex items-center gap-3 bg-white/70 rounded-2xl px-4 py-2.5 border border-slate-200/60">
+                    <AlertCircle size={14} className="text-slate-500 shrink-0" />
+                    <p className="text-[11px] font-bold text-slate-600">
+                      {cloudCheck?.error
+                        ? "No se pudo conectar con la nube para comparar. Revisa tu internet."
+                        : "Aún no tienes una base de datos en la nube configurada. Agrega una abajo para respaldo automático."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </motion.div>
+
         {/* ── CONEXIÓN MONGODB (UNIFICADO) ── */}
         <motion.div variants={fadeUp}>
           <div className="glass rounded-3xl overflow-hidden">
@@ -1199,15 +1369,15 @@ export default function DatabasePage() {
                   <Database size={16} className="text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Base de datos en la nube</p>
-                  <p className="text-[11px] text-slate-400">Estado, conexión y bases guardadas</p>
+                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Conexión y bases guardadas</p>
+                  <p className="text-[11px] text-slate-400">Cambia entre local y nube · Administra tus conexiones</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {dbStats && (
-                  <span className={`flex items-center gap-1.5 text-[10px] font-black px-3 py-1 rounded-full ${dbStats.is_custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
-                    {dbStats.is_custom ? <WifiOff size={10} /> : <Wifi size={10} />}
-                    {dbStats.is_custom ? "BD Personalizada" : "BD Local"}
+                  <span className={`flex items-center gap-1.5 text-[10px] font-black px-3 py-1 rounded-full ${dbStats.is_atlas ? "bg-sky-100 text-sky-700" : dbStats.is_custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                    {dbStats.is_atlas ? <Cloud size={10} /> : <Laptop size={10} />}
+                    {dbStats.is_atlas ? "Nube" : dbStats.is_custom ? "Personalizada" : "Local"}
                   </span>
                 )}
                 <button onClick={(e) => { e.stopPropagation(); loadDbStats(); }} className="w-8 h-8 rounded-xl hover:bg-white/60 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all">
@@ -1563,9 +1733,14 @@ export default function DatabasePage() {
                               onClick={async () => {
                                 setNewDbUrl(p.url);
                                 try {
-                                  await switchDatabase(p.url);
-                                  toast({ title: `Conectado a "${p.name}" ✓ — Actualizando...` });
-                                  setTimeout(() => window.location.reload(), 1200);
+                                  const res = await switchDatabase(p.url);
+                                  const uploaded = res?.total_uploaded || 0;
+                                  if (uploaded > 0) {
+                                    toast({ title: `☁️ "${p.name}" conectada · ${uploaded} registros locales subidos`, description: "Los datos locales se fusionaron con la nube. Actualizando..." });
+                                  } else {
+                                    toast({ title: `Conectado a "${p.name}" ✓ — Actualizando...` });
+                                  }
+                                  setTimeout(() => window.location.reload(), 1600);
                                 } catch (e) { toast({ title: e.response?.data?.detail || "Error al conectar", variant: "destructive" }); }
                               }}
                               className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-white/80 hover:bg-white transition-colors border border-white/60">

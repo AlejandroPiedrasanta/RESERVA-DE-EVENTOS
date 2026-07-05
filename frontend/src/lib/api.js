@@ -53,6 +53,7 @@ export const updateAppSettings = (data) => api.put("/settings", data).then(r => 
 // Database Settings
 export const getDbStats = () => api.get("/settings/database").then(r => r.data);
 export const testDbConnection = (url) => api.post("/settings/database/test", { url }).then(r => r.data);
+export const compareDatabase = (url) => api.post("/settings/database/compare", { url }).then(r => r.data);
 export const switchDatabase = (url) => api.post("/settings/database/connect", { url }).then(r => r.data);
 export const resetDatabase = () => api.post("/settings/database/reset").then(r => r.data);
 export const optimizeDatabase = () => api.post("/settings/database/optimize").then(r => r.data);

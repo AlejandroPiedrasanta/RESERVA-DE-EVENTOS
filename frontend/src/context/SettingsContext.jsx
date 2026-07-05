@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { setEventConfigOverrides } from "@/lib/eventConfig";
 import { getCloudAppearance, saveCloudAppearance, getSecurityStatus } from "@/lib/api";
 
-export const NAV_PATHS = ["/dashboard", "/reservaciones", "/calendario", "/socios", "/metas", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
+export const NAV_PATHS = ["/dashboard", "/calendario", "/socios", "/metas", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
 
 export const APPEARANCE_KEYS = [
   "theme", "preset", "animations", "radius", "pdf_theme", "dark_mode", "font_scale", "bg_intensity",
@@ -77,7 +77,7 @@ export const STATUS_COLOR_CLASSES = {
 
 const T = {
   es: {
-    nav: { dashboard: "Dashboard", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", database: "Base de Datos", appearance: "Apariencia" },
+    nav: { dashboard: "Panel", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", database: "Base de Datos", appearance: "Apariencia" },
     common: { newReservation: "Nueva Reserva", cancel: "Cancelar", save: "Guardar cambios", create: "Crear reserva", saving: "Guardando...", edit: "Editar", viewAll: "Ver todas" },
     statuses: { Pendiente: "Pendiente", Confirmado: "Confirmado", Completado: "Completado", Cancelado: "Cancelado" },
     months: ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"],

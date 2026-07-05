@@ -396,29 +396,6 @@ export default function CalendarView() {
       </motion.div>
       )}
 
-      {/* Charts Section */}
-      {viewMode !== "list" && (
-      <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.5 }} className="glass rounded-3xl p-6 mt-5" data-testid="calendar-charts">
-        <div className="flex items-center gap-2.5 mb-5">
-          <motion.div animate={{ rotate: [0, -6, 6, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }} className="w-9 h-9 rounded-2xl btn-primary flex items-center justify-center">
-            <BarChart2 size={15} className="text-white" />
-          </motion.div>
-          <h2 className="text-base font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{es ? "Análisis del Calendario" : "Calendar Analysis"}</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div>
-            <p className="text-sm font-black text-slate-700 mb-3" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{es ? `Tipos — ${tr.months[month]}` : `Types — ${tr.months[month]}`}</p>
-            <MonthDistribution events={events} year={year} month={month} language={language} />
-          </div>
-          <div>
-            <p className="text-sm font-black text-slate-700 mb-1" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{es ? `Actividad ${year}` : `Activity ${year}`}</p>
-            <p className="text-xs text-slate-400 mb-3">{es ? "Clic en un mes para ir a él" : "Click a month to navigate"}</p>
-            <YearActivity events={events} year={year} currentMonth={month} language={language} onMonthClick={(m) => goTo(year, m, m > month ? 1 : -1)} />
-          </div>
-        </div>
-      </motion.div>
-      )}
-
       {/* Floating hover preview */}
       <AnimatePresence>
         {hover && (() => {

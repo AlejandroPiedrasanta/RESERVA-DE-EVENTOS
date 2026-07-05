@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import {
   Menu, ArrowUp, ArrowDown, RotateCcw,
-  LayoutDashboard, List, CalendarDays, Users, Target, Database, Palette, SlidersHorizontal, RefreshCw,
+  LayoutDashboard, CalendarDays, Users, Target, Database, Palette, SlidersHorizontal, RefreshCw,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -9,8 +9,7 @@ import { Section } from "./SectionShell";
 
 const NAV_META = {
   "/dashboard":       { key: "dashboard",    icon: LayoutDashboard },
-  "/reservaciones":   { key: "reservations", icon: List },
-  "/calendario":      { key: "calendar",     icon: CalendarDays },
+  "/calendario":      { key: "reservations", icon: CalendarDays },
   "/socios":          { key: "socios",       icon: Users },
   "/metas":           { key: "metas",        icon: Target },
   "/base-de-datos":   { key: "database",     icon: Database },

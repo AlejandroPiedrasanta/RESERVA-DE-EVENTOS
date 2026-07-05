@@ -405,6 +405,7 @@ class NotificationSettingsModel(BaseModel):
 
 class DBConnectRequest(BaseModel):
     url: str
+    sync_local: bool = True
 
 
 # ─── Reminder Logic ──────────────────────────────────────
@@ -1882,6 +1883,64 @@ async def test_db_connection(req: DBConnectRequest):
         raise HTTPException(status_code=400, detail=f"No se pudo conectar: {e}")
 
 
+@api_router.post("/settings/database/compare")
+async def compare_database(req: DBConnectRequest):
+    """Compara los conteos de documentos de la BD actual contra una BD destino (nube).
+    Sirve para indicar cuántos registros locales aún no están en la nube."""
+    global db
+    try:
+        # Conteos actuales
+        current_counts: dict[str, int] = {}
+        current_total = 0
+        for cname in await _all_collections():
+            try:
+                n = await db[cname].count_documents({})
+            except Exception:
+                n = 0
+            current_counts[cname] = n
+            current_total += n
+
+        # Conteos remotos
+        target_counts: dict[str, int] = {}
+        target_total = 0
+        target_client = AsyncIOMotorClient(req.url, serverSelectionTimeoutMS=5000)
+        try:
+            target_db = target_client[DB_NAME]
+            await target_db.command("ping")
+            target_names = [n for n in await target_db.list_collection_names() if not n.startswith("system.")]
+            for cname in target_names:
+                try:
+                    n = await target_db[cname].count_documents({})
+                except Exception:
+                    n = 0
+                target_counts[cname] = n
+                target_total += n
+        finally:
+            target_client.close()
+
+        # Pendientes de subir (colecciones donde local > remoto)
+        pending: dict[str, int] = {}
+        for k, v in current_counts.items():
+            diff = v - target_counts.get(k, 0)
+            if diff > 0:
+                pending[k] = diff
+        pending_total = sum(pending.values())
+
+        return {
+            "current": current_counts,
+            "current_total": current_total,
+            "target": target_counts,
+            "target_total": target_total,
+            "pending_upload": pending,
+            "pending_total": pending_total,
+            "needs_sync": pending_total > 0,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al comparar: {e}")
+
+
 @api_router.post("/settings/database/connect")
 async def switch_database(req: DBConnectRequest):
     global client, db
@@ -1889,13 +1948,53 @@ async def switch_database(req: DBConnectRequest):
         new_client = AsyncIOMotorClient(req.url, serverSelectionTimeoutMS=5000)
         new_db = new_client[DB_NAME]
         await new_db.command("ping")
+
+        # ─── Sync local → cloud (merge, do NOT overwrite existing cloud docs) ───
+        sync_stats: dict[str, int] = {}
+        total_uploaded = 0
+        if req.sync_local:
+            try:
+                local_names = await db.list_collection_names()
+                for cname in local_names:
+                    if cname.startswith("system."):
+                        continue
+                    try:
+                        local_docs = await db[cname].find({}).to_list(length=None)
+                    except Exception:
+                        continue
+                    if not local_docs:
+                        continue
+                    uploaded = 0
+                    for doc in local_docs:
+                        _id = doc.get("_id")
+                        try:
+                            if _id is not None:
+                                exists = await new_db[cname].find_one({"_id": _id}, {"_id": 1})
+                                if exists:
+                                    continue
+                            await new_db[cname].insert_one(doc)
+                            uploaded += 1
+                        except Exception:
+                            # Duplicate key or validation → skip, keep cloud version
+                            continue
+                    if uploaded > 0:
+                        sync_stats[cname] = uploaded
+                        total_uploaded += uploaded
+            except Exception as e:
+                logger.warning(f"Sync local→cloud failed: {e}")
+
         old_client = client
         client = new_client
         db = new_db
         CUSTOM_DB_FILE.write_text(req.url)
         old_client.close()
-        logger.info(f"Database switched to: {req.url[:30]}...")
-        return {"success": True, "message": "Base de datos cambiada correctamente"}
+        logger.info(f"Database switched to: {req.url[:30]}... (synced {total_uploaded} docs)")
+
+        msg = "Base de datos cambiada correctamente"
+        if total_uploaded > 0:
+            details = ", ".join(f"{k}: {v}" for k, v in sync_stats.items())
+            msg = f"Conectado a la nube · {total_uploaded} registros locales subidos ({details})"
+        return {"success": True, "message": msg, "synced": sync_stats, "total_uploaded": total_uploaded}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al conectar: {e}")
 

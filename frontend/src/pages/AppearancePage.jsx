@@ -1889,7 +1889,7 @@ function SiteTitlesSection({ es, customLabels, changeCustomLabel, resetCustomLab
       title: es ? "Barra Lateral" : "Sidebar",
       desc: es ? "Nombres de las secciones en el menú" : "Section names in the sidebar menu",
       fields: [
-        { key: "nav.dashboard",    label: "Dashboard",       placeholder: "Dashboard" },
+        { key: "nav.dashboard",    label: es ? "Panel" : "Dashboard",           placeholder: es ? "Panel" : "Dashboard" },
         { key: "nav.reservations", label: es ? "Reservaciones" : "Reservations", placeholder: es ? "Reservaciones" : "Reservations" },
         { key: "nav.calendar",     label: es ? "Calendario" : "Calendar",       placeholder: es ? "Calendario" : "Calendar" },
         { key: "nav.socios",       label: es ? "Socios" : "Partners",           placeholder: es ? "Socios" : "Partners" },
