@@ -72,8 +72,6 @@ agenthub/agents/youtube/db
 *.pack
 *.deb
 *.dylib
-# Exception: prebuilt node_modules tarball for fast WARM boot (must be committed)
-!frontend/node_modules.tar.gz
 
 # Build caches
 .cache/
@@ -81,15 +79,5 @@ agenthub/agents/youtube/db
 memory/test_credentials.md
 
 # Mobile development
-android-sdk/frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/8.pack
-frontend/node_modules/.cache/default-development/4.pack
+android-sdk/frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/6.pack
-frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/1.pack_
-frontend/node_modules/.cache/default-development/5.pack
-frontend/node_modules/.cache/default-development/7.pack
-artifacts/pip-wheels.tar.gz
