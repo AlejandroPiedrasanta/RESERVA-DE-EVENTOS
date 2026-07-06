@@ -101,3 +101,65 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Rediseño total del calendario mensual en la página de reservaciones (/calendario, vista "Mes").
+  Problemas reportados por el usuario:
+  - El hover del ratón sobre las celdas del calendario no funciona bien (no se percibe).
+  - Cuando hay un evento en una fecha, la celda debe brillar/destacar (glow).
+  - Hacerlo más útil, más intuitivo, más animado. Rediseño total.
+
+frontend:
+  - task: "Rediseño calendario mensual (hover, glow celdas con eventos, animaciones)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/CalendarView.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Se rediseñaron por completo las celdas del grid del calendario mensual dentro de CalendarView.jsx (bloque {viewMode === "month"} → grid-cols-7).
+          Cambios aplicados:
+          1. Grid ahora usa gap-1.5 con padding y celdas con rounded-2xl (antes: bordes rectos con border-r/border-b y transiciones básicas).
+          2. Hover en celda: whileHover con motion (scale 1.035 + y:-3, spring stiffness 300) — reemplaza el hover:bg-white/40 estático anterior, que no se sentía. Solo se activa en días válidos y no pasados.
+          3. Celdas con eventos: fondo con gradiente sutil del color del tipo primario (linear-gradient de 14% opacity), inset boxShadow que pulsa (animate opacity 0.4→0.85→0.4, duración 2.4s) y un icono Sparkles animado en la esquina superior derecha (scale/rotate loop).
+          4. Hover extra sobre celda con eventos: aparece un radial-gradient glow más intenso desde la esquina.
+          5. Día actual: layoutId "today-ring" con doble anillo (interior sólido + exterior pulsante) para mayor visibilidad.
+          6. Número de día: con color del tipo de evento primario cuando hay eventos, whileHover scale 1.15, dentro de un rounded-xl.
+          7. Badge de conteo de eventos: círculo pequeño con el color del evento, aparece con spring animation, hover rotate.
+          8. Botón "+" para crear evento aparece en hover con animación rotate 90.
+          9. Chips de eventos: gradiente en fondo, animación spring de entrada con stagger, hover con scale/x/boxShadow coloreado, shadow-sm→shadow-md.
+          10. "+X más": ahora es clickeable-friendly, con color del evento primario y hover scale.
+          11. Se preserva el hover-card lateral (onChipEnter/onChipMove/onChipLeave) para detalles del evento.
+          
+          Cambios SOLO en /app/frontend/src/pages/CalendarView.jsx, bloque de renderizado de celdas (~líneas 268-370). Lint OK. Sin cambios en backend, API, ni en la ruta.
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Rediseño calendario mensual (hover, glow celdas con eventos, animaciones)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Ir a /calendario (o clic en "Reservaciones" en sidebar → vista "Mes" activa por defecto).
+      Verificar:
+      1. HOVER: pasar el mouse sobre una celda día vacía y sobre una con evento — debe animarse (escala/lift/sombra) de forma visible y suave.
+      2. GLOW EVENTOS: las celdas que tienen al menos un evento deben verse claramente destacadas: gradiente sutil de fondo del color del tipo, inset ring pulsante, ícono Sparkles animado en la esquina, y un badge con el número de eventos.
+      3. TODAY: la celda del día actual (6 de Julio 2026) tiene un anillo doble (interior sólido violeta + exterior pulsante).
+      4. Al pasar mouse sobre un chip de evento debe aparecer una hover-card con detalles a la derecha (comportamiento preservado).
+      5. Al hacer clic en una celda vacía se abre el formulario de nueva reserva.
+      6. Al hacer clic en un chip de evento se navega a /reservaciones/:id.
+      7. Navegación entre meses (chevrons) sigue funcionando con animación direccional.
+      Ya existe una reserva de prueba el 09/07/2026 (Boda) para verificar el glow. Preview URL: https://evento-reserve-3.preview.emergentagent.com

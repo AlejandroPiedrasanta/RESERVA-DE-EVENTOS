@@ -268,54 +268,167 @@ export default function CalendarView() {
           {/* Day cells with directional slide */}
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div key={`grid-${month}-${year}`} custom={direction} variants={gridVariants} initial="hidden" animate="show"
-              exit={{ opacity: 0, x: direction * -24, transition: { duration: 0.18 } }} className="grid grid-cols-7" data-testid="calendar-grid">
+              exit={{ opacity: 0, x: direction * -24, transition: { duration: 0.18 } }} className="grid grid-cols-7 gap-1.5 p-2 sm:p-3" data-testid="calendar-grid">
               {cells.map((day, i) => {
                 const dayEvents = getEventsForDay(day);
                 const visible = dayEvents.slice(0, 3);
                 const extra = dayEvents.length - visible.length;
                 const past = day ? isPast(day) : false;
                 const todayCell = day && isToday(day);
+                const hasEvents = dayEvents.length > 0;
+                const primaryType = hasEvents ? dayEvents[0].event_type : null;
+                const primaryColor = primaryType ? getColor(primaryType) : null;
+                const isWeekend = day && ((firstDay + day - 1) % 7 === 0 || (firstDay + day - 1) % 7 === 6);
+
                 return (
-                  <motion.div key={i} variants={cellVariant}
-                    className={`relative min-h-[112px] p-2 border-r border-b border-white/20 last:border-r-0 transition-colors group/cell ${!day ? "bg-slate-50/20" : past ? "bg-slate-50/30" : "hover:bg-white/40"} ${day ? "cursor-pointer" : ""}`}
+                  <motion.div
+                    key={i}
+                    variants={cellVariant}
+                    whileHover={day && !past ? { scale: 1.035, y: -3, transition: { type: "spring", stiffness: 300, damping: 20 } } : {}}
+                    className={`relative min-h-[112px] p-2 rounded-2xl border transition-colors group/cell overflow-hidden ${
+                      !day ? "bg-transparent border-transparent" :
+                      past ? "bg-slate-50/40 border-white/30" :
+                      hasEvents ? "border-white/60" :
+                      "bg-white/25 border-white/40 hover:bg-white/55 hover:border-white/80 hover:shadow-md"
+                    } ${day ? "cursor-pointer" : ""}`}
+                    style={hasEvents && !past ? {
+                      background: `linear-gradient(135deg, ${primaryColor.fg}14, ${primaryColor.fg}05 60%, rgba(255,255,255,0.4))`,
+                    } : hasEvents && past ? {
+                      background: `linear-gradient(135deg, ${primaryColor.fg}0a, rgba(248,250,252,0.4))`,
+                    } : undefined}
                     onClick={() => { if (day && dayEvents.length === 0) setShowForm(true); }}
-                    data-testid={day ? `calendar-day-${day}` : undefined}>
-                    {todayCell && (
-                      <motion.div layoutId="today-ring" className="absolute inset-1 rounded-2xl pointer-events-none"
-                        style={{ boxShadow: "inset 0 0 0 2px var(--t-from)" }} />
-                    )}
-                    {day && (
+                    data-testid={day ? `calendar-day-${day}` : undefined}
+                  >
+                    {/* Glow animado si tiene eventos (no en pasado) */}
+                    {hasEvents && !past && (
                       <>
+                        <motion.div
+                          className="absolute inset-0 rounded-2xl pointer-events-none opacity-60"
+                          style={{
+                            boxShadow: `inset 0 0 0 1.5px ${primaryColor.fg}55`,
+                          }}
+                          animate={{ opacity: [0.4, 0.85, 0.4] }}
+                          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut", delay: (i % 7) * 0.15 }}
+                        />
+                        <motion.div
+                          className="absolute -inset-0.5 rounded-2xl pointer-events-none opacity-0 group-hover/cell:opacity-100 transition-opacity duration-300"
+                          style={{
+                            background: `radial-gradient(circle at 30% 20%, ${primaryColor.fg}30, transparent 65%)`,
+                          }}
+                        />
+                        {/* Sparkle esquina */}
+                        <motion.div
+                          className="absolute top-1 right-1 pointer-events-none"
+                          animate={{ scale: [1, 1.25, 1], rotate: [0, 12, 0] }}
+                          transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: (i % 5) * 0.3 }}
+                        >
+                          <Sparkles size={9} style={{ color: primaryColor.fg }} strokeWidth={2.5} className="opacity-60" />
+                        </motion.div>
+                      </>
+                    )}
+
+                    {/* Anillo TODAY */}
+                    {todayCell && (
+                      <motion.div
+                        layoutId="today-ring"
+                        className="absolute inset-0 rounded-2xl pointer-events-none z-10"
+                        style={{ boxShadow: "inset 0 0 0 2.5px var(--t-from)" }}
+                      >
+                        <motion.div
+                          className="absolute inset-0 rounded-2xl"
+                          style={{ boxShadow: "0 0 0 3px var(--t-from)33" }}
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                        />
+                      </motion.div>
+                    )}
+
+                    {day && (
+                      <div className="relative z-[1]">
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className={`inline-flex items-center justify-center w-7 h-7 text-sm rounded-full font-bold transition-all ${todayCell ? "theme-today" : past ? "text-slate-300" : "text-slate-700 group-hover/cell:bg-white/70"}`}>{day}</span>
-                          {day && dayEvents.length === 0 && !past && (
-                            <motion.span initial={{ opacity: 0 }} whileHover={{ scale: 1.2 }} className="opacity-0 group-hover/cell:opacity-100 transition-opacity">
-                              <Plus size={13} className="text-slate-400" />
+                          <motion.span
+                            whileHover={{ scale: 1.15 }}
+                            className={`inline-flex items-center justify-center min-w-[28px] h-7 px-1.5 text-sm rounded-xl font-black transition-all ${
+                              todayCell ? "theme-today shadow-md" :
+                              past ? "text-slate-300" :
+                              hasEvents ? "text-slate-800 group-hover/cell:bg-white/80" :
+                              isWeekend ? "text-slate-500 group-hover/cell:bg-white/80" :
+                              "text-slate-700 group-hover/cell:bg-white/80"
+                            }`}
+                            style={hasEvents && !todayCell && !past ? { color: primaryColor.fg } : undefined}
+                          >
+                            {day}
+                          </motion.span>
+                          {hasEvents ? (
+                            <motion.span
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: "spring", stiffness: 280, delay: 0.1 + (i % 7) * 0.02 }}
+                              whileHover={{ scale: 1.2, rotate: 5 }}
+                              className="text-[9px] font-black px-1.5 py-0.5 rounded-full text-white shadow-sm flex-shrink-0"
+                              style={{ background: primaryColor.fg }}
+                            >
+                              {dayEvents.length}
                             </motion.span>
+                          ) : (
+                            !past && (
+                              <motion.span
+                                whileHover={{ scale: 1.3, rotate: 90 }}
+                                className="opacity-0 group-hover/cell:opacity-100 transition-opacity"
+                              >
+                                <div className="w-5 h-5 rounded-full bg-white/70 flex items-center justify-center shadow-sm">
+                                  <Plus size={11} className="text-slate-500" strokeWidth={2.5} />
+                                </div>
+                              </motion.span>
+                            )
                           )}
                         </div>
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <AnimatePresence>
-                            {visible.map(ev => {
+                            {visible.map((ev, evIdx) => {
                               const c = getColor(ev.event_type);
                               const cfg = getEventConfig(ev.event_type);
                               const EvIcon = cfg.icon;
                               return (
-                                <motion.div key={ev.id} layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                                  whileHover={{ scale: 1.04, x: 2, boxShadow: "0 4px 12px rgba(0,0,0,0.12)" }}
+                                <motion.div
+                                  key={ev.id}
+                                  layout
+                                  initial={{ opacity: 0, x: -8, scale: 0.9 }}
+                                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                                  exit={{ opacity: 0, scale: 0.9 }}
+                                  transition={{ delay: 0.1 + evIdx * 0.05, type: "spring", stiffness: 260 }}
+                                  whileHover={{ scale: 1.06, x: 3, boxShadow: `0 4px 14px ${c.fg}44` }}
+                                  whileTap={{ scale: 0.96 }}
                                   onClick={(e) => { e.stopPropagation(); navigate(`/reservaciones/${ev.id}`); }}
-                                  onMouseEnter={(e) => onChipEnter(ev, e)} onMouseMove={onChipMove} onMouseLeave={onChipLeave}
-                                  style={{ borderLeftColor: c.fg, background: c.bg }}
-                                  className="flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-r-lg rounded-l-sm border-l-[3px] cursor-pointer" data-testid={`calendar-event-${ev.id}`}>
-                                  <EvIcon size={9} style={{ color: c.fg }} strokeWidth={2.2} className="flex-shrink-0" />
-                                  <span className="text-[10px] font-bold truncate leading-tight" style={{ color: c.fg }}>{ev.event_time ? `${ev.event_time} ` : ""}{ev.event_type || ev.client_name}</span>
+                                  onMouseEnter={(e) => onChipEnter(ev, e)}
+                                  onMouseMove={onChipMove}
+                                  onMouseLeave={onChipLeave}
+                                  style={{ borderLeftColor: c.fg, background: `linear-gradient(90deg, ${c.bg}, ${c.bg}cc)` }}
+                                  className="flex items-center gap-1 pl-1.5 pr-1.5 py-1 rounded-lg border-l-[3px] cursor-pointer shadow-sm hover:shadow-md transition-shadow"
+                                  data-testid={`calendar-event-${ev.id}`}
+                                >
+                                  <EvIcon size={10} style={{ color: c.fg }} strokeWidth={2.3} className="flex-shrink-0" />
+                                  <span className="text-[10px] font-black truncate leading-tight" style={{ color: c.fg }}>
+                                    {ev.event_time ? `${ev.event_time} ` : ""}{ev.event_type || ev.client_name}
+                                  </span>
                                 </motion.div>
                               );
                             })}
                           </AnimatePresence>
-                          {extra > 0 && <span className="text-[10px] font-bold text-slate-400 pl-1 block">+{extra} {es ? "más" : "more"}</span>}
+                          {extra > 0 && (
+                            <motion.span
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ delay: 0.25 }}
+                              whileHover={{ scale: 1.08, x: 2 }}
+                              className="text-[10px] font-black pl-1 block cursor-pointer"
+                              style={{ color: primaryColor?.fg || "#94a3b8" }}
+                            >
+                              + {extra} {es ? "más" : "more"}
+                            </motion.span>
+                          )}
                         </div>
-                      </>
+                      </div>
                     )}
                   </motion.div>
                 );
