@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getStats, getReservations, getSocios } from "@/lib/api";
-import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle, LayoutDashboard } from "lucide-react";
+import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle, LayoutDashboard, MapPin, Sparkles, Flame, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
@@ -480,8 +480,8 @@ export default function Dashboard() {
             })}
           </div>
         ) : (
-          /* ── ESTILO LÍNEA (default) ── */
-          <div className="divide-y divide-white/30">
+          /* ── ESTILO LÍNEA (default) — WOOWY EDITION ── */
+          <div className="p-4 space-y-3">
             {recent.map((r, idx) => {
               const cfg = getEventConfig(r.event_type);
               const EvIcon = cfg.icon;
@@ -490,44 +490,247 @@ export default function Dashboard() {
                 .filter(p => p.socio);
               const firstPartner = partners[0];
               const isPaid = firstPartner?.payment_status === "Pagado";
+
+              // Day + month abbrev
+              const [ey, em, ed] = (r.event_date || "").split("-");
+              const dayNum = ed ? parseInt(ed, 10) : "-";
+              const monthAbbrEs = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
+              const monthAbbrEn = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+              const monthAbbr = em ? (language === "es" ? monthAbbrEs : monthAbbrEn)[parseInt(em,10)-1] : "";
+
+              // Days until
+              let daysUntil = null;
+              if (ey && em && ed) {
+                const eventD = new Date(parseInt(ey,10), parseInt(em,10)-1, parseInt(ed,10));
+                const today0 = new Date(); today0.setHours(0,0,0,0);
+                daysUntil = Math.round((eventD - today0) / 86400000);
+              }
+              const isToday = daysUntil === 0;
+              const isTomorrow = daysUntil === 1;
+              const isSoon = daysUntil !== null && daysUntil > 0 && daysUntil <= 7;
+
+              let urgencyLabel = "";
+              let urgencyClass = "bg-slate-100 text-slate-500";
+              let UrgencyIcon = Clock;
+              if (isToday) { urgencyLabel = language==="es"?"¡HOY!":"TODAY!"; urgencyClass="bg-gradient-to-r from-rose-500 to-red-500 text-white shadow-md"; UrgencyIcon = Flame; }
+              else if (isTomorrow) { urgencyLabel = language==="es"?"Mañana":"Tomorrow"; urgencyClass="bg-amber-100 text-amber-700 border border-amber-200"; UrgencyIcon = Zap; }
+              else if (isSoon) { urgencyLabel = language==="es"?`En ${daysUntil}d`:`In ${daysUntil}d`; urgencyClass="bg-indigo-100 text-indigo-700 border border-indigo-200"; UrgencyIcon = Sparkles; }
+              else if (daysUntil !== null && daysUntil > 7) { urgencyLabel = language==="es"?`En ${daysUntil}d`:`In ${daysUntil}d`; urgencyClass="bg-slate-100 text-slate-500 border border-slate-200"; }
+
+              const paidPercent = r.total_amount > 0 ? Math.min(100, ((r.advance_paid || 0) / r.total_amount) * 100) : 0;
+
               return (
                 <motion.div
                   key={r.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.35 + idx * 0.05 }}
-                  whileHover={{ backgroundColor: "rgba(255,255,255,0.35)" }}
-                  className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-colors"
+                  initial={{ opacity: 0, y: 20, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ delay: 0.35 + idx * 0.08, type: "spring", stiffness: 180, damping: 22 }}
+                  whileHover={{ y: -3, scale: 1.008 }}
+                  className="group relative cursor-pointer"
                   onClick={() => navigate(`/reservaciones/${r.id}`)}
                   data-testid={`recent-row-${r.id}`}
                 >
-                  <div className="flex items-center gap-3 w-[30%] min-w-0">
-                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: cfg.fg + "18" }}>
-                      <EvIcon size={20} style={{ color: cfg.fg }} strokeWidth={1.8} />
-                    </div>
-                    <p className="text-2xl font-black truncate leading-none" style={{ fontFamily: "Cabinet Grotesk, sans-serif", color: cfg.fg }}>
-                      {r.event_type || "Evento"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                    {firstPartner ? (
-                      <>
-                        <Camera size={14} className="text-slate-400 flex-shrink-0" />
-                        <span className="text-base font-bold text-slate-700 truncate">{firstPartner.socio.name}</span>
-                        {firstPartner.payment > 0 && <span className={`text-base font-black flex-shrink-0 ${isPaid ? "text-emerald-600" : "text-amber-600"}`}>{formatCurrency(firstPartner.payment)}</span>}
-                        <span className={`text-xs font-black px-2.5 py-1 rounded-full flex-shrink-0 ${isPaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                          {isPaid ? (language === "es" ? "Pagado" : "Paid") : (language === "es" ? "Pendiente" : "Pending")}
+                  {/* Glow blur atrás en hover */}
+                  <motion.div
+                    className="absolute -inset-0.5 rounded-3xl opacity-0 group-hover:opacity-60 blur-xl transition-opacity duration-500 pointer-events-none"
+                    style={{ background: `linear-gradient(90deg, ${cfg.fg}55, transparent 70%)` }}
+                  />
+                  {/* Sparkle animado si es HOY */}
+                  {isToday && (
+                    <motion.div
+                      className="absolute -top-2 -right-2 z-10"
+                      animate={{ rotate: [0, 15, -15, 0], scale: [1, 1.15, 1] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-red-500 shadow-lg flex items-center justify-center border-2 border-white">
+                        <Flame size={14} className="text-white" strokeWidth={2.5} />
+                      </div>
+                    </motion.div>
+                  )}
+
+                  <div className="relative bg-white/60 backdrop-blur-md border border-white/70 group-hover:border-white/90 rounded-3xl px-4 py-4 shadow-sm group-hover:shadow-xl transition-all duration-300 overflow-hidden">
+                    {/* Barra lateral coloreada del tipo */}
+                    <motion.div
+                      className="absolute left-0 top-0 bottom-0 w-1"
+                      style={{ background: `linear-gradient(180deg, ${cfg.fg}, ${cfg.fg}88)` }}
+                      initial={{ scaleY: 0 }}
+                      animate={{ scaleY: 1 }}
+                      transition={{ delay: 0.4 + idx * 0.08, duration: 0.5 }}
+                    />
+
+                    <div className="flex items-center gap-4">
+                      {/* ── DAY TILE grande ── */}
+                      <motion.div
+                        whileHover={{ rotate: [0, -6, 6, 0], scale: 1.06 }}
+                        transition={{ duration: 0.5 }}
+                        className="relative flex-shrink-0"
+                      >
+                        <motion.div
+                          className="relative w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl flex flex-col items-center justify-center shadow-md"
+                          style={{
+                            background: isToday
+                              ? "linear-gradient(135deg, #f43f5e, #ef4444)"
+                              : `linear-gradient(135deg, ${cfg.fg}, ${cfg.fg}bb)`,
+                          }}
+                          animate={isToday ? { boxShadow: ["0 4px 14px rgba(244,63,94,0.35)","0 4px 24px rgba(244,63,94,0.6)","0 4px 14px rgba(244,63,94,0.35)"] } : {}}
+                          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                        >
+                          {/* Highlight top */}
+                          <div className="absolute top-0 left-0 right-0 h-3 bg-white/25 rounded-t-2xl"></div>
+                          <span className="text-[9px] font-black text-white/85 tracking-wider mt-1 leading-none">{monthAbbr}</span>
+                          <motion.span
+                            key={dayNum}
+                            initial={{ scale: 0.6, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: 0.5 + idx * 0.08, type: "spring", stiffness: 260 }}
+                            className="text-3xl sm:text-4xl font-black text-white leading-none"
+                            style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                          >
+                            {dayNum}
+                          </motion.span>
+                        </motion.div>
+                      </motion.div>
+
+                      {/* ── INFO CENTRAL ── */}
+                      <div className="flex-1 min-w-0">
+                        {/* Header: tipo evento + urgencia */}
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <motion.div
+                            whileHover={{ rotate: [0, -10, 10, 0] }}
+                            transition={{ duration: 0.4 }}
+                            className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm"
+                            style={{ background: cfg.fg + "1f" }}
+                          >
+                            <EvIcon size={14} style={{ color: cfg.fg }} strokeWidth={2.2} />
+                          </motion.div>
+                          <p
+                            className="text-lg sm:text-xl font-black truncate leading-tight"
+                            style={{ fontFamily: "Cabinet Grotesk, sans-serif", color: cfg.fg }}
+                          >
+                            {r.event_type || "Evento"}
+                          </p>
+                          {urgencyLabel && (
+                            <motion.span
+                              initial={{ opacity: 0, x: -6 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.6 + idx * 0.08 }}
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 ${urgencyClass}`}
+                            >
+                              <UrgencyIcon size={10} strokeWidth={2.5} />
+                              {urgencyLabel}
+                            </motion.span>
+                          )}
+                          {r.package_type && (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide hidden sm:inline-flex ${r.package_type === "Completo" ? "bg-amber-100 text-amber-700" : r.package_type === "Intermedio" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}>
+                              {r.package_type}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Cliente + venue */}
+                        <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                          <span className="flex items-center gap-1 font-semibold text-slate-700">
+                            <User size={11} className="text-slate-400" strokeWidth={2.2} />
+                            {r.client_name}
+                          </span>
+                          {r.venue && (
+                            <>
+                              <span className="text-slate-300">·</span>
+                              <span className="flex items-center gap-1 font-medium truncate max-w-[180px]">
+                                <MapPin size={10} className="text-slate-400 flex-shrink-0" strokeWidth={2.2} />
+                                {r.venue}
+                              </span>
+                            </>
+                          )}
+                          {r.event_time && (
+                            <>
+                              <span className="text-slate-300">·</span>
+                              <span className="flex items-center gap-1 font-medium">
+                                <Clock size={10} className="text-slate-400" strokeWidth={2.2} />
+                                {r.event_time}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Fotógrafo + pago */}
+                        {firstPartner ? (
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <span className="flex items-center gap-1 text-xs font-bold text-slate-600">
+                              <Camera size={11} className="text-slate-400" strokeWidth={2.2} />
+                              {firstPartner.socio.name}
+                            </span>
+                            {firstPartner.payment > 0 && (
+                              <span className={`text-xs font-black ${isPaid ? "text-emerald-600" : "text-amber-600"}`}>
+                                {formatCurrency(firstPartner.payment)}
+                              </span>
+                            )}
+                            <motion.span
+                              whileHover={{ scale: 1.06 }}
+                              className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${isPaid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                            >
+                              {isPaid ? (language === "es" ? "Pagado" : "Paid") : (language === "es" ? "Pendiente" : "Pending")}
+                            </motion.span>
+                            {partners.length > 1 && (
+                              <span className="text-[10px] font-bold text-slate-400">+{partners.length - 1}</span>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* ── DERECHA: monto + progreso + status ── */}
+                      <div className="hidden md:flex flex-col items-end gap-1.5 flex-shrink-0 min-w-[160px]">
+                        <motion.span
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: 0.55 + idx * 0.08 }}
+                          className="text-xl font-black text-slate-800 leading-none"
+                          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                        >
+                          {r.total_amount > 0 ? formatCurrency(r.total_amount) : "—"}
+                        </motion.span>
+                        {r.total_amount > 0 && (
+                          <div className="flex items-center gap-2 w-full">
+                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${paidPercent}%` }}
+                                transition={{ delay: 0.7 + idx * 0.08, duration: 0.9, ease: "easeOut" }}
+                                className="h-full rounded-full theme-progress"
+                              />
+                            </div>
+                            <span className="text-[10px] font-black text-emerald-600 min-w-[32px] text-right">{Math.round(paidPercent)}%</span>
+                          </div>
+                        )}
+                        <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-black uppercase tracking-wider ${statusColors[r.status] || FALLBACK_COLOR}`}>
+                          {tr.statuses[r.status] || r.status}
                         </span>
-                        {partners.length > 1 && <span className="text-xs font-bold text-slate-400 flex-shrink-0">+{partners.length - 1}</span>}
-                      </>
-                    ) : (
-                      <><User size={14} className="text-slate-300 flex-shrink-0" /><span className="text-sm text-slate-300 font-medium">{language === "es" ? "Sin fotógrafo asignado" : "No photographer assigned"}</span></>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    {r.total_amount > 0 && <span className="text-base font-black text-slate-800 whitespace-nowrap">{formatCurrency(r.total_amount)}</span>}
-                    <span className="text-base font-bold text-slate-500 whitespace-nowrap">{formatDate(r.event_date)}</span>
-                    <span className={`text-xs px-3 py-1.5 rounded-full border font-bold whitespace-nowrap ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status] || r.status}</span>
+                      </div>
+
+                      {/* Flecha CTA hover */}
+                      <motion.div
+                        className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                        animate={{ x: [0, 4, 0] }}
+                        transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center shadow-md"
+                          style={{ background: cfg.fg }}
+                        >
+                          <ArrowRight size={14} className="text-white" strokeWidth={2.5} />
+                        </div>
+                      </motion.div>
+                    </div>
+
+                    {/* Mobile: monto + status abajo */}
+                    <div className="flex md:hidden items-center justify-between mt-3 pt-3 border-t border-white/60">
+                      <span className="text-base font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                        {r.total_amount > 0 ? formatCurrency(r.total_amount) : "—"}
+                      </span>
+                      <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-black uppercase tracking-wider ${statusColors[r.status] || FALLBACK_COLOR}`}>
+                        {tr.statuses[r.status] || r.status}
+                      </span>
+                    </div>
                   </div>
                 </motion.div>
               );
