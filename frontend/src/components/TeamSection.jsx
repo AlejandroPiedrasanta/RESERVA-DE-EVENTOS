@@ -309,21 +309,23 @@ export default function TeamSection({ reservation, onUpdated }) {
       </div>
 
       {/* Add partner row */}
-      <div className="relative flex flex-col sm:flex-row gap-2 mb-5">
-        <SocioPicker
-          socios={socios}
-          value={selectedSocio}
-          onChange={setSelectedSocio}
-          disabled={adding}
-        />
-        <div className="relative sm:w-32">
+      <div className="relative grid grid-cols-1 sm:grid-cols-12 gap-2 mb-5 items-stretch">
+        <div className="sm:col-span-7 flex">
+          <SocioPicker
+            socios={socios}
+            value={selectedSocio}
+            onChange={setSelectedSocio}
+            disabled={adding}
+          />
+        </div>
+        <div className="relative sm:col-span-3 flex">
           <DollarSign size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="number"
             value={payment}
             onChange={e => setPayment(e.target.value)}
             placeholder="Pago"
-            className="w-full text-sm font-bold pl-8 pr-3 py-2.5 rounded-2xl bg-white/60 backdrop-blur-md border border-white/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-400/40 focus:border-fuchsia-300 text-slate-700 shadow-sm transition"
+            className="w-full text-sm font-bold pl-8 pr-3 py-2.5 rounded-2xl bg-white/60 backdrop-blur-md border border-white/70 focus:outline-none focus:ring-2 focus:ring-fuchsia-400/40 focus:border-fuchsia-300 text-slate-700 shadow-sm transition h-full"
             data-testid="input-partner-payment"
           />
         </div>
@@ -333,7 +335,7 @@ export default function TeamSection({ reservation, onUpdated }) {
           onClick={handleAdd}
           disabled={adding || !selectedSocio}
           data-testid="add-partner-btn"
-          className="relative overflow-hidden group px-4 py-2.5 rounded-2xl text-white text-sm font-black flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-fuchsia-500/30"
+          className="sm:col-span-2 relative overflow-hidden group px-3 py-2.5 rounded-2xl text-white text-sm font-black flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-fuchsia-500/30 h-full min-h-[44px]"
           style={{ background: "linear-gradient(135deg, #8b5cf6 0%, #ec4899 60%, #f59e0b 100%)" }}
         >
           <motion.span
@@ -377,7 +379,7 @@ export default function TeamSection({ reservation, onUpdated }) {
 
                   <SocioAvatar socio={p} size="md" />
 
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 pr-2">
                     <p className="text-sm font-black text-slate-900 truncate leading-tight">{p.name}</p>
                     <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider mt-1 ${meta.text}`}>
                       <RoleIcon size={10} /> {p.role}
@@ -385,8 +387,8 @@ export default function TeamSection({ reservation, onUpdated }) {
                   </div>
 
                   {/* Payment badge */}
-                  <div className="flex flex-col items-end">
-                    <span className={`text-sm font-black ${isPaid ? "text-emerald-600" : "text-slate-800"}`}>
+                  <div className="flex flex-col items-end justify-center w-24 flex-shrink-0">
+                    <span className={`text-sm font-black tabular-nums ${isPaid ? "text-emerald-600" : "text-slate-800"}`}>
                       {formatCurrency(p.payment)}
                     </span>
                     <motion.span
@@ -400,36 +402,39 @@ export default function TeamSection({ reservation, onUpdated }) {
                     </motion.span>
                   </div>
 
-                  {/* Toggle payment */}
-                  <motion.button
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => handleTogglePayment(p.socio_id)}
-                    title={isPaid ? "Marcar pendiente" : "Marcar pagado"}
-                    data-testid={`toggle-payment-${p.socio_id}`}
-                    className={`relative p-2 rounded-xl transition-colors ${isPaid ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30" : "bg-white/70 text-amber-500 border border-amber-200/70 hover:bg-amber-50"}`}
-                  >
-                    {isPaid ? <CheckCircle2 size={14} /> : <Zap size={14} />}
-                    {!isPaid && (
-                      <motion.span
-                        aria-hidden
-                        className="absolute inset-0 rounded-xl border-2 border-amber-400/50"
-                        animate={{ opacity: [0.2, 0.8, 0.2], scale: [1, 1.12, 1] }}
-                        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-                      />
-                    )}
-                  </motion.button>
+                  {/* Actions cluster with fixed alignment */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* Toggle payment */}
+                    <motion.button
+                      whileHover={{ scale: 1.12 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => handleTogglePayment(p.socio_id)}
+                      title={isPaid ? "Marcar pendiente" : "Marcar pagado"}
+                      data-testid={`toggle-payment-${p.socio_id}`}
+                      className={`relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${isPaid ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30" : "bg-white/70 text-amber-500 border border-amber-200/70 hover:bg-amber-50"}`}
+                    >
+                      {isPaid ? <CheckCircle2 size={14} /> : <Zap size={14} />}
+                      {!isPaid && (
+                        <motion.span
+                          aria-hidden
+                          className="absolute inset-0 rounded-xl border-2 border-amber-400/50"
+                          animate={{ opacity: [0.2, 0.8, 0.2], scale: [1, 1.12, 1] }}
+                          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                        />
+                      )}
+                    </motion.button>
 
-                  {/* Remove */}
-                  <motion.button
-                    whileHover={{ scale: 1.12, rotate: 90 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => handleRemove(p.socio_id)}
-                    className="p-1.5 rounded-full hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors opacity-60 group-hover:opacity-100"
-                    data-testid={`remove-partner-${p.socio_id}`}
-                  >
-                    <X size={13} />
-                  </motion.button>
+                    {/* Remove */}
+                    <motion.button
+                      whileHover={{ scale: 1.12, rotate: 90 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => handleRemove(p.socio_id)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors opacity-60 group-hover:opacity-100"
+                      data-testid={`remove-partner-${p.socio_id}`}
+                    >
+                      <X size={13} />
+                    </motion.button>
+                  </div>
                 </motion.div>
               );
             })}
