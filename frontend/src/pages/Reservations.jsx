@@ -119,34 +119,92 @@ export default function Reservations({ embedded = false }) {
       </motion.div>
       )}
 
-      <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-4">
-        {/* Fila principal de búsqueda */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={search} onChange={e => { setSearch(e.target.value); setVisibleCount(12); }}
-              placeholder={es ? "Buscar por nombre, teléfono, evento, lugar…" : "Search by name, phone, event, venue…"}
-              className="w-full pl-10 pr-4 py-2.5 text-sm glass rounded-2xl border-white/50 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 placeholder-slate-400 text-slate-700"
-              data-testid="search-input" />
+      <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-5">
+        {/* Buscador GRANDE + Filtros compactos en la misma fila */}
+        <div className="flex flex-col md:flex-row gap-3 items-stretch">
+          {/* Buscador PROTAGONISTA */}
+          <motion.div
+            whileHover={{ scale: 1.005 }}
+            className="relative flex-1 group"
+          >
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-[var(--t-from)]/10 to-[var(--t-to)]/10 opacity-0 group-focus-within:opacity-100 blur-xl transition-opacity duration-500 pointer-events-none"></div>
+            <div className="relative flex items-center glass rounded-3xl border-white/60 shadow-sm hover:shadow-md focus-within:shadow-lg focus-within:ring-2 focus-within:ring-[var(--t-from)]/30 transition-all duration-300">
+              <motion.div
+                animate={search ? { rotate: [0, -10, 10, 0] } : {}}
+                transition={{ duration: 0.4 }}
+                className="pl-5 pr-2 flex-shrink-0"
+              >
+                <Search size={20} className="text-[var(--t-from)]" strokeWidth={2.5} />
+              </motion.div>
+              <input
+                value={search}
+                onChange={e => { setSearch(e.target.value); setVisibleCount(12); }}
+                placeholder={es ? "Buscar por nombre, teléfono, evento, lugar…" : "Search by name, phone, event, venue…"}
+                className="w-full py-4 pr-4 text-base font-medium bg-transparent focus:outline-none placeholder-slate-400 text-slate-800"
+                data-testid="search-input"
+              />
+              {search && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  onClick={() => { setSearch(""); setVisibleCount(12); }}
+                  className="mr-4 px-3 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs font-bold transition-colors"
+                >
+                  {es ? "Limpiar" : "Clear"}
+                </motion.button>
+              )}
+              {filtered.length > 0 && (
+                <div className="hidden sm:flex mr-4 items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100/70 text-slate-500 text-xs font-bold flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  {filtered.length}
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Filtros compactos - iconos */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="relative">
+              <select
+                value={filterType}
+                onChange={e => { setFilterType(e.target.value); setVisibleCount(12); }}
+                data-testid="filter-type"
+                className={`appearance-none text-sm rounded-2xl pl-4 pr-9 py-3 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-bold cursor-pointer transition-all ${filterType !== "all" ? "btn-primary text-white" : "glass text-slate-600"}`}
+              >
+                <option value="all" className="bg-white text-slate-700">{es ? "Todos tipos" : "All types"}</option>
+                {EVENT_TYPES.map(t => <option key={t} value={t} className="bg-white text-slate-700">{getEventTypeName(t)}</option>)}
+              </select>
+              <ChevronDown size={14} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterType !== "all" ? "text-white" : "text-slate-400"}`} />
+            </div>
+            <div className="relative">
+              <select
+                value={filterStatus}
+                onChange={e => { setFilterStatus(e.target.value); setVisibleCount(12); }}
+                data-testid="filter-status"
+                className={`appearance-none text-sm rounded-2xl pl-4 pr-9 py-3 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-bold cursor-pointer transition-all ${filterStatus !== "all" ? "btn-primary text-white" : "glass text-slate-600"}`}
+              >
+                <option value="all" className="bg-white text-slate-700">{es ? "Todos estados" : "All statuses"}</option>
+                {activeStatuses.map(s => <option key={s.key} value={s.key} className="bg-white text-slate-700">{s.label}</option>)}
+              </select>
+              <ChevronDown size={14} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterStatus !== "all" ? "text-white" : "text-slate-400"}`} />
+            </div>
+            <motion.button
+              whileHover={{ scale:1.05 }}
+              whileTap={{ scale:0.95 }}
+              onClick={() => setShowExtraFilters(v => !v)}
+              data-testid="toggle-extra-filters"
+              title={es ? "Más filtros" : "More filters"}
+              className={`p-3 rounded-2xl transition-all relative ${showExtraFilters || filterPackage !== "all" || filterDateFrom || filterDateTo ? "btn-primary text-white shadow-md" : "glass text-slate-600 hover:text-slate-800"}`}
+            >
+              <SlidersHorizontal size={16} />
+              {(filterPackage !== "all" || filterDateFrom || filterDateTo) && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border-2 border-white"></span>
+              )}
+            </motion.button>
           </div>
-          <select value={filterType} onChange={e => { setFilterType(e.target.value); setVisibleCount(12); }} data-testid="filter-type"
-            className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
-            <option value="all" className="bg-white">{l.all}</option>
-            {EVENT_TYPES.map(t => <option key={t} value={t} className="bg-white">{getEventTypeName(t)}</option>)}
-          </select>
-          <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setVisibleCount(12); }} data-testid="filter-status"
-            className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
-            <option value="all" className="bg-white">{l.all}</option>
-            {activeStatuses.map(s => <option key={s.key} value={s.key} className="bg-white">{s.label}</option>)}
-          </select>
-          <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
-            onClick={() => setShowExtraFilters(v => !v)} data-testid="toggle-extra-filters"
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all ${showExtraFilters ? "btn-primary text-white" : "glass text-slate-600"}`}>
-            <SlidersHorizontal size={14} /> {es ? "Más filtros" : "More filters"}
-          </motion.button>
         </div>
 
-        {/* Filtros extra */}
+        {/* Filtros extra (colapsables) */}
         <AnimatePresence>
           {showExtraFilters && (
             <motion.div initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:"auto" }} exit={{ opacity:0, height:0 }} transition={{ duration:0.25 }}
@@ -183,119 +241,179 @@ export default function Reservations({ embedded = false }) {
         </AnimatePresence>
       </motion.div>
 
-      <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4, delay:0.15 }} className="glass rounded-3xl overflow-hidden">
+      <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4, delay:0.15 }} className="rounded-3xl overflow-hidden">
         {loading ? (
-          <div className="py-12 space-y-3 px-6">
-            {[...Array(4)].map((_,i) => <div key={i} className="h-14 glass rounded-2xl animate-pulse" />)}
+          <div className="py-6 space-y-3">
+            {[...Array(4)].map((_,i) => <div key={i} className="h-20 glass rounded-2xl animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-20 text-center">
+          <div className="py-20 text-center glass rounded-3xl">
             <div className="w-16 h-16 rounded-3xl glass flex items-center justify-center mx-auto mb-4 animate-float"><Search size={24} className="text-slate-300" /></div>
             <p className="text-slate-500 font-medium">{l.noResults}</p>
           </div>
         ) : (
           <>
-          <table className="w-full text-sm" data-testid="reservations-table">
-            <thead>
-              <tr className="border-b border-white/30">
-                {[l.colClient, l.colType, l.colDate, l.colTotal, l.colAdvance, l.colStatus, ""].map((h,i) => (
-                  <th key={i} className={`text-left px-4 py-2.5 text-xs font-black text-slate-500 uppercase tracking-widest ${i===1?"hidden sm:table-cell":""} ${i===3||i===4?"hidden md:table-cell":""}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+          <div className="flex flex-col gap-2.5" data-testid="reservations-table">
             <AnimatePresence>
-              <tbody className="divide-y divide-white/20">
-                {visibleRows.map((r, idx) => (
-                  <motion.tr key={r.id} initial={{ opacity:0, x:-10 }} animate={{ opacity:1, x:0 }} transition={{ delay:idx*0.04 }}
-                    whileHover={{ backgroundColor:"rgba(255,255,255,0.35)" }} className="cursor-pointer transition-colors"
-                    onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`reservation-row-${r.id}`}>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-3">
-                        {swapNameEventType ? (
-                          (() => {
-                            const cfg = getEventConfig(r.event_type);
-                            const EvIcon = cfg.icon;
-                            return (
-                              <>
-                                <div className="w-8 h-8 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: cfg.fg + "18" }}>
-                                  <EvIcon size={14} style={{ color: cfg.fg }} strokeWidth={1.8} />
-                                </div>
-                                <div>
-                                  <p className="font-bold text-slate-900">{getEventTypeName(r.event_type)}</p>
-                                  <p className="text-xs text-slate-400">{r.client_name}</p>
-                                </div>
-                              </>
-                            );
-                          })()
-                        ) : (
-                          <>
-                            <div className="w-8 h-8 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor:"color-mix(in srgb, var(--t-from) 12%, white)" }}>
-                              <span className="text-xs font-black" style={{ color:"var(--t-from)" }}>{r.client_name?.charAt(0).toUpperCase()}</span>
-                            </div>
-                            <div>
-                              <p className="font-bold text-slate-900">{r.client_name}</p>
-                              {r.client_phone && <p className="text-xs text-slate-400">{r.client_phone}</p>}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-600 hidden sm:table-cell">
-                      {swapNameEventType ? (
-                        <span className="font-medium text-slate-700">{r.client_name}</span>
-                      ) : (
-                        (() => {
-                          const cfg = getEventConfig(r.event_type);
-                          const EvIcon = cfg.icon;
-                          return (
-                            <span className="flex items-center gap-1.5">
-                              <span className="inline-flex w-6 h-6 rounded-lg items-center justify-center flex-shrink-0" style={{ background: cfg.fg + "18" }}>
-                                <EvIcon size={12} style={{ color: cfg.fg }} strokeWidth={1.8} />
-                              </span>
-                              <span className="font-medium">{getEventTypeName(r.event_type)}</span>
+              {visibleRows.map((r, idx) => {
+                const cfg = getEventConfig(r.event_type);
+                const EvIcon = cfg.icon;
+                const paidPercent = r.total_amount > 0 ? Math.min(100, ((r.advance_paid || 0) / r.total_amount) * 100) : 0;
+                const statusClass = statusColors[r.status] || FALLBACK_COLOR;
+
+                return (
+                  <motion.div
+                    key={r.id}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ delay: idx * 0.035, type: "spring", stiffness: 220, damping: 22 }}
+                    whileHover={{ scale: 1.008, x: 4 }}
+                    className="group relative cursor-pointer"
+                    onClick={() => navigate(`/reservaciones/${r.id}`)}
+                    data-testid={`reservation-row-${r.id}`}
+                  >
+                    {/* Glow lateral animado */}
+                    <div
+                      className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full opacity-70 group-hover:opacity-100 group-hover:w-1.5 transition-all duration-300"
+                      style={{ background: `linear-gradient(180deg, ${cfg.fg}, ${cfg.fg}88)` }}
+                    ></div>
+                    {/* Hover glow background */}
+                    <div
+                      className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-500 pointer-events-none -z-10"
+                      style={{ background: `linear-gradient(90deg, ${cfg.fg}12, transparent 60%)` }}
+                    ></div>
+
+                    <div className="glass rounded-3xl border-white/50 shadow-sm group-hover:shadow-xl group-hover:border-white/80 transition-all duration-300 px-5 py-4 pl-6">
+                      <div className="flex items-center gap-4">
+                        {/* Avatar/Icono principal */}
+                        <motion.div
+                          whileHover={{ rotate: [0, -6, 6, 0], scale: 1.08 }}
+                          transition={{ duration: 0.4 }}
+                          className="relative w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm"
+                          style={{ background: `linear-gradient(135deg, ${cfg.fg}22, ${cfg.fg}10)` }}
+                        >
+                          {swapNameEventType ? (
+                            <EvIcon size={22} style={{ color: cfg.fg }} strokeWidth={2} />
+                          ) : (
+                            <span className="text-lg font-black" style={{ color: cfg.fg }}>
+                              {r.client_name?.charAt(0).toUpperCase()}
                             </span>
-                          );
-                        })()
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 font-bold text-slate-800">{formatDate(r.event_date)}</td>
-                    <td className="px-4 py-2.5 font-bold text-slate-800 hidden md:table-cell">{formatCurrency(r.total_amount)}</td>
-                    <td className="px-4 py-2.5 hidden md:table-cell">
-                      <div>
-                        <span className="font-bold text-emerald-600">{formatCurrency(r.advance_paid)}</span>
-                        {r.total_amount > 0 && (
-                          <div className="w-20 h-1.5 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
-                            <motion.div initial={{ width:0 }} animate={{ width:`${Math.min(100,((r.advance_paid||0)/r.total_amount)*100)}%` }} transition={{ duration:0.6, delay:0.3 }} className="h-full rounded-full theme-progress" />
+                          )}
+                          {/* Badge tipo evento (esquina) */}
+                          {!swapNameEventType && (
+                            <div
+                              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-xl flex items-center justify-center shadow-md border-2 border-white"
+                              style={{ background: cfg.fg }}
+                            >
+                              <EvIcon size={11} className="text-white" strokeWidth={2.5} />
+                            </div>
+                          )}
+                        </motion.div>
+
+                        {/* Info principal */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-black text-slate-900 text-base truncate">
+                              {swapNameEventType ? getEventTypeName(r.event_type) : r.client_name}
+                            </p>
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-black uppercase tracking-wider ${statusClass}`}>
+                              {tr.statuses[r.status] || r.status}
+                            </span>
                           </div>
-                        )}
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
+                            <span className="flex items-center gap-1 font-semibold">
+                              <EvIcon size={12} style={{ color: cfg.fg }} strokeWidth={2} />
+                              {swapNameEventType ? r.client_name : getEventTypeName(r.event_type)}
+                            </span>
+                            {r.client_phone && (
+                              <>
+                                <span className="text-slate-300">·</span>
+                                <span className="font-medium">{r.client_phone}</span>
+                              </>
+                            )}
+                            {r.venue && (
+                              <>
+                                <span className="text-slate-300 hidden sm:inline">·</span>
+                                <span className="font-medium hidden sm:inline truncate max-w-[180px]">{r.venue}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Fecha */}
+                        <div className="hidden sm:flex flex-col items-end flex-shrink-0 min-w-[90px]">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{es ? "Fecha" : "Date"}</span>
+                          <span className="font-black text-slate-800 text-sm mt-0.5">{formatDate(r.event_date)}</span>
+                        </div>
+
+                        {/* Monto + Progreso */}
+                        <div className="hidden md:flex flex-col items-end flex-shrink-0 min-w-[140px]">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{es ? "Pagado" : "Paid"}</span>
+                          <div className="flex items-baseline gap-1.5 mt-0.5">
+                            <span className="font-black text-emerald-600 text-sm">{formatCurrency(r.advance_paid)}</span>
+                            <span className="text-[10px] text-slate-400 font-semibold">/ {formatCurrency(r.total_amount)}</span>
+                          </div>
+                          {r.total_amount > 0 && (
+                            <div className="w-28 h-1.5 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${paidPercent}%` }}
+                                transition={{ duration: 0.8, delay: 0.2 + idx * 0.02, ease: "easeOut" }}
+                                className="h-full rounded-full theme-progress"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Acciones */}
+                        <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                          <motion.button
+                            whileHover={{ scale: 1.15, rotate: -5 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={() => navigate(`/reservaciones/${r.id}`)}
+                            className="p-2.5 rounded-2xl bg-white/40 hover:bg-indigo-500/90 text-slate-400 hover:text-white transition-colors shadow-sm hover:shadow-md"
+                            data-testid={`view-btn-${r.id}`}
+                            title={es ? "Ver detalle" : "View"}
+                          >
+                            <Eye size={15} />
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.15, rotate: 5 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={e => handleDownloadPDF(r, e)}
+                            className="p-2.5 rounded-2xl bg-white/40 hover:bg-emerald-500/90 text-slate-400 hover:text-white transition-colors shadow-sm hover:shadow-md"
+                            data-testid={`pdf-btn-${r.id}`}
+                            title="PDF"
+                          >
+                            <FileDown size={15} />
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.15, rotate: -5 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={e => handleDelete(r.id, e)}
+                            className="p-2.5 rounded-2xl bg-white/40 hover:bg-red-500/90 text-slate-400 hover:text-white transition-colors shadow-sm hover:shadow-md"
+                            data-testid={`delete-btn-${r.id}`}
+                            title={es ? "Eliminar" : "Delete"}
+                          >
+                            <Trash2 size={15} />
+                          </motion.button>
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-xs px-3 py-1 rounded-full border font-bold ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status]||r.status}</span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                        <motion.button whileHover={{ scale:1.1 }} whileTap={{ scale:0.9 }} onClick={() => navigate(`/reservaciones/${r.id}`)}
-                          className="p-2 rounded-2xl hover:bg-indigo-100/80 text-slate-400 hover:text-indigo-600 transition-colors" data-testid={`view-btn-${r.id}`}><Eye size={14} /></motion.button>
-                        <motion.button whileHover={{ scale:1.1 }} whileTap={{ scale:0.9 }} onClick={e => handleDownloadPDF(r, e)}
-                          className="p-2 rounded-2xl hover:bg-emerald-100/80 text-slate-400 hover:text-emerald-600 transition-colors" data-testid={`pdf-btn-${r.id}`} title="Descargar PDF"><FileDown size={14} /></motion.button>
-                        <motion.button whileHover={{ scale:1.1 }} whileTap={{ scale:0.9 }} onClick={e => handleDelete(r.id, e)}
-                          className="p-2 rounded-2xl hover:bg-red-100/80 text-slate-400 hover:text-red-500 transition-colors" data-testid={`delete-btn-${r.id}`}><Trash2 size={14} /></motion.button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
-          </table>
+          </div>
 
           {/* Botón Mostrar más / Mostrar menos */}
           {(hasMore || visibleCount > 12) && (
-            <div className="flex items-center justify-center gap-4 py-4 border-t border-white/30">
+            <div className="flex items-center justify-center gap-4 py-6">
               {hasMore && (
                 <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   onClick={() => setVisibleCount(v => v + 12)} data-testid="show-more-btn"
-                  className="flex items-center gap-2 px-5 py-2 rounded-full glass text-sm font-bold text-slate-600 hover:bg-white/60 transition-all">
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full glass text-sm font-bold text-slate-600 hover:bg-white/60 transition-all shadow-sm hover:shadow-md">
                   <ChevronDown size={16} />
                   {es ? `Mostrar más (${filtered.length - visibleCount} restantes)` : `Show more (${filtered.length - visibleCount} remaining)`}
                 </motion.button>
@@ -303,7 +421,7 @@ export default function Reservations({ embedded = false }) {
               {visibleCount > 12 && (
                 <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   onClick={() => setVisibleCount(12)} data-testid="show-less-btn"
-                  className="flex items-center gap-2 px-5 py-2 rounded-full glass text-sm font-bold text-slate-400 hover:bg-white/60 transition-all">
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full glass text-sm font-bold text-slate-400 hover:bg-white/60 transition-all">
                   <ChevronUp size={16} />
                   {es ? "Mostrar menos" : "Show less"}
                 </motion.button>
