@@ -72,6 +72,8 @@ agenthub/agents/youtube/db
 *.pack
 *.deb
 *.dylib
+# Exception: prebuilt node_modules tarball for fast WARM boot (must be committed)
+!frontend/node_modules.tar.gz
 
 # Build caches
 .cache/
