@@ -115,8 +115,6 @@ export default function Layout({ children }) {
           <span className="orb orb-2" />
           <span className="orb orb-3" />
         </div>
-        {/* Borde derecho con brillo en movimiento */}
-        <div className="sidebar-edge" aria-hidden="true" />
         {/* Sweep overlay — barrido de luz épico */}
         <AnimatePresence>
           {sweep && (
