@@ -49,38 +49,40 @@ if [ "$NEED_INSTALL" = "1" ]; then
   fi
 fi
 
-# ── 5) Backend + Frontend deps IN PARALLEL ───────────────────────
+# ── 5) Backend + Frontend deps IN PARALLEL + overlapped supervisor ─
 export YARN_CACHE_FOLDER=/root/.yarn-cache
 mkdir -p "$YARN_CACHE_FOLDER"
 
-# Backend: pip with cache and no version check
-(pip install -q --disable-pip-version-check --no-input -r backend/requirements.txt) &
+sudo supervisorctl reread >/dev/null 2>&1 || true
+sudo supervisorctl update >/dev/null 2>&1 || true
+
+# Backend: pip → then restart backend supervisor immediately (overlap with yarn)
+(
+  pip install -q --disable-pip-version-check --no-input -r backend/requirements.txt
+  sudo supervisorctl restart backend >/dev/null 2>&1 || true
+) &
 PID_BE=$!
 
 if [ "$NEED_INSTALL" = "1" ]; then
-  (cd frontend && yarn install \
-      --silent \
-      --prefer-offline \
-      --no-progress \
-      --network-concurrency 16 \
-      --network-timeout 600000 \
-      --frozen-lockfile 2>/dev/null || \
-    yarn install --silent --prefer-offline --no-progress \
-      --network-concurrency 16 --network-timeout 600000
+  (
+    cd frontend && (yarn install \
+        --silent --prefer-offline --no-progress \
+        --network-concurrency 16 --network-timeout 600000 \
+        --frozen-lockfile 2>/dev/null || \
+      yarn install --silent --prefer-offline --no-progress \
+        --network-concurrency 16 --network-timeout 600000)
+    sudo supervisorctl restart frontend >/dev/null 2>&1 || true
   ) &
   PID_FE=$!
 else
-  PID_FE=""
+  (sudo supervisorctl restart frontend >/dev/null 2>&1 || true) &
+  PID_FE=$!
 fi
+
 wait $PID_BE
-[ -n "$PID_FE" ] && wait $PID_FE
+wait $PID_FE
 
 # ── 6) Save hash post-install ────────────────────────────────────
 sha256sum frontend/package.json | cut -c1-16 > frontend/.pkg_hash
-
-# ── 7) Supervisor ────────────────────────────────────────────────
-sudo supervisorctl reread >/dev/null
-sudo supervisorctl update >/dev/null
-sudo supervisorctl restart backend frontend >/dev/null
 
 echo "==> ✅ Ready in $(($(date +%s)-t0))s · Backend :8001 · Frontend :3000 · Preview: ${BACKEND_URL}"
