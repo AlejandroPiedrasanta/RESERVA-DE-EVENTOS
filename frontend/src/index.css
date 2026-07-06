@@ -1427,6 +1427,50 @@ body.app-blur-unfocus::after {
 .ultra-compact .ultra-section-header { font-size: 11px; padding: 4px 11px; margin-bottom: 8px; }
 .ultra-compact .ultra-datetime-btn { padding: 11px 14px 11px 40px; font-size: 13.5px; border-radius: 13px; }
 
+/* ══ Sidebar PRO ambient animations ══ */
+.sidebar-aurora {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
+}
+.sidebar-aurora .orb {
+  position: absolute; border-radius: 9999px; filter: blur(44px); opacity: 0.30; will-change: transform;
+}
+.sidebar-aurora .orb-1 { width: 190px; height: 190px; top: -50px; left: -50px; background: var(--t-from, #8b5cf6); animation: sbFloat1 15s ease-in-out infinite; }
+.sidebar-aurora .orb-2 { width: 170px; height: 170px; bottom: 90px; right: -60px; background: var(--t-to, #ec4899); animation: sbFloat2 19s ease-in-out infinite; }
+.sidebar-aurora .orb-3 { width: 150px; height: 150px; top: 44%; left: -40px; background: #06b6d4; animation: sbFloat1 22s ease-in-out infinite reverse; }
+@keyframes sbFloat1 {
+  0%   { transform: translate(0,0) scale(1); }
+  50%  { transform: translate(28px, 40px) scale(1.18); }
+  100% { transform: translate(0,0) scale(1); }
+}
+@keyframes sbFloat2 {
+  0%   { transform: translate(0,0) scale(1); }
+  50%  { transform: translate(-30px, -34px) scale(1.22); }
+  100% { transform: translate(0,0) scale(1); }
+}
+/* Animated glowing right edge */
+.sidebar-edge {
+  position: absolute; top: 0; right: 0; width: 2px; height: 100%; z-index: 3; pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, var(--t-from, #8b5cf6) 25%, var(--t-to, #ec4899) 50%, var(--t-from, #8b5cf6) 75%, transparent 100%);
+  background-size: 100% 250%;
+  animation: sbEdge 5s linear infinite;
+  opacity: 0.8;
+  box-shadow: 0 0 14px 1px color-mix(in srgb, var(--t-from, #8b5cf6) 55%, transparent);
+}
+@keyframes sbEdge { 0% { background-position: 0% 0%; } 100% { background-position: 0% 250%; } }
+/* Logo shimmer sweep */
+.sidebar-brand { position: relative; overflow: hidden; }
+.sidebar-brand::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 45%; height: 100%; z-index: 2; pointer-events: none;
+  background: linear-gradient(115deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%);
+  transform: skewX(-18deg);
+  animation: sbSheen 6.5s ease-in-out infinite;
+}
+@keyframes sbSheen {
+  0%, 62% { left: -60%; }
+  85%     { left: 140%; }
+  100%    { left: 140%; }
+}
+
 /* Pretty datetime button */
 .ultra-datetime-btn {
   position: relative;

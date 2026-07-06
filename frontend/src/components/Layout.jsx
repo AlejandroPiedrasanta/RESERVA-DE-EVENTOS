@@ -109,6 +109,14 @@ export default function Layout({ children }) {
         className="hidden md:flex flex-col min-h-screen glass-sidebar fixed left-0 top-0 z-20 transition-all duration-300 overflow-hidden"
         style={{ width: sidebarWidth, ...sidebarExtra }}
       >
+        {/* Aurora animada de fondo — efecto WOW continuo */}
+        <div className="sidebar-aurora" aria-hidden="true">
+          <span className="orb orb-1" />
+          <span className="orb orb-2" />
+          <span className="orb orb-3" />
+        </div>
+        {/* Borde derecho con brillo en movimiento */}
+        <div className="sidebar-edge" aria-hidden="true" />
         {/* Sweep overlay — barrido de luz épico */}
         <AnimatePresence>
           {sweep && (
@@ -145,7 +153,7 @@ export default function Layout({ children }) {
         </AnimatePresence>
 
         {/* Logo area */}
-        <div className={`border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6"}`}>
+        <div className={`sidebar-brand relative z-10 border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6"}`}>
           {compact ? (
             <div className="w-9 h-9 rounded-xl btn-primary flex items-center justify-center text-white font-black text-base">
               C
@@ -165,7 +173,7 @@ export default function Layout({ children }) {
           )}
         </div>
 
-        <nav className={`flex-1 py-5 space-y-1 transition-all duration-300 ${compact ? "px-2" : "px-3"}`}>
+        <nav className={`relative z-10 flex-1 py-5 space-y-1 transition-all duration-300 ${compact ? "px-2" : "px-3"}`}>
           {navItems.map(({ path, label, icon: Icon }, idx) => (
             <NavLink
               key={path}
@@ -247,7 +255,7 @@ export default function Layout({ children }) {
         </nav>
 
         {!compact && (
-          <div className="px-6 py-4 border-t border-white/40">
+          <div className="relative z-10 px-6 py-4 border-t border-white/40">
             <p className="text-[10px] text-slate-400 font-medium">v1.0 · {presetLabel}</p>
           </div>
         )}
