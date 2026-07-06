@@ -14,6 +14,43 @@ function getLocation(locations, type) {
   return (locations || []).find(l => l.type === type) || { type, address: "", waze_url: "" };
 }
 
+function detectMapProvider(url) {
+  if (!url) return null;
+  const u = url.toLowerCase().trim();
+  if (u.includes("waze.com") || u.includes("waze://")) return "waze";
+  if (
+    u.includes("google.com/maps") ||
+    u.includes("google.co") && u.includes("/maps") ||
+    u.includes("maps.google") ||
+    u.includes("maps.app.goo.gl") ||
+    u.includes("goo.gl/maps") ||
+    u.includes("g.co/kgs") ||
+    u.includes("geo:")
+  ) return "google";
+  return "other";
+}
+
+const PROVIDER_META = {
+  waze: {
+    label: "Abrir en Waze",
+    className: "bg-cyan-100/80 text-cyan-700 hover:bg-cyan-200",
+    tagLabel: "Waze",
+    tagClassName: "bg-cyan-100/70 text-cyan-700",
+  },
+  google: {
+    label: "Abrir en Google Maps",
+    className: "bg-emerald-100/80 text-emerald-700 hover:bg-emerald-200",
+    tagLabel: "Google Maps",
+    tagClassName: "bg-emerald-100/70 text-emerald-700",
+  },
+  other: {
+    label: "Abrir mapa",
+    className: "bg-slate-100/80 text-slate-600 hover:bg-slate-200",
+    tagLabel: "Enlace",
+    tagClassName: "bg-slate-100/70 text-slate-500",
+  },
+};
+
 export default function LocationsSection({ reservation, onUpdated }) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -88,13 +125,27 @@ export default function LocationsSection({ reservation, onUpdated }) {
                     onChange={e => setField(key, "address", e.target.value)}
                     placeholder="Dirección / Lugar"
                     className="w-full text-xs px-3 py-2 rounded-xl bg-white/60 border border-white/60 focus:outline-none focus:ring-1 focus:ring-[var(--t-from)]/40 text-slate-700 placeholder-slate-400"
+                    data-testid={`location-address-input-${key}`}
                   />
                   <input
                     value={loc.waze_url || ""}
                     onChange={e => setField(key, "waze_url", e.target.value)}
-                    placeholder="Link de Waze (URL)"
+                    placeholder="Link de Waze o Google Maps (URL)"
                     className="w-full text-xs px-3 py-2 rounded-xl bg-white/60 border border-white/60 focus:outline-none focus:ring-1 focus:ring-[var(--t-from)]/40 text-slate-700 placeholder-slate-400"
+                    data-testid={`location-url-input-${key}`}
                   />
+                  {loc.waze_url && (() => {
+                    const p = detectMapProvider(loc.waze_url);
+                    const meta = PROVIDER_META[p];
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-bold rounded-full px-2 py-0.5 ${meta.tagClassName}`}
+                        data-testid={`location-detected-provider-${key}`}
+                      >
+                        <Navigation size={9} /> Detectado: {meta.tagLabel}
+                      </span>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -103,12 +154,16 @@ export default function LocationsSection({ reservation, onUpdated }) {
                   ) : (
                     <>
                       {loc.address && <p className="text-xs font-medium text-slate-700">{loc.address}</p>}
-                      {loc.waze_url && (
-                        <a href={loc.waze_url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-bold rounded-full px-2.5 py-1 bg-cyan-100/80 text-cyan-700 hover:bg-cyan-200 transition-colors">
-                          <Navigation size={10} /> Abrir en Waze
-                        </a>
-                      )}
+                      {loc.waze_url && (() => {
+                        const meta = PROVIDER_META[detectMapProvider(loc.waze_url)];
+                        return (
+                          <a href={loc.waze_url} target="_blank" rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-1 text-xs font-bold rounded-full px-2.5 py-1 transition-colors ${meta.className}`}
+                            data-testid={`location-open-link-${key}`}>
+                            <Navigation size={10} /> {meta.label}
+                          </a>
+                        );
+                      })()}
                     </>
                   )}
                 </div>

@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getReservation, uploadReceipt, deleteReceipt } from "@/lib/api";
+import { getReservation, uploadReceipt, deleteReceipt, updateReservation } from "@/lib/api";
 import {
   ArrowLeft, Upload, Trash2, Save, X, ImageIcon,
   Calendar as CalIcon, Clock, MapPin, Users, Package as PackageIcon,
   Phone, Mail, Sparkles, Wallet, CheckCircle2, AlarmClock, Heart, Cake,
   PartyPopper, Briefcase, Mic2, Star, TrendingUp, StickyNote, CircleDollarSign,
-  Hash
+  Hash, User, Edit2, Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -86,6 +86,17 @@ export default function ReservationDetail() {
     if (!window.confirm("¿Eliminar comprobante?")) return;
     try { await deleteReceipt(id, receiptId); toast({ title: "Eliminado" }); load(); }
     catch { toast({ title: "Error", variant: "destructive" }); }
+  };
+
+  const handleInlineSave = async (field, value) => {
+    try {
+      await updateReservation(id, { [field]: value });
+      setReservation(prev => ({ ...prev, [field]: value }));
+      toast({ title: "Actualizado" });
+    } catch {
+      toast({ title: "Error al guardar", variant: "destructive" });
+      throw new Error("save failed");
+    }
   };
 
   const daysToEvent = useMemo(() => {
@@ -252,12 +263,15 @@ export default function ReservationDetail() {
               <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">{dt.eventInfo}</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <EditableInfoTile icon={User} color="violet" label={dt.clientName || "Nombre"} value={reservation.client_name}
+                field="client_name" type="text" onSave={handleInlineSave} delay={0.1} required />
               <InfoTile icon={CalIcon}    color="indigo"  label={dt.eventDate} value={formatDate(reservation.event_date)} delay={0.12} />
               {reservation.event_time    && <InfoTile icon={Clock}       color="cyan"    label={dt.time}     value={reservation.event_time} delay={0.15} />}
               {reservation.venue         && <InfoTile icon={MapPin}      color="rose"    label={dt.venue}    value={reservation.venue} delay={0.18} />}
               {reservation.guests_count  && <InfoTile icon={Users}       color="amber"   label={dt.guests}   value={`${reservation.guests_count} ${dt.persons}`} delay={0.2} />}
               {reservation.package_type  && <InfoTile icon={PackageIcon} color="fuchsia" label="Paquete"     value={reservation.package_type} delay={0.22} />}
-              {reservation.client_phone  && <InfoTile icon={Phone}       color="emerald" label={dt.phone}    value={reservation.client_phone} delay={0.24} />}
+              <EditableInfoTile icon={Phone} color="emerald" label={dt.phone} value={reservation.client_phone}
+                field="client_phone" type="tel" placeholder="Número de teléfono" onSave={handleInlineSave} delay={0.24} />
               {reservation.client_email  && <InfoTile icon={Mail}        color="sky"     label={dt.email}    value={reservation.client_email} delay={0.26} />}
             </div>
             {reservation.notes && (
@@ -484,6 +498,7 @@ const TILE_COLORS = {
   fuchsia: { bg: "bg-fuchsia-100", text: "text-fuchsia-500", ring: "ring-fuchsia-100" },
   emerald: { bg: "bg-emerald-100", text: "text-emerald-500", ring: "ring-emerald-100" },
   sky:     { bg: "bg-sky-100",     text: "text-sky-500",     ring: "ring-sky-100" },
+  violet:  { bg: "bg-violet-100",  text: "text-violet-500",  ring: "ring-violet-100" },
 };
 
 function InfoTile({ icon: Icon, color, label, value, delay = 0 }) {
@@ -500,6 +515,69 @@ function InfoTile({ icon: Icon, color, label, value, delay = 0 }) {
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 truncate">{label}</p>
         <p className="text-sm font-bold text-slate-900 truncate" title={typeof value === "string" ? value : undefined}>{value}</p>
+      </div>
+    </motion.div>
+  );
+}
+
+function EditableInfoTile({ icon: Icon, color, label, value, field, type = "text", placeholder, onSave, delay = 0, required = false }) {
+  const c = TILE_COLORS[color] || TILE_COLORS.indigo;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || "");
+  const [saving, setSaving] = useState(false);
+
+  const start = () => { setDraft(value || ""); setEditing(true); };
+  const cancel = () => { setDraft(value || ""); setEditing(false); };
+  const save = async () => {
+    const trimmed = (draft || "").trim();
+    if (required && !trimmed) return;
+    if (trimmed === (value || "")) { setEditing(false); return; }
+    setSaving(true);
+    try { await onSave(field, trimmed); setEditing(false); }
+    catch { /* keep editing on failure */ }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, ease: easeOut }}
+      className="rd-info-tile group relative"
+    >
+      <div className={`w-9 h-9 rounded-xl ${c.bg} flex items-center justify-center flex-shrink-0`}>
+        <Icon size={16} className={c.text} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 truncate">{label}</p>
+        {editing ? (
+          <div className="flex items-center gap-1 mt-0.5">
+            <input
+              autoFocus
+              type={type}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") cancel(); }}
+              placeholder={placeholder || label}
+              className="w-full text-sm font-bold text-slate-900 bg-white/80 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--t-from)]/50"
+              data-testid={`inline-edit-input-${field}`}
+            />
+            <button onClick={save} disabled={saving} title="Guardar"
+              className="p-1 rounded-md text-emerald-600 hover:bg-emerald-50 disabled:opacity-50" data-testid={`inline-edit-save-${field}`}>
+              <Check size={14} />
+            </button>
+            <button onClick={cancel} title="Cancelar"
+              className="p-1 rounded-md text-slate-400 hover:bg-slate-100" data-testid={`inline-edit-cancel-${field}`}>
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={start}
+            className="flex items-center gap-1.5 text-left w-full group/edit" data-testid={`inline-edit-trigger-${field}`}>
+            <span className={`text-sm font-bold truncate ${value ? "text-slate-900" : "text-slate-300 italic"}`} title={value || ""}>
+              {value || placeholder || "—"}
+            </span>
+            <Edit2 size={11} className="text-slate-300 group-hover/edit:text-slate-500 transition-colors flex-shrink-0" />
+          </button>
+        )}
       </div>
     </motion.div>
   );
