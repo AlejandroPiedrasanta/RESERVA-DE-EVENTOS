@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { createReservation, updateReservation } from "@/lib/api";
 import {
   ArrowLeft, X, Sparkles, User, Phone, Mail, Calendar as CalIcon, Clock, MapPin,
   Users, DollarSign, Package, StickyNote, PartyPopper, Heart, Cake, Briefcase,
-  Mic2, Star, CheckCircle2, Loader2, Wallet, Tag
+  Mic2, Star, CheckCircle2, Loader2, Wallet, Tag, Pencil, RotateCcw, Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -50,6 +50,61 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
   ];
   const [saving, setSaving] = useState(false);
 
+  // Snapshot original values for dirty tracking (edit mode)
+  const originalRef = useRef(null);
+  const buildSnapshot = (r) => ({
+    client_name: r?.client_name || "",
+    client_phone: r?.client_phone || "",
+    client_email: r?.client_email || "",
+    event_type: r?.event_type || "Boda",
+    event_date: r?.event_date || "",
+    event_time: r?.event_time || "",
+    venue: r?.venue || "",
+    guests_count: String(r?.guests_count ?? ""),
+    total_amount: String(r?.total_amount ?? ""),
+    advance_paid: String(r?.advance_paid ?? "0"),
+    status: r?.status || "Reservado",
+    notes: r?.notes || "",
+    package_type: r?.package_type || "",
+  });
+
+  const isDirtyField = (field) => {
+    if (!isEdit || !originalRef.current) return false;
+    return String(form[field] ?? "") !== String(originalRef.current[field] ?? "");
+  };
+
+  const FIELD_META = useMemo(() => ({
+    client_name:  { label: "Nombre",   icon: User },
+    client_phone: { label: "Teléfono", icon: Phone },
+    client_email: { label: "Email",    icon: Mail },
+    event_type:   { label: "Tipo",     icon: Sparkles },
+    event_date:   { label: "Fecha",    icon: CalIcon },
+    event_time:   { label: "Hora",     icon: Clock },
+    venue:        { label: "Lugar",    icon: MapPin },
+    guests_count: { label: "Invitados",icon: Users },
+    total_amount: { label: "Total",    icon: DollarSign },
+    advance_paid: { label: "Anticipo", icon: Wallet },
+    status:       { label: "Estado",   icon: Tag },
+    package_type: { label: "Paquete",  icon: Package },
+    notes:        { label: "Notas",    icon: StickyNote },
+  }), []);
+
+  const dirtyFields = useMemo(() => {
+    if (!isEdit || !originalRef.current) return [];
+    return Object.keys(FIELD_META).filter(k => String(form[k] ?? "") !== String(originalRef.current[k] ?? ""));
+  }, [form, isEdit, FIELD_META]);
+
+  const clientInitials = useMemo(() => {
+    const src = (isEdit ? (originalRef.current?.client_name || reservation?.client_name) : form.client_name) || "?";
+    return src.trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("") || "?";
+  }, [isEdit, reservation, form.client_name]);
+
+  const handleRevert = () => {
+    if (!originalRef.current) return;
+    setForm({ ...originalRef.current });
+    toast({ title: "Cambios descartados" });
+  };
+
   // Lock body scroll while modal open
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -58,21 +113,11 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
   }, []);
 
   useEffect(() => {
-    if (reservation) setForm({
-      client_name: reservation.client_name || "",
-      client_phone: reservation.client_phone || "",
-      client_email: reservation.client_email || "",
-      event_type: reservation.event_type || "Boda",
-      event_date: reservation.event_date || "",
-      event_time: reservation.event_time || "",
-      venue: reservation.venue || "",
-      guests_count: reservation.guests_count || "",
-      total_amount: reservation.total_amount || "",
-      advance_paid: reservation.advance_paid || "0",
-      status: reservation.status || "Reservado",
-      notes: reservation.notes || "",
-      package_type: reservation.package_type || "",
-    });
+    if (reservation) {
+      const snap = buildSnapshot(reservation);
+      originalRef.current = snap;
+      setForm(snap);
+    }
   }, [reservation]);
 
   const set = (field) => (e) => setForm(p => ({ ...p, [field]: e.target.value }));
@@ -169,8 +214,8 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
           <div className="ultra-grid" />
 
           {/* Header */}
-          <div className="relative z-10 flex items-center justify-between px-7 py-4 border-b border-white/10">
-            <div className="flex items-center gap-3">
+          <div className="relative z-10 flex items-center justify-between px-7 py-4 border-b border-white/10 gap-3 flex-wrap">
+            <div className="flex items-center gap-3 min-w-0">
               <motion.button
                 whileHover={{ scale: 1.05, x: -2 }} whileTap={{ scale: 0.94 }}
                 type="button" onClick={onClose}
@@ -180,19 +225,86 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
               >
                 <ArrowLeft size={12} /> Cancelar
               </motion.button>
-              <div className="flex items-center gap-3.5">
-                <div className="relative w-9 h-9 rounded-xl flex items-center justify-center"
-                     style={{ background: "linear-gradient(135deg, #8b5cf6, #ec4899)", boxShadow: "0 8px 20px -6px rgba(167,139,250,0.7)" }}>
-                  <Sparkles size={16} className="text-white ultra-icon-float" />
+
+              {isEdit ? (
+                <div className="flex items-center gap-3 min-w-0">
+                  <motion.div
+                    initial={{ scale: 0.6, rotate: -12, opacity: 0 }}
+                    animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 260, damping: 18 }}
+                    className="edit-avatar shrink-0"
+                    data-testid="edit-avatar"
+                  >
+                    {clientInitials}
+                  </motion.div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <motion.span
+                        initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 }}
+                        className="edit-badge"
+                        data-testid="edit-mode-badge"
+                      >
+                        <Pencil size={10} /> Editando
+                      </motion.span>
+                      <AnimatePresence mode="wait">
+                        <motion.span
+                          key={dirtyFields.length === 0 ? "clean" : "dirty"}
+                          initial={{ opacity: 0, y: -4, scale: 0.9 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 4, scale: 0.9 }}
+                          transition={{ duration: 0.22 }}
+                          className={`edit-counter ${dirtyFields.length === 0 ? "zero" : ""}`}
+                          data-testid="edit-changes-counter"
+                        >
+                          <Zap size={10} />
+                          {dirtyFields.length === 0 ? (
+                            <>Sin cambios</>
+                          ) : (
+                            <>
+                              <span className="num">{dirtyFields.length}</span>
+                              cambio{dirtyFields.length === 1 ? "" : "s"}
+                            </>
+                          )}
+                        </motion.span>
+                      </AnimatePresence>
+                    </div>
+                    <h2 className="ultra-title truncate" style={{ fontSize: 20, maxWidth: 320 }} data-testid="edit-client-name">
+                      {originalRef.current?.client_name || "Reserva"}
+                    </h2>
+                  </div>
                 </div>
-                <h2 className="ultra-title" style={{ fontSize: 18 }}>{title}</h2>
-              </div>
+              ) : (
+                <div className="flex items-center gap-3.5">
+                  <div className="relative w-9 h-9 rounded-xl flex items-center justify-center"
+                       style={{ background: "linear-gradient(135deg, #8b5cf6, #ec4899)", boxShadow: "0 8px 20px -6px rgba(167,139,250,0.7)" }}>
+                    <Sparkles size={16} className="text-white ultra-icon-float" />
+                  </div>
+                  <h2 className="ultra-title" style={{ fontSize: 18 }}>{title}</h2>
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <AnimatePresence>
+                {isEdit && dirtyFields.length > 0 && (
+                  <motion.button
+                    key="revert"
+                    initial={{ opacity: 0, x: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 10, scale: 0.9 }}
+                    whileHover={{ y: -1 }} whileTap={{ scale: 0.94 }}
+                    type="button" onClick={handleRevert}
+                    className="revert-btn"
+                    data-testid="revert-changes-btn"
+                  >
+                    <RotateCcw size={12} /> Descartar
+                  </motion.button>
+                )}
+              </AnimatePresence>
               <motion.button
                 whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                type="button" onClick={handleSubmit} disabled={saving}
-                className="ultra-cta"
+                type="button" onClick={handleSubmit} disabled={saving || (isEdit && dirtyFields.length === 0)}
+                className={`ultra-cta ${isEdit && dirtyFields.length > 0 ? "has-changes" : ""}`}
                 style={{ padding: "10px 20px", fontSize: 13 }}
                 data-testid="submit-form-btn"
               >
@@ -207,22 +319,58 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
 
           {/* Form body */}
           <form onSubmit={handleSubmit} className="relative z-10 px-7 py-5 ultra-compact flex-1 overflow-hidden">
+            {/* Diff strip — shows changed fields as chips */}
+            <AnimatePresence>
+              {isEdit && dirtyFields.length > 0 && (
+                <motion.div
+                  key="diff-strip"
+                  initial={{ opacity: 0, y: -8, height: 0, marginBottom: 0 }}
+                  animate={{ opacity: 1, y: 0, height: "auto", marginBottom: 14 }}
+                  exit={{ opacity: 0, y: -8, height: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                  className="edit-diff-strip"
+                  data-testid="edit-diff-strip"
+                >
+                  <span className="text-[10px] font-black tracking-widest uppercase text-amber-200/80 mr-1 flex items-center gap-1.5">
+                    <Zap size={11} /> Modificado:
+                  </span>
+                  {dirtyFields.map((k, i) => {
+                    const meta = FIELD_META[k];
+                    const Icon = meta?.icon || Pencil;
+                    return (
+                      <motion.span
+                        key={k}
+                        initial={{ opacity: 0, scale: 0.7, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.7 }}
+                        transition={{ delay: i * 0.03, type: "spring", stiffness: 320, damping: 20 }}
+                        className="edit-diff-chip"
+                        data-testid={`diff-chip-${k}`}
+                      >
+                        <Icon size={10} /> {meta?.label || k}
+                      </motion.span>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* SECTION 1 — Cliente */}
             <motion.div variants={stagger} initial="hidden" animate="visible" custom={0} className="mb-4">
               <div className="ultra-section-header"><User size={11} /> Datos del cliente</div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                <UField icon={User}  label={`${f.clientName} *`}>
+                <UField icon={User}  label={`${f.clientName} *`} dirty={isDirtyField("client_name")} testId="field-client-name">
                   <input value={form.client_name} onChange={set("client_name")} placeholder="María García" required
                          data-testid="input-client-name" />
                 </UField>
                 {ff.phone !== false && (
-                  <UField icon={Phone} label={f.phone}>
+                  <UField icon={Phone} label={f.phone} dirty={isDirtyField("client_phone")} testId="field-phone">
                     <input value={form.client_phone} onChange={set("client_phone")} placeholder="+502 1234 5678"
                            data-testid="input-phone" />
                   </UField>
                 )}
                 {ff.email !== false && (
-                  <UField icon={Mail} label={f.email}>
+                  <UField icon={Mail} label={f.email} dirty={isDirtyField("client_email")} testId="field-email">
                     <input type="email" value={form.client_email} onChange={set("client_email")} placeholder="correo@email.com"
                            data-testid="input-email" />
                   </UField>
@@ -232,11 +380,23 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
 
             {/* SECTION 2 — Tipo de evento (choice cards) */}
             <motion.div variants={stagger} initial="hidden" animate="visible" custom={1} className="mb-4">
-              <div className="ultra-section-header"><Sparkles size={11} /> Tipo de evento</div>
+              <div className="ultra-section-header">
+                <Sparkles size={11} /> Tipo de evento
+                {isDirtyField("event_type") && (
+                  <motion.span
+                    initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-200 text-[9px] tracking-wider"
+                    data-testid="event-type-dirty-badge"
+                  >
+                    <Zap size={8} /> Cambiado
+                  </motion.span>
+                )}
+              </div>
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                 {EVENT_TYPES.map((t) => {
                   const Icon = t.icon;
                   const active = form.event_type === t.key;
+                  const wasOriginal = isEdit && originalRef.current?.event_type === t.key;
                   return (
                     <motion.button
                       key={t.key} type="button"
@@ -244,6 +404,7 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
                       onClick={() => setForm(p => ({ ...p, event_type: t.key }))}
                       className={`ultra-choice ${active ? "is-active" : ""}`}
                       data-testid={`event-type-${t.key.toLowerCase().replace(/\s/g,"-")}`}
+                      style={wasOriginal && !active ? { outline: "1.5px dashed rgba(167,139,250,0.55)", outlineOffset: 2 } : undefined}
                     >
                       <Icon size={22} strokeWidth={2.2} />
                       <span className="text-[11px]">{getEventTypeName(t.key)}</span>
@@ -257,16 +418,22 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
             <motion.div variants={stagger} initial="hidden" animate="visible" custom={2} className="mb-4">
               <div className="ultra-section-header"><CalIcon size={11} /> Detalles del evento</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="ultra-label"><CalIcon size={12} /> {f.eventDate} *</label>
+                <div className="relative">
+                  <label className="ultra-label"><CalIcon size={12} /> {f.eventDate} *
+                    {isDirtyField("event_date") && <Zap size={10} className="text-amber-300" />}
+                  </label>
                   <PrettyDatePicker value={form.event_date} onChange={set("event_date")} testId="input-event-date-pretty" />
+                  {isDirtyField("event_date") && <span className="dirty-dot" style={{ top: 22, right: -3 }} />}
                   {/* Hidden native for tests */}
                   <input type="date" value={form.event_date} onChange={set("event_date")} required data-testid="input-event-date" className="hidden" />
                 </div>
                 {ff.time !== false && (
-                  <div>
-                    <label className="ultra-label"><Clock size={12} /> {f.time}</label>
+                  <div className="relative">
+                    <label className="ultra-label"><Clock size={12} /> {f.time}
+                      {isDirtyField("event_time") && <Zap size={10} className="text-amber-300" />}
+                    </label>
                     <PrettyTimePicker value={form.event_time} onChange={set("event_time")} testId="input-event-time-pretty" />
+                    {isDirtyField("event_time") && <span className="dirty-dot" style={{ top: 22, right: -3 }} />}
                     <input type="time" value={form.event_time} onChange={set("event_time")} data-testid="input-event-time" className="hidden" />
                   </div>
                 )}
@@ -281,14 +448,14 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 mt-2.5">
                 {ff.venue !== false && (
                   <div className="md:col-span-2">
-                    <UField icon={MapPin} label={f.venue}>
+                    <UField icon={MapPin} label={f.venue} dirty={isDirtyField("venue")} testId="field-venue">
                       <input value={form.venue} onChange={set("venue")} placeholder="Salón / Hotel / Ubicación"
                              data-testid="input-venue" />
                     </UField>
                   </div>
                 )}
                 {ff.guests !== false && (
-                  <UField icon={Users} label={f.guests}>
+                  <UField icon={Users} label={f.guests} dirty={isDirtyField("guests_count")} testId="field-guests">
                     <input type="number" value={form.guests_count} onChange={set("guests_count")} placeholder="150" min="0"
                            data-testid="input-guests" />
                   </UField>
@@ -327,12 +494,12 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                <UField icon={DollarSign} label={`${f.totalAmount} *`}>
+                <UField icon={DollarSign} label={`${f.totalAmount} *`} dirty={isDirtyField("total_amount")} testId="field-total">
                   <input type="number" value={form.total_amount} onChange={set("total_amount")} placeholder="50,000" min="0" step="0.01" required
                          data-testid="input-total" />
                 </UField>
                 {ff.advance !== false && (
-                  <UField icon={Wallet} label={f.advancePaid}>
+                  <UField icon={Wallet} label={f.advancePaid} dirty={isDirtyField("advance_paid")} testId="field-advance">
                     <input type="number" value={form.advance_paid} onChange={set("advance_paid")} placeholder="10,000" min="0" step="0.01"
                            data-testid="input-advance" />
                   </UField>
@@ -374,9 +541,9 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
 }
 
 // Reusable ultra field with icon
-function UField({ icon: Icon, label, children }) {
+function UField({ icon: Icon, label, children, dirty = false, testId }) {
   return (
-    <div className="ultra-field">
+    <div className={`ultra-field ${dirty ? "is-dirty" : ""}`} data-testid={testId}>
       <label className="ultra-label">
         {Icon && <Icon size={12} />}
         {label}
@@ -384,6 +551,7 @@ function UField({ icon: Icon, label, children }) {
       <div className="relative">
         {Icon && <Icon size={16} className="ultra-field-icon" />}
         {children}
+        {dirty && <span className="dirty-dot" data-testid="dirty-dot" />}
       </div>
     </div>
   );
