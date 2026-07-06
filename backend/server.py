@@ -2340,9 +2340,35 @@ async def ntfy_test():
 _build_state = {"status": "idle", "message": "Listo para actualizar", "started_at": None, "finished_at": None, "progress": 0}
 
 # Estado del push a GitHub — alimenta la barra de progreso de la UI
-_push_state = {"status": "idle", "progress": 0, "message": "", "started_at": None, "finished_at": None}
+# step / total_steps → permiten mostrar "Paso X de N" en la interfaz.
+# detail            → sub-mensaje secundario (ej. archivo/sección en curso).
+# started_ts        → timestamp interno (epoch) para calcular segundos transcurridos.
+_push_state = {
+    "status": "idle",
+    "progress": 0,
+    "message": "",
+    "detail": "",
+    "step": 0,
+    "total_steps": 8,
+    "started_at": None,
+    "finished_at": None,
+    "started_ts": None,
+}
 
-def _set_push_state(progress=None, message=None, status=None):
+# Etiquetas legibles de cada fase, para el desglose de pasos en la UI.
+PUSH_STEP_LABELS = [
+    "Conectando con GitHub",
+    "Clonando repositorio",
+    "Compilando interfaz",
+    "Empaquetando archivos",
+    "Preparando versión para PC",
+    "Registrando cambios (git add)",
+    "Creando commit",
+    "Subiendo a GitHub",
+]
+
+def _set_push_state(progress=None, message=None, status=None, step=None, detail=None):
+    """Actualiza el estado del push. Cualquier campo omitido conserva su valor previo."""
     global _push_state
     if status is not None:
         _push_state["status"] = status
@@ -2350,6 +2376,38 @@ def _set_push_state(progress=None, message=None, status=None):
         _push_state["progress"] = progress
     if message is not None:
         _push_state["message"] = message
+    if detail is not None:
+        _push_state["detail"] = detail
+    if step is not None:
+        _push_state["step"] = step
+
+
+async def _push_progress_ticker(stop_event, start_ts, lo, hi, base_message, hints=None):
+    """Mantiene la barra de progreso en movimiento durante fases largas y bloqueantes
+    (por ejemplo `yarn build`). Incrementa el progreso suavemente entre `lo` y `hi`
+    y muestra los segundos transcurridos + una pista rotativa de lo que ocurre.
+
+    Esto evita que la barra parezca "congelada" cuando una tarea tarda 1–2 min.
+    """
+    import time as _time
+    hints = hints or ["procesando…"]
+    i = 0
+    while not stop_event.is_set():
+        elapsed = int(_time.time() - start_ts)
+        cur = _push_state.get("progress", lo)
+        nxt = min(hi, cur + 1) if cur < hi else hi
+        hint = hints[i % len(hints)]
+        i += 1
+        _set_push_state(
+            progress=nxt,
+            message=f"{base_message} · {elapsed}s transcurridos",
+            detail=hint,
+        )
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=1.8)
+        except asyncio.TimeoutError:
+            pass
+
 
 
 async def _run_frontend_build():
@@ -3852,8 +3910,11 @@ async def github_push_all(payload: dict = Body(default={})):
     # Limpia el resultado anterior
     _push_state["result"] = None
     _push_state["error"] = None
-    _set_push_state(progress=1, message="En cola…", status="running")
+    import time as _time_init
+    _set_push_state(progress=1, message="En cola…", status="running", step=0, detail="Preparando el entorno")
+    _push_state["total_steps"] = len(PUSH_STEP_LABELS)
     _push_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    _push_state["started_ts"] = _time_init.time()
     _push_state["finished_at"] = None
 
     asyncio.create_task(_do_github_push_all(payload))
@@ -3898,7 +3959,8 @@ async def _do_github_push_all(payload: dict):
 
     # Directorio temporal (limpio) para clonar
     work_dir = Path(tempfile.mkdtemp(prefix="cp_push_"))
-    _set_push_state(progress=5, message="Conectando con GitHub…", status="running")
+    _set_push_state(progress=5, message="Conectando con GitHub…", status="running", step=1,
+                    detail="Verificando credenciales del repositorio")
     _push_state["started_at"] = datetime.now(timezone.utc).isoformat()
     _push_state["finished_at"] = None
 
@@ -3914,24 +3976,34 @@ async def _do_github_push_all(payload: dict):
             out = out.replace(token, "***")
         return result.returncode, out
 
+    # Versión NO bloqueante: ejecuta el comando en un hilo aparte para que el
+    # event loop siga libre y `/github/push-status` responda EN VIVO durante
+    # operaciones largas (clone, yarn build, push). Antes bloqueaba el loop y la
+    # barra parecía congelada 1–2 min.
+    async def _arun(args, cwd=None, timeout=120, sensitive=False):
+        return await asyncio.to_thread(_run, args, cwd=cwd, timeout=timeout, sensitive=sensitive)
+
     try:
         # ── 1. Clonar el repo remoto ─────────────────────────────────
-        rc, out = _run(
+        _set_push_state(progress=8, message="Clonando repositorio desde GitHub…", step=2,
+                        detail="Descargando la última versión de la rama")
+        rc, out = await _arun(
             ["git", "clone", "--depth", "1", "--branch", branch, auth_url, str(work_dir)],
             timeout=180, sensitive=True,
         )
         if rc != 0:
             # Puede ser porque la rama no existe aún → clonar sin branch
-            rc2, out2 = _run(["git", "clone", "--depth", "1", auth_url, str(work_dir)], timeout=180, sensitive=True)
+            rc2, out2 = await _arun(["git", "clone", "--depth", "1", auth_url, str(work_dir)], timeout=180, sensitive=True)
             if rc2 != 0:
                 raise HTTPException(status_code=502, detail=f"git clone falló: {out2[-400:]}")
             # Crear la rama solicitada
-            _run(["git", "checkout", "-b", branch], cwd=work_dir)
+            await _arun(["git", "checkout", "-b", branch], cwd=work_dir)
 
         # ── 2. Configurar identidad ──────────────────────────────────
-        _set_push_state(progress=20, message="Repositorio clonado. Preparando compilación…")
-        _run(["git", "config", "user.email", f"{username}@users.noreply.github.com"], cwd=work_dir)
-        _run(["git", "config", "user.name", username], cwd=work_dir)
+        _set_push_state(progress=20, message="Repositorio clonado. Preparando compilación…", step=3,
+                        detail="Configurando identidad de Git")
+        await _arun(["git", "config", "user.email", f"{username}@users.noreply.github.com"], cwd=work_dir)
+        await _arun(["git", "config", "user.name", username], cwd=work_dir)
 
         # ── 3. Copiar contenido actual sobre el clone (sin tocar .git) ──
         # Directorios completos a espejar
@@ -3954,25 +4026,53 @@ async def _do_github_push_all(payload: dict):
         if payload.get("build_frontend", True):
             frontend_src = ROOT_DIR.parent / "frontend"
             if frontend_src.exists():
-                _set_push_state(progress=30, message="Compilando interfaz (yarn build)… puede tardar 1–2 min")
-                rc_b, out_b = _run(["yarn", "build"], cwd=frontend_src, timeout=600)
+                import time as _time_b
+                _set_push_state(progress=30, message="Compilando interfaz (yarn build)…", step=4,
+                                detail="Esto suele tardar 1–2 min · no cierres esta ventana")
+                # Ticker: mantiene la barra en movimiento mientras compila y muestra
+                # los segundos transcurridos + una pista rotativa de la fase.
+                _build_stop = asyncio.Event()
+                _build_hints = [
+                    "Optimizando componentes de React…",
+                    "Minificando CSS y JavaScript…",
+                    "Generando bundles de producción…",
+                    "Aplicando Tailwind y estilos…",
+                    "Creando archivos estáticos…",
+                ]
+                _ticker_task = asyncio.create_task(
+                    _push_progress_ticker(_build_stop, _time_b.time(), lo=30, hi=58,
+                                          base_message="Compilando interfaz (yarn build)",
+                                          hints=_build_hints)
+                )
+                try:
+                    rc_b, out_b = await _arun(["yarn", "build"], cwd=frontend_src, timeout=600)
+                finally:
+                    _build_stop.set()
+                    try:
+                        await _ticker_task
+                    except Exception:
+                        pass
                 if rc_b != 0:
                     shutil.rmtree(str(work_dir), ignore_errors=True)
-                    _set_push_state(progress=0, message="Error al compilar el frontend", status="error")
+                    _set_push_state(progress=0, message="Error al compilar el frontend", status="error",
+                                    detail="Revisa los logs del build")
                     raise HTTPException(
                         status_code=500,
                         detail=f"yarn build falló, no se subió nada: {out_b[-400:]}",
                     )
-                _set_push_state(progress=60, message="Interfaz compilada. Empaquetando archivos…")
+                _set_push_state(progress=60, message="Interfaz compilada. Empaquetando archivos…", step=4,
+                                detail="Copiando código fuente al repositorio")
 
 
-        for d in mirror_dirs:
+        for idx, d in enumerate(mirror_dirs, start=1):
             src = ROOT_DIR.parent / d
             dst = work_dir / d
             if src.exists():
+                _set_push_state(progress=62 + idx * 2, message="Empaquetando archivos…", step=4,
+                                detail=f"Copiando carpeta «{d}» ({idx}/{len(mirror_dirs)})")
                 if dst.exists():
                     shutil.rmtree(str(dst))
-                shutil.copytree(str(src), str(dst), ignore=ignore_patterns)
+                await asyncio.to_thread(shutil.copytree, str(src), str(dst), ignore=ignore_patterns)
 
         # Archivos raíz del repo — copiar TODOS los archivos individuales
         # (no directorios; excepto los ya cubiertos arriba)
@@ -4022,7 +4122,7 @@ async def _do_github_push_all(payload: dict):
                 local_build = int(cdoc.get("desktop_build", 9))
                 max_remote_build = 0
                 try:
-                    rc_ls, ls_out = _run(
+                    rc_ls, ls_out = await _arun(
                         ["git", "ls-remote", "--tags", "origin", "v1.*"],
                         cwd=work_dir, timeout=30, sensitive=True,
                     )
@@ -4040,7 +4140,8 @@ async def _do_github_push_all(payload: dict):
 
         try:
             standalone_src = ROOT_DIR / "standalone_app.py"
-            _set_push_state(progress=75, message=f"Preparando versión v{version_str} para PC…")
+            _set_push_state(progress=75, message=f"Preparando versión v{version_str} para PC…", step=5,
+                            detail="Publicando app.py, build/ y version.txt para la app de escritorio")
             if standalone_src.exists():
                 shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
             fe_build = ROOT_DIR.parent / "frontend" / "build"
@@ -4048,22 +4149,24 @@ async def _do_github_push_all(payload: dict):
                 root_build = work_dir / "build"
                 if root_build.exists():
                     shutil.rmtree(str(root_build))
-                shutil.copytree(str(fe_build), str(root_build))
+                await asyncio.to_thread(shutil.copytree, str(fe_build), str(root_build))
             (work_dir / "version.txt").write_text(version_str, encoding="utf-8")
         except Exception as e:
             logger.warning(f"No se pudo publicar la versión PC plana: {e}")
 
         # ── 4. Add + Commit + Push ───────────────────────────────────
-        _set_push_state(progress=85, message="Registrando cambios (git add)…")
-        _run(["git", "add", "-A"], cwd=work_dir)
+        _set_push_state(progress=85, message="Registrando cambios (git add)…", step=6,
+                        detail="Comparando archivos con el repositorio")
+        await _arun(["git", "add", "-A"], cwd=work_dir)
         # Forzar el add de la versión PC (build/ está en .gitignore como /build)
         for forced in ("build", "app.py", "version.txt"):
             if (work_dir / forced).exists():
-                _run(["git", "add", "-f", forced], cwd=work_dir)
+                await _arun(["git", "add", "-f", forced], cwd=work_dir)
 
-        rc_st, status_out = _run(["git", "status", "--porcelain"], cwd=work_dir)
+        rc_st, status_out = await _arun(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():
-            _set_push_state(progress=100, message="Sin cambios que subir — ya está sincronizado", status="done")
+            _set_push_state(progress=100, message="Sin cambios que subir — ya está sincronizado", status="done",
+                            step=len(PUSH_STEP_LABELS), detail="El repositorio ya estaba al día")
             _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
             _push_state["result"] = {
                 "success": True,
@@ -4075,20 +4178,22 @@ async def _do_github_push_all(payload: dict):
         # Contar archivos cambiados para el resumen
         changed = len([l for l in status_out.strip().split("\n") if l.strip()])
 
-        _set_push_state(progress=90, message="Creando commit…")
-        rc_c, out_c = _run(["git", "commit", "-m", message], cwd=work_dir)
+        _set_push_state(progress=90, message="Creando commit…", step=7,
+                        detail=f"{changed} archivo(s) con cambios · versión v{version_str}")
+        rc_c, out_c = await _arun(["git", "commit", "-m", message], cwd=work_dir)
         if rc_c != 0:
             _set_push_state(progress=0, message="Error al crear el commit", status="error")
             raise HTTPException(status_code=500, detail=f"git commit falló: {out_c[-400:]}")
 
-        _set_push_state(progress=95, message="Subiendo a GitHub…")
-        rc_p, out_p = _run(["git", "push", "origin", branch], cwd=work_dir, timeout=300, sensitive=True)
+        _set_push_state(progress=95, message="Subiendo a GitHub…", step=8,
+                        detail=f"Enviando {changed} archivo(s) a la rama «{branch}»")
+        rc_p, out_p = await _arun(["git", "push", "origin", branch], cwd=work_dir, timeout=300, sensitive=True)
         if rc_p != 0:
             _set_push_state(progress=0, message="Error al subir a GitHub", status="error")
             raise HTTPException(status_code=502, detail=f"git push falló: {out_p[-500:]}")
 
         # ── 5. Obtener SHA del commit ────────────────────────────────
-        rc_sha, sha = _run(["git", "rev-parse", "HEAD"], cwd=work_dir)
+        rc_sha, sha = await _arun(["git", "rev-parse", "HEAD"], cwd=work_dir)
         new_sha = sha.strip() if rc_sha == 0 else ""
 
         # ── 6. Crear registro en app_updates (para que aparezca en el historial
@@ -4121,11 +4226,11 @@ async def _do_github_push_all(payload: dict):
             try:
                 tag_name = f"v{version_str}"
                 # Crea tag anotado y lo pushea
-                rc_tag, out_tag = _run(
+                rc_tag, out_tag = await _arun(
                     ["git", "tag", "-a", tag_name, "-m", message], cwd=work_dir
                 )
                 if rc_tag == 0:
-                    rc_push_tag, out_push_tag = _run(
+                    rc_push_tag, out_push_tag = await _arun(
                         ["git", "push", "origin", tag_name],
                         cwd=work_dir, timeout=120, sensitive=True,
                     )
@@ -4151,7 +4256,8 @@ async def _do_github_push_all(payload: dict):
             upsert=True,
         )
 
-        _set_push_state(progress=100, message="¡Subido a GitHub! La versión PC ya está publicada.", status="done")
+        _set_push_state(progress=100, message="¡Subido a GitHub! La versión PC ya está publicada.", status="done",
+                        step=len(PUSH_STEP_LABELS), detail=f"Commit {new_sha[:7] if new_sha else ''} · v{registered_version or version_str}")
         _push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
         _push_state["result"] = {
             "success": True,
@@ -4190,11 +4296,24 @@ async def _do_github_push_all(payload: dict):
 @api_router.get("/github/push-status")
 async def github_push_status():
     """Estado actual del push a GitHub (para la barra de progreso en la UI).
-    Incluye `result` cuando termina OK y `error` cuando falla."""
+    Incluye `result` cuando termina OK y `error` cuando falla.
+    Añade step/total_steps/detail/elapsed_seconds para un progreso más detallado."""
+    import time as _time_st
+    started_ts = _push_state.get("started_ts")
+    elapsed = int(_time_st.time() - started_ts) if started_ts and _push_state.get("status") == "running" else None
+    step = _push_state.get("step", 0)
+    total = _push_state.get("total_steps", len(PUSH_STEP_LABELS))
+    step_label = PUSH_STEP_LABELS[step - 1] if 1 <= step <= len(PUSH_STEP_LABELS) else ""
     return {
         "status": _push_state.get("status", "idle"),
         "progress": _push_state.get("progress", 0),
         "message": _push_state.get("message", ""),
+        "detail": _push_state.get("detail", ""),
+        "step": step,
+        "total_steps": total,
+        "step_label": step_label,
+        "steps": PUSH_STEP_LABELS,
+        "elapsed_seconds": elapsed,
         "started_at": _push_state.get("started_at"),
         "finished_at": _push_state.get("finished_at"),
         "result": _push_state.get("result"),

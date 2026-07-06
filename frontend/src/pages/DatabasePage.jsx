@@ -211,6 +211,12 @@ export default function DatabasePage() {
   const [ghPushing, setGhPushing] = useState(false);
   const [ghPushProgress, setGhPushProgress] = useState(0);
   const [ghPushMsg, setGhPushMsg] = useState("");
+  const [ghPushDetail, setGhPushDetail] = useState("");
+  const [ghPushStep, setGhPushStep] = useState(0);
+  const [ghPushTotalSteps, setGhPushTotalSteps] = useState(8);
+  const [ghPushStepLabel, setGhPushStepLabel] = useState("");
+  const [ghPushSteps, setGhPushSteps] = useState([]);
+  const [ghPushElapsed, setGhPushElapsed] = useState(0);
   const ghPushPollRef = useRef(null);
   // Modal de publicación: versión + mensaje
   const [ghPushModalOpen, setGhPushModalOpen] = useState(false);
@@ -467,6 +473,10 @@ export default function DatabasePage() {
     setGhPushing(true);
     setGhPushProgress(3);
     setGhPushMsg("Iniciando…");
+    setGhPushDetail("Preparando el entorno");
+    setGhPushStep(0);
+    setGhPushStepLabel("");
+    setGhPushElapsed(0);
     if (ghPushPollRef.current) clearInterval(ghPushPollRef.current);
 
     // Guard: garantiza que el cierre (y el confeti) se ejecute UNA sola vez.
@@ -482,11 +492,14 @@ export default function DatabasePage() {
       }
       if (kind === "done") {
         setGhPushProgress(100);
+        setGhPushStep(ghPushTotalSteps);
         if (payload?.nothing_to_commit) {
           setGhPushMsg("Sin cambios que subir");
+          setGhPushDetail("El repositorio ya estaba al día");
           toast({ title: "Sin cambios que subir", description: "El repositorio ya está sincronizado." });
         } else {
           setGhPushMsg("¡Subido a GitHub!");
+          setGhPushDetail(`Commit ${payload?.commit_short || ""} · v${payload?.version || ""} · ${payload?.files_changed ?? ""} archivo(s)`);
           toast({
             title: "✓ Subido a GitHub",
             description: `Commit ${payload?.commit_short || ""} en rama ${payload?.branch || "main"}`,
@@ -496,6 +509,7 @@ export default function DatabasePage() {
         loadGithubConfig();
       } else {
         setGhPushMsg("Error al subir");
+        setGhPushDetail(String(payload || "").slice(0, 160));
         toast({
           title: "Error al subir",
           description: String(payload || "").slice(0, 250),
@@ -506,7 +520,11 @@ export default function DatabasePage() {
         setGhPushing(false);
         setGhPushProgress(0);
         setGhPushMsg("");
-      }, 1400);
+        setGhPushDetail("");
+        setGhPushStep(0);
+        setGhPushStepLabel("");
+        setGhPushElapsed(0);
+      }, 1800);
     };
 
     // Polling del progreso + detección de fin
@@ -517,6 +535,12 @@ export default function DatabasePage() {
         if (finished) return;
         if (typeof st.progress === "number") setGhPushProgress(st.progress);
         if (st.message) setGhPushMsg(st.message);
+        if (typeof st.detail === "string") setGhPushDetail(st.detail);
+        if (typeof st.step === "number") setGhPushStep(st.step);
+        if (typeof st.total_steps === "number") setGhPushTotalSteps(st.total_steps);
+        if (typeof st.step_label === "string") setGhPushStepLabel(st.step_label);
+        if (Array.isArray(st.steps) && st.steps.length) setGhPushSteps(st.steps);
+        if (typeof st.elapsed_seconds === "number") setGhPushElapsed(st.elapsed_seconds);
         if (st.status === "done") finish("done", st.result || {});
         else if (st.status === "error") finish("error", st.error || st.message || "Error desconocido");
       } catch (_) { /* ignora errores de polling puntuales */ }
@@ -1948,17 +1972,44 @@ export default function DatabasePage() {
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
                       data-testid="github-push-progress"
-                      className="overflow-hidden bg-emerald-50/60 border border-emerald-100 rounded-2xl px-4 py-3 space-y-2"
+                      className="overflow-hidden bg-emerald-50/60 border border-emerald-100 rounded-2xl px-4 py-3 space-y-3"
                     >
-                      <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
-                        <span className="flex items-center gap-2">
-                          <Loader2 size={13} className="animate-spin" />
-                          {ghPushMsg || "Subiendo repositorio…"}
-                        </span>
-                        <span data-testid="github-push-progress-pct" className="font-mono tabular-nums">
-                          {Math.round(ghPushProgress)}%
-                        </span>
+                      {/* Encabezado: mensaje principal + % + paso + tiempo */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <Loader2 size={13} className="animate-spin shrink-0" />
+                            <span className="truncate">{ghPushMsg || "Subiendo repositorio…"}</span>
+                          </span>
+                          <span data-testid="github-push-progress-pct" className="font-mono tabular-nums shrink-0 ml-2">
+                            {Math.round(ghPushProgress)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-emerald-700/80">
+                          <span className="flex items-center gap-1.5">
+                            {ghPushStep > 0 && (
+                              <span className="font-semibold">
+                                Paso {ghPushStep} de {ghPushTotalSteps}
+                                {ghPushStepLabel ? ` · ${ghPushStepLabel}` : ""}
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-1 font-mono tabular-nums">
+                            <Clock size={10} />
+                            {Math.floor(ghPushElapsed / 60)}:{String(ghPushElapsed % 60).padStart(2, "0")}
+                          </span>
+                        </div>
                       </div>
+
+                      {/* Sub-detalle rotativo de lo que está haciendo ahora mismo */}
+                      {ghPushDetail && (
+                        <div className="text-[11px] text-emerald-700/90 flex items-center gap-1.5 bg-white/60 rounded-lg px-2.5 py-1.5 border border-emerald-100">
+                          <Sparkles size={11} className="shrink-0 text-emerald-500" />
+                          <span className="truncate">{ghPushDetail}</span>
+                        </div>
+                      )}
+
+                      {/* Barra */}
                       <div className="h-2.5 w-full rounded-full bg-emerald-100 overflow-hidden">
                         <motion.div
                           className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600"
@@ -1967,6 +2018,38 @@ export default function DatabasePage() {
                           transition={{ duration: 0.4, ease: "easeOut" }}
                         />
                       </div>
+
+                      {/* Desglose de todos los pasos con estado (hecho / actual / pendiente) */}
+                      {ghPushSteps.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-1">
+                          {ghPushSteps.map((label, i) => {
+                            const n = i + 1;
+                            const done = ghPushStep > n || (ghPushProgress >= 100);
+                            const active = ghPushStep === n && ghPushProgress < 100;
+                            return (
+                              <div
+                                key={label}
+                                className={`flex items-center gap-1.5 text-[10px] leading-tight ${
+                                  done ? "text-emerald-700" : active ? "text-emerald-900 font-bold" : "text-emerald-700/40"
+                                }`}
+                              >
+                                {done ? (
+                                  <CheckCircle size={11} className="shrink-0 text-emerald-500" />
+                                ) : active ? (
+                                  <Loader2 size={11} className="shrink-0 animate-spin" />
+                                ) : (
+                                  <span className="w-[11px] h-[11px] shrink-0 rounded-full border border-emerald-300/60" />
+                                )}
+                                <span className="truncate">{label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <p className="text-[9px] text-emerald-600/70 leading-tight pt-0.5">
+                        Puedes dejar esta ventana abierta. La compilación tarda 1–2 min; tus actualizaciones para PC se publican automáticamente al terminar.
+                      </p>
                     </motion.div>
                   )}
                 </AnimatePresence>
