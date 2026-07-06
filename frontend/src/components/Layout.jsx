@@ -153,7 +153,7 @@ export default function Layout({ children }) {
         </AnimatePresence>
 
         {/* Logo area */}
-        <div className={`sidebar-brand relative z-10 border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6"}`}>
+        <div className={`relative z-10 border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6"}`}>
           {compact ? (
             <div className="w-9 h-9 rounded-xl btn-primary flex items-center justify-center text-white font-black text-base">
               C
