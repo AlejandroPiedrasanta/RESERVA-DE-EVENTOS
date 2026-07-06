@@ -222,17 +222,21 @@ export default function MonthlyEventsBanner({
               style={{ paddingBottom: "0.5rem", paddingTop: "0.5rem" }}
             >
               <p
-                className="font-black tracking-tighter text-white"
+                className="font-black text-white"
                 style={{
                   fontFamily: "Cabinet Grotesk, sans-serif",
                   fontSize: "clamp(6rem, 14vw, 11rem)",
                   lineHeight: 1.05,
+                  letterSpacing: "-0.02em",
                   textShadow: "0 4px 40px rgba(236,72,153,0.4)",
                   background:
                     "linear-gradient(135deg, #ffffff 0%, #fce7f3 40%, #c4b5fd 100%)",
                   WebkitBackgroundClip: "text",
                   WebkitTextFillColor: "transparent",
                   paddingBottom: "0.15em",
+                  paddingRight: "0.12em",
+                  display: "inline-block",
+                  overflow: "visible",
                 }}
                 data-testid="banner-month-count"
               >
