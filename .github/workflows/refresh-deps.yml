@@ -1,0 +1,66 @@
+name: refresh-deps
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - frontend/yarn.lock
+      - backend/requirements.txt
+      - .github/workflows/refresh-deps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    # Emergent pods run on aarch64 -> use ARM runner so pip wheels match.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pigz
+        run: sudo apt-get update -y && sudo apt-get install -y pigz
+
+      - name: yarn install (frozen)
+        working-directory: frontend
+        run: |
+          npm i -g yarn@1.22.22
+          yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: Build node_modules tarball
+        run: |
+          mkdir -p artifacts
+          cd frontend && tar --use-compress-program="pigz -6" -cf ../artifacts/node_modules.tar.gz node_modules
+          sha256sum frontend/yarn.lock | awk '{print $1}' > artifacts/node_modules.sha256
+
+      - name: Download pip wheels
+        run: |
+          mkdir -p /tmp/wheels
+          pip download --dest /tmp/wheels -r backend/requirements.txt
+          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels
+          sha256sum backend/requirements.txt | awk '{print $1}' > artifacts/pip-wheels.sha256
+
+      - name: Recreate deps-latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete previous release + tag if present, then recreate cleanly.
+          gh release delete deps-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create deps-latest \
+            --title deps-latest \
+            --prerelease \
+            --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Target env: linux/aarch64, node 20, python 3.11." \
+            artifacts/node_modules.tar.gz \
+            artifacts/node_modules.sha256 \
+            artifacts/pip-wheels.tar.gz \
+            artifacts/pip-wheels.sha256
