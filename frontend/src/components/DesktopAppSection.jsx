@@ -1,70 +1,56 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Monitor, Package, AlertCircle, CheckCircle, XCircle,
-  Loader2, RefreshCw, Download,
+  Loader2, Download, Rocket,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { Section } from "@/components/appearance/SectionShell";
 
 /**
- * DesktopAppSection — Compila y descarga la app de escritorio (.zip).
- * Autocontenido: gestiona su propio buildStatus + polling + handlers.
+ * DesktopAppSection — UN SOLO BOTÓN: Compila + descarga la app de escritorio (.zip)
+ * con barra de progreso y pasos visibles (estilo "Guardar en GitHub").
  * Se usa dentro de: Base de Datos → Soporte avanzado.
  */
+const STEPS_ES = [
+  { id: 1, label: "Iniciando compilación" },
+  { id: 2, label: "Compilando frontend" },
+  { id: 3, label: "Empaquetando .zip" },
+  { id: 4, label: "Descargando en tu equipo" },
+];
+const STEPS_EN = [
+  { id: 1, label: "Starting build" },
+  { id: 2, label: "Building frontend" },
+  { id: 3, label: "Packaging .zip" },
+  { id: 4, label: "Downloading to your device" },
+];
+
 export function DesktopAppSection() {
   const { language, tr } = useSettings();
   const { toast } = useToast();
   const s = tr.settings;
+  const STEPS = language === "es" ? STEPS_ES : STEPS_EN;
 
-  const [downloadLoading, setDownloadLoading] = useState(false);
-  const [buildStatus, setBuildStatus] = useState({ status: "idle", message: "" });
-  const [buildPolling, setBuildPolling] = useState(false);
+  // "idle" | "building" | "downloading" | "done" | "error"
+  const [phase, setPhase] = useState("idle");
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [message, setMessage] = useState("");
+  const pollingRef = useRef(null);
 
-  // Poll build status
-  useEffect(() => {
-    if (!buildPolling) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/build-status`);
-        const data = await res.json();
-        setBuildStatus(data);
-        if (data.status === "ready" || data.status === "error") {
-          setBuildPolling(false);
-          clearInterval(interval);
-          if (data.status === "ready") toast({ title: "App actualizada ✓ — Ya puedes descargarla" });
-          else toast({ title: data.message || "Error al compilar", variant: "destructive" });
-        }
-      } catch { /* ignore network errors during polling */ }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [buildPolling, toast]);
+  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
-  const handleRebuild = async () => {
-    setBuildStatus({ status: "building", message: "Iniciando compilación…" });
-    setBuildPolling(false);
-    try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/rebuild`, { method: "POST" });
-      const data = await res.json();
-      setBuildStatus(data);
-      if (data.status === "building") {
-        setBuildPolling(true);
-        toast({ title: "Compilando app… espera 1-3 minutos" });
-      }
-    } catch {
-      setBuildStatus({ status: "error", message: "Error al iniciar compilación" });
-      toast({ title: "Error al iniciar compilación", variant: "destructive" });
-    }
-  };
-
-  const handleDownloadPackage = async () => {
-    setDownloadLoading(true);
+  const downloadZip = async () => {
+    setPhase("downloading");
+    setCurrentStep(4);
+    setProgress(95);
+    setMessage(language === "es" ? "Descargando el paquete .zip…" : "Downloading the .zip package…");
     try {
       const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package`);
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || "Error al generar el paquete");
+        throw new Error(err.detail || (language === "es" ? "Error al generar el paquete" : "Failed to build package"));
       }
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -75,13 +61,70 @@ export function DesktopAppSection() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-      toast({ title: "Paquete descargado ✓ — Extrae el .zip y ejecuta start.bat" });
+      setProgress(100);
+      setPhase("done");
+      setMessage(language === "es" ? "✓ Paquete descargado. Extrae el .zip y ejecuta start.bat" : "✓ Package downloaded. Extract the .zip and run start.bat");
+      toast({ title: language === "es" ? "App descargada ✓" : "App downloaded ✓" });
     } catch (err) {
-      toast({ title: err.message || "Error al descargar", variant: "destructive" });
-    } finally {
-      setDownloadLoading(false);
+      setPhase("error");
+      setMessage(err.message);
+      toast({ title: err.message, variant: "destructive" });
     }
   };
+
+  const pollBuild = () => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/build-status`);
+        const data = await res.json();
+        // Escalamos progreso 0-100 del backend a 0-90 (10% reservado para descarga)
+        const scaled = Math.min(90, Math.round((data.progress || 0) * 0.9));
+        setProgress(scaled);
+        if (data.step) setCurrentStep(data.step);
+        if (data.message) setMessage(data.message);
+        if (data.status === "ready") {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          await downloadZip();
+        } else if (data.status === "error") {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setPhase("error");
+          setMessage(data.message || (language === "es" ? "Error al compilar" : "Build error"));
+          toast({ title: data.message || (language === "es" ? "Error al compilar" : "Build error"), variant: "destructive" });
+        }
+      } catch { /* ignore transient network errors */ }
+    }, 2500);
+  };
+
+  const handleCompileAndDownload = async () => {
+    setPhase("building");
+    setProgress(5);
+    setCurrentStep(1);
+    setMessage(language === "es" ? "Iniciando compilación…" : "Starting build…");
+    try {
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/rebuild`, { method: "POST" });
+      const data = await res.json();
+      if (data.status === "building") {
+        toast({ title: language === "es" ? "Compilando app… espera 1–3 minutos" : "Building app… wait 1–3 min" });
+        pollBuild();
+      } else if (data.status === "ready") {
+        await downloadZip();
+      } else {
+        setPhase("error");
+        setMessage(data.message || (language === "es" ? "No se pudo iniciar la compilación" : "Could not start build"));
+      }
+    } catch {
+      setPhase("error");
+      setMessage(language === "es" ? "Error al iniciar compilación" : "Failed to start build");
+      toast({ title: language === "es" ? "Error al iniciar compilación" : "Failed to start build", variant: "destructive" });
+    }
+  };
+
+  const isBusy = phase === "building" || phase === "downloading";
+  const isError = phase === "error";
+  const isDone = phase === "done";
 
   return (
     <Section
@@ -117,128 +160,144 @@ export function DesktopAppSection() {
           </p>
         </div>
 
-        {/* ══ PASO 1: COMPILAR ══════════════════════════════════ */}
-        <div className="rounded-2xl border border-indigo-100/80 bg-gradient-to-br from-white/80 to-indigo-50/40 overflow-hidden shadow-sm">
+        {/* ══ BOTÓN ÚNICO: COMPILAR + DESCARGAR ══════════════════════ */}
+        <div className={`rounded-2xl border overflow-hidden shadow-sm transition-all ${
+          isError ? "border-red-200 bg-gradient-to-br from-red-50/40 to-white/80" :
+          isDone ? "border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white/80" :
+          "border-indigo-100/80 bg-gradient-to-br from-white/80 to-indigo-50/40"
+        }`}>
           <div className="px-4 py-3 border-b border-indigo-100/60 bg-white/50">
             <div className="flex items-center gap-2.5">
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0 ${
-                buildStatus.status === "ready" ? "bg-gradient-to-br from-emerald-500 to-emerald-600" :
-                buildStatus.status === "building" ? "bg-gradient-to-br from-indigo-500 to-purple-500 animate-pulse" :
-                buildStatus.status === "error" ? "bg-gradient-to-br from-red-500 to-red-600" :
-                "btn-primary"
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white shadow-sm flex-shrink-0 ${
+                isDone ? "bg-gradient-to-br from-emerald-500 to-emerald-600" :
+                isError ? "bg-gradient-to-br from-red-500 to-red-600" :
+                isBusy ? "bg-gradient-to-br from-indigo-500 to-purple-500 animate-pulse" :
+                "bg-gradient-to-br from-indigo-500 to-purple-500"
               }`}>
-                {buildStatus.status === "ready" ? <CheckCircle size={14} /> : "1"}
+                {isDone ? <CheckCircle size={14} /> : isError ? <XCircle size={14} /> : <Rocket size={14} />}
               </div>
               <div className="flex-1">
                 <p className="text-xs font-black text-slate-800">
-                  {language === "es" ? "Compilar app con los últimos cambios" : "Compile app with latest changes"}
+                  {language === "es" ? "Compilar y descargar app (.zip)" : "Build & download app (.zip)"}
                 </p>
                 <p className="text-[10px] text-slate-500 font-medium">
-                  {language === "es" ? "Genera el paquete para tu PC (1–3 min)" : "Builds the package for your PC (1–3 min)"}
+                  {language === "es" ? "Un solo paso: compila y descarga automáticamente (1–3 min)" : "One step: builds and downloads automatically (1–3 min)"}
                 </p>
               </div>
             </div>
           </div>
 
           <div className="px-4 py-3 space-y-3">
-            {/* Estado del build */}
-            <AnimatePresence mode="wait">
-              {buildStatus.status !== "idle" && (
+            {/* Barra de progreso con pasos (estilo "Guardar en GitHub") */}
+            <AnimatePresence>
+              {(isBusy || isDone || isError) && (
                 <motion.div
-                  key={`build-${buildStatus.status}`}
                   initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  className={`rounded-xl px-3 py-2.5 border ${
-                    buildStatus.status === "building" ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
-                    buildStatus.status === "ready" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                    "bg-red-50 text-red-700 border-red-200"
-                  }`}
+                  className="space-y-3"
+                  data-testid="desktop-build-progress"
                 >
-                  <div className="flex items-start gap-2">
-                    {buildStatus.status === "building" ? <Loader2 size={13} className="animate-spin flex-shrink-0 mt-0.5" /> :
-                     buildStatus.status === "ready" ? <CheckCircle size={13} className="flex-shrink-0 mt-0.5" /> :
-                     <XCircle size={13} className="flex-shrink-0 mt-0.5" />}
-                    <p className="text-[11px] font-semibold whitespace-pre-wrap flex-1 leading-tight">{buildStatus.message}</p>
+                  {/* Lista de pasos */}
+                  <div className="rounded-xl bg-white/70 border border-slate-200/60 p-3 space-y-2">
+                    {STEPS.map((step) => {
+                      const isCurrent = currentStep === step.id && !isError;
+                      const isCompleted = currentStep > step.id || (isDone && step.id === 4);
+                      const isFailed = isError && currentStep === step.id;
+                      return (
+                        <div
+                          key={step.id}
+                          data-testid={`desktop-step-${step.id}`}
+                          className={`flex items-center gap-2.5 transition-all ${
+                            isCurrent || isCompleted || isFailed ? "opacity-100" : "opacity-40"
+                          }`}
+                        >
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[9px] font-black ${
+                            isFailed ? "bg-red-500 text-white" :
+                            isCompleted ? "bg-emerald-500 text-white" :
+                            isCurrent ? "bg-indigo-500 text-white" :
+                            "bg-slate-200 text-slate-500"
+                          }`}>
+                            {isFailed ? <XCircle size={11} /> :
+                             isCompleted ? <CheckCircle size={11} /> :
+                             isCurrent ? <Loader2 size={11} className="animate-spin" /> :
+                             step.id}
+                          </div>
+                          <span className={`text-[11px] font-semibold leading-tight ${
+                            isFailed ? "text-red-700" :
+                            isCompleted ? "text-emerald-700" :
+                            isCurrent ? "text-indigo-700" :
+                            "text-slate-500"
+                          }`}>
+                            {step.label}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {buildStatus.status === "building" && typeof buildStatus.progress === "number" && (
-                    <div className="mt-2 h-1 bg-indigo-100 rounded-full overflow-hidden">
+
+                  {/* Barra de progreso */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                        {language === "es" ? "Progreso" : "Progress"}
+                      </span>
+                      <span className={`text-[11px] font-black ${
+                        isError ? "text-red-600" : isDone ? "text-emerald-600" : "text-indigo-600"
+                      }`} data-testid="desktop-progress-percent">
+                        {progress}%
+                      </span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                       <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.max(10, buildStatus.progress)}%` }}
-                        transition={{ duration: 0.5 }}
-                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                        animate={{ width: `${progress}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
+                        className={`h-full ${
+                          isError ? "bg-gradient-to-r from-red-500 to-red-600" :
+                          isDone ? "bg-gradient-to-r from-emerald-500 to-emerald-600" :
+                          "bg-gradient-to-r from-indigo-500 to-purple-500"
+                        }`}
                       />
+                    </div>
+                  </div>
+
+                  {/* Mensaje de estado */}
+                  {message && (
+                    <div className={`rounded-xl px-3 py-2 border text-[11px] font-semibold whitespace-pre-wrap leading-tight ${
+                      isError ? "bg-red-50 text-red-700 border-red-200" :
+                      isDone ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                      "bg-indigo-50 text-indigo-700 border-indigo-200"
+                    }`} data-testid="desktop-build-message">
+                      {message}
                     </div>
                   )}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Botón compilar */}
+            {/* Botón ÚNICO */}
             <motion.button
-              whileHover={{ scale: buildStatus.status === "building" ? 1 : 1.02 }}
+              whileHover={{ scale: isBusy ? 1 : 1.02 }}
               whileTap={{ scale: 0.97 }}
-              onClick={handleRebuild}
-              disabled={buildStatus.status === "building"}
-              data-testid="desktop-rebuild-btn"
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black text-white shadow-md transition-all disabled:opacity-60"
+              onClick={handleCompileAndDownload}
+              disabled={isBusy}
+              data-testid="desktop-compile-download-btn"
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black text-white shadow-md transition-all disabled:opacity-70 disabled:cursor-not-allowed"
               style={{
-                background: buildStatus.status === "ready"
+                background: isDone
                   ? "linear-gradient(135deg, #10b981, #059669)"
+                  : isError
+                  ? "linear-gradient(135deg, #ef4444, #dc2626)"
                   : "linear-gradient(135deg, var(--t-from), var(--t-to))"
               }}
             >
-              {buildStatus.status === "building"
-                ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Compilando…" : "Compiling…"}</>
-                : buildStatus.status === "ready"
-                ? <><CheckCircle size={16} /> {language === "es" ? "App lista ✓ (recompilar)" : "Ready ✓ (rebuild)"}</>
-                : <><RefreshCw size={16} /> {language === "es" ? "Compilar app" : "Compile app"}</>}
-            </motion.button>
-          </div>
-        </div>
-
-        {/* ══ PASO 2: DESCARGAR ══════════════════════════════ */}
-        <div className={`rounded-2xl border overflow-hidden shadow-sm transition-all ${
-          buildStatus.status === "ready"
-            ? "border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white/80"
-            : "border-slate-200 bg-gradient-to-br from-slate-50/40 to-white/40 opacity-70"
-        }`}>
-          <div className={`px-4 py-3 border-b bg-white/50 ${
-            buildStatus.status === "ready" ? "border-emerald-100/60" : "border-slate-100/60"
-          }`}>
-            <div className="flex items-center gap-2.5">
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black flex-shrink-0 ${
-                buildStatus.status === "ready" ? "bg-gradient-to-br from-emerald-500 to-emerald-600" : "bg-slate-300"
-              }`}>
-                2
-              </div>
-              <div className="flex-1">
-                <p className={`text-xs font-black ${buildStatus.status === "ready" ? "text-slate-800" : "text-slate-500"}`}>
-                  {language === "es" ? "Descargar app (.zip)" : "Download app (.zip)"}
-                </p>
-                <p className="text-[10px] text-slate-500 font-medium">
-                  {language === "es" ? "Un solo archivo con todo lo necesario" : "Single file with everything included"}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="px-4 py-3">
-            <motion.button
-              whileHover={{ scale: buildStatus.status === "ready" ? 1.02 : 1 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={handleDownloadPackage}
-              disabled={downloadLoading || buildStatus.status !== "ready"}
-              data-testid="desktop-download-btn"
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black transition-all disabled:cursor-not-allowed"
-              style={{
-                background: buildStatus.status === "ready" ? "linear-gradient(135deg,var(--t-from),var(--t-to))" : "#e2e8f0",
-                color: buildStatus.status === "ready" ? "white" : "#94a3b8"
-              }}
-            >
-              {downloadLoading
-                ? <><Loader2 size={16} className="animate-spin" /> {s.desktopDownloading}</>
-                : buildStatus.status === "ready"
-                ? <><Download size={16} /> {language === "es" ? "Descargar para Windows (.zip)" : "Download for Windows (.zip)"}</>
-                : <><Package size={16} /> {language === "es" ? "Compila primero (Paso 1)" : "Compile first (Step 1)"}</>}
+              {phase === "building"
+                ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Compilando…" : "Building…"}</>
+                : phase === "downloading"
+                ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Descargando…" : "Downloading…"}</>
+                : isDone
+                ? <><Download size={16} /> {language === "es" ? "Descargar de nuevo" : "Download again"}</>
+                : isError
+                ? <><Rocket size={16} /> {language === "es" ? "Reintentar" : "Retry"}</>
+                : <><Package size={16} /> {language === "es" ? "Compilar y descargar (.zip)" : "Build & download (.zip)"}</>}
             </motion.button>
           </div>
         </div>

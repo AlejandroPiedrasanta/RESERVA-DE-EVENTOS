@@ -2337,7 +2337,7 @@ async def ntfy_test():
 
 
 
-_build_state = {"status": "idle", "message": "Listo para actualizar", "started_at": None, "finished_at": None, "progress": 0}
+_build_state = {"status": "idle", "message": "Listo para actualizar", "started_at": None, "finished_at": None, "progress": 0, "step": 0, "step_label": ""}
 
 # Estado del push a GitHub — alimenta la barra de progreso de la UI
 # step / total_steps → permiten mostrar "Paso X de N" en la interfaz.
@@ -2414,7 +2414,9 @@ async def _run_frontend_build():
     global _build_state
     try:
         frontend_dir = str(ROOT_DIR.parent / "frontend")
-        _build_state = {**_build_state, "message": "Compilando frontend con yarn build…", "progress": 30}
+        _build_state = {**_build_state, "message": "Preparando entorno de compilación…", "progress": 15, "step": 1, "step_label": "Preparando entorno"}
+        await asyncio.sleep(0.3)
+        _build_state = {**_build_state, "message": "Compilando frontend con yarn build…", "progress": 35, "step": 2, "step_label": "Compilando frontend"}
         process = await asyncio.create_subprocess_exec(
             "yarn", "build",
             cwd=frontend_dir,
@@ -2444,15 +2446,19 @@ async def _run_frontend_build():
             # Verificar que el build realmente exista
             build_dir = ROOT_DIR.parent / "frontend" / "build"
             if not (build_dir / "index.html").exists():
-                _build_state = {**_build_state, "status": "error", "message": "El build terminó pero no se generó index.html. Revisa los logs.", "progress": 0}
+                _build_state = {**_build_state, "status": "error", "message": "El build terminó pero no se generó index.html. Revisa los logs.", "progress": 0, "step": 0, "step_label": ""}
                 logger.error("Build succeeded but no index.html generated")
                 return
+            _build_state = {**_build_state, "message": "Empaquetando archivos y generando .zip…", "progress": 80, "step": 3, "step_label": "Empaquetando .zip"}
+            await asyncio.sleep(0.3)
             _build_state = {
                 "status": "ready",
                 "message": "✓ App compilada correctamente. Ya puedes descargarla.",
                 "started_at": _build_state["started_at"],
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "progress": 100,
+                "step": 4,
+                "step_label": "Listo para descargar",
             }
             logger.info("Frontend build completed successfully")
         else:
@@ -2466,12 +2472,14 @@ async def _run_frontend_build():
                 "started_at": _build_state["started_at"],
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "progress": 0,
+                "step": 0,
+                "step_label": "",
             }
             logger.error(f"Frontend build failed: {err_full[:1000]}")
     except FileNotFoundError:
-        _build_state = {**_build_state, "status": "error", "message": "yarn no encontrado en el sistema. Instala Node.js + yarn.", "progress": 0}
+        _build_state = {**_build_state, "status": "error", "message": "yarn no encontrado en el sistema. Instala Node.js + yarn.", "progress": 0, "step": 0, "step_label": ""}
     except Exception as e:
-        _build_state = {**_build_state, "status": "error", "message": f"Error inesperado: {str(e)[:200]}", "progress": 0}
+        _build_state = {**_build_state, "status": "error", "message": f"Error inesperado: {str(e)[:200]}", "progress": 0, "step": 0, "step_label": ""}
 
 
 @api_router.post("/download/package/rebuild")
@@ -2485,6 +2493,8 @@ async def rebuild_package():
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": None,
         "progress": 10,
+        "step": 1,
+        "step_label": "Iniciando compilación",
     }
     asyncio.create_task(_run_frontend_build())
     return _build_state
