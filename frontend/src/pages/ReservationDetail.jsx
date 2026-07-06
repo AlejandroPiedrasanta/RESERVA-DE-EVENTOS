@@ -23,7 +23,6 @@ const STATUS_META = {
   Reservado:  { grad: "from-violet-400 to-fuchsia-500", ring: "ring-violet-300/50",  text: "text-violet-700", bg: "bg-violet-50" },
   Pagado:     { grad: "from-emerald-400 to-cyan-500",   ring: "ring-emerald-300/50", text: "text-emerald-700",bg: "bg-emerald-50" },
 };
-const STATUSES = ["Pendiente","Confirmado","Completado","Cancelado"];
 
 const EVENT_ICON = {
   "Boda": Heart,
@@ -40,18 +39,13 @@ export default function ReservationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { tr, formatCurrency, logoUrl, pdfLogoUrl, usePdfLogo, useCustomPdfLogo, pdfTheme } = useSettings();
+  const { tr, formatCurrency } = useSettings();
   const dt = tr.detail;
   const [reservation, setReservation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
 
-  const getEffectivePdfLogo = () => {
-    if (!usePdfLogo) return null;
-    if (useCustomPdfLogo && pdfLogoUrl) return pdfLogoUrl;
-    return logoUrl || undefined;
-  };
   const [lightbox, setLightbox] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
@@ -91,22 +85,6 @@ export default function ReservationDetail() {
   const handleDeleteReceipt = async (receiptId) => {
     if (!window.confirm("¿Eliminar comprobante?")) return;
     try { await deleteReceipt(id, receiptId); toast({ title: "Eliminado" }); load(); }
-    catch { toast({ title: "Error", variant: "destructive" }); }
-  };
-
-  const handleStatusChange = async (newStatus) => {
-    try {
-      const payload = { status: newStatus };
-      const wasCompleted = reservation.status === "Completado";
-      if (newStatus === "Completado" && reservation.total_amount) {
-        payload.advance_paid = reservation.total_amount;
-      }
-      const updated = await updateReservation(id, payload);
-      setReservation(updated);
-      toast({ title: `${tr.statuses[newStatus] || newStatus}` });
-      if (newStatus === "Completado" && !wasCompleted) celebrateFullPayment();
-      else if (newStatus === "Confirmado" && reservation.status === "Pendiente") celebratePayment();
-    }
     catch { toast({ title: "Error", variant: "destructive" }); }
   };
 
