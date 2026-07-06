@@ -24,18 +24,25 @@ if [ -d frontend/node_modules ] && [ -f frontend/.pkg_hash ]; then
   [ "$CUR" = "$OLD" ] && NEED_INSTALL=0 && echo "♻ Reusing node_modules (hash match)"
 fi
 
-# ── 4) FAST-PATH attempt: prebuilt tarball from GitHub Releases ──
-# Upload ONCE to Releases: node_modules.tar.gz (tag: deps-latest)
-# If it exists, we download (~15s) instead of yarn install (~180s)
+# ── 4) FAST-PATH attempt: prebuilt node_modules tarball ─────────
+# Priority: (a) tarball committed in repo (frontend/node_modules.tar.gz)
+#           (b) GitHub Releases tarball (deps-latest tag)
+# Either avoids yarn install (~180s) -> extract only (~10s).
 TARBALL_URL="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/deps-latest/node_modules.tar.gz"
 if [ "$NEED_INSTALL" = "1" ]; then
   echo "⚡ Trying fast-path (node_modules tarball)..."
   rm -rf frontend/node_modules
-  if curl -fsSL --max-time 90 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null; then
+  if [ -f frontend/node_modules.tar.gz ]; then
+    echo "⚡ Using committed tarball: frontend/node_modules.tar.gz"
+    tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null && \
+    [ -d frontend/node_modules ] && \
+    NEED_INSTALL=0 && \
+    echo "⚡ node_modules restored from committed tarball ($(du -sh frontend/node_modules | cut -f1))"
+  elif curl -fsSL --max-time 90 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null; then
     tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null && \
     [ -d frontend/node_modules ] && \
     NEED_INSTALL=0 && \
-    echo "⚡ node_modules restored from tarball ($(du -sh frontend/node_modules | cut -f1))"
+    echo "⚡ node_modules restored from Releases tarball ($(du -sh frontend/node_modules | cut -f1))"
     rm -f /tmp/nm.tgz
   else
     echo "ℹ Tarball not available — falling back to yarn install"
