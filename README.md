@@ -1,5 +1,17 @@
 # Cinema Productions · Reserva de Eventos
 
+<div align="center">
+
+![Bandera de Guatemala](https://flagcdn.com/w80/gt.png)
+
+**🇬🇹 Hecho con orgullo en Guatemala 🇬🇹**
+
+*Software desarrollado localmente en Guatemala por [@AlejandroPiedrasanta](https://github.com/AlejandroPiedrasanta).*
+
+</div>
+
+---
+
 Aplicación **full-stack** para la gestión y reserva de eventos de Cinema Productions, con **doble modo de entrega**:
 
 - 🌐 **Web** (React + FastAPI + MongoDB) — desplegable en cualquier proveedor.
@@ -296,5 +308,13 @@ Copyright © Cinema Productions.
 Uso interno. Contacta al autor para condiciones de reutilización.
 
 ---
+
+<div align="center">
+
+![Bandera de Guatemala](https://flagcdn.com/w40/gt.png)
+
+**Hecho en Guatemala 🇬🇹 · Made in Guatemala**
+
+</div>
 
 **Autor**: [@AlejandroPiedrasanta](https://github.com/AlejandroPiedrasanta) — [Repositorio](https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS)
