@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { getReservation, uploadReceipt, deleteReceipt, updateReservation } from "@/lib/api";
 import {
@@ -463,6 +464,7 @@ export default function ReservationDetail() {
       </div>
 
       {/* Lightbox */}
+      {createPortal(
       <AnimatePresence>
         {lightbox && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -481,7 +483,9 @@ export default function ReservationDetail() {
             )}
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {showEdit && <ReservationForm reservation={reservation} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
     </div>

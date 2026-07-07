@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { getCalendarEvents } from "@/lib/api";
 import {
@@ -664,6 +665,7 @@ export default function CalendarView() {
       {/* Legend row removed per request */}
 
       {/* Floating hover preview */}
+      {createPortal(
       <AnimatePresence>
         {hover && (() => {
           const c = getColor(hover.ev.event_type);
@@ -717,7 +719,9 @@ export default function CalendarView() {
             </motion.div>
           );
         })()}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {showForm && <ReservationForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); reload(); }} />}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, PartyPopper, Bell, Sparkles, ArrowRight, Clock, MapPin, Flame, CalendarDays } from "lucide-react";
 import { getEventConfig } from "@/lib/eventConfig";
@@ -74,7 +75,7 @@ export default function NextEventReminderPopup({
 
   const fmtDate = (d) => { if (!d) return "-"; const [y,m,dd] = d.split("-"); return `${dd}/${m}/${y}`; };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -339,6 +340,7 @@ export default function NextEventReminderPopup({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

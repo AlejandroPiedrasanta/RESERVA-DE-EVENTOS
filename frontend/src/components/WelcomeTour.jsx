@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -192,7 +193,7 @@ export default function WelcomeTour() {
   const isLast = step === total - 1;
   const isFirst = step === 0;
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div key="tour" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-[200]" data-testid="welcome-tour-overlay">
@@ -420,6 +421,7 @@ export default function WelcomeTour() {
           </div>
         </motion.div>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

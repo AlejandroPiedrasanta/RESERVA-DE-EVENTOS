@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { getMetasProgress, upsertMeta } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award } from "lucide-react";
@@ -211,7 +212,7 @@ function useCountUp(target, duration = 900) {
 
 function GoalReachedModal({ open, onClose, type, monthLabel, amount, formatCurrency }) {
   const typeCfg = TYPES.find(t => t.key === type) || TYPES[0];
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -295,7 +296,8 @@ function GoalReachedModal({ open, onClose, type, monthLabel, amount, formatCurre
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
@@ -305,7 +307,7 @@ function MilestoneToast({ milestone, onDone }) {
     const t = setTimeout(() => onDone(), 2600);
     return () => clearTimeout(t);
   }, [milestone, onDone]);
-  return (
+  return createPortal(
     <AnimatePresence>
       {milestone && (
         <motion.div
@@ -323,7 +325,8 @@ function MilestoneToast({ milestone, onDone }) {
           </div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 

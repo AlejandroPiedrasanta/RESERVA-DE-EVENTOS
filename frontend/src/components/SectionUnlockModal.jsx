@@ -1,5 +1,6 @@
 // Modal de desbloqueo por sección — con animaciones épicas
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Lock, X, Eye, EyeOff, ShieldAlert, KeyRound, Loader2 } from "lucide-react";
 
@@ -45,7 +46,7 @@ export default function SectionUnlockModal({ sectionLock, onUnlock, onCancel }) 
     }
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <motion.div
         key="section-lock"
@@ -227,6 +228,7 @@ export default function SectionUnlockModal({ sectionLock, onUnlock, onCancel }) 
           </div>
         </motion.form>
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

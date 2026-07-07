@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitCommit, GitBranch, RefreshCw, X, Sparkles, Loader2, CheckCircle2,
@@ -172,7 +173,7 @@ export default function GithubUpdateNotifier() {
   const commitsAhead = data.commits_ahead || (data.commits?.length ?? 0);
   const commits = data.commits || [];
 
-  return (
+  return createPortal(
     <>
       {/* ── Persistent floating pill (visible en cualquier apartado) ── */}
       <AnimatePresence>
@@ -407,6 +408,7 @@ export default function GithubUpdateNotifier() {
           </motion.div>
         )}
       </AnimatePresence>
-    </>
+    </>,
+    document.body
   );
 }

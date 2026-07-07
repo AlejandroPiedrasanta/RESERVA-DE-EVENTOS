@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, CalendarDays, Bell, Sparkles, ArrowRight, Clock } from "lucide-react";
 import { getEventConfig } from "@/lib/eventConfig";
@@ -42,7 +43,7 @@ export default function EventNotificationPopup({
     return Math.max(0, Math.round((ev - today) / 86400000));
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -292,6 +293,7 @@ export default function EventNotificationPopup({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

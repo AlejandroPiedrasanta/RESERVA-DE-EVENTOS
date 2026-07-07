@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Database, Download, Upload, Save, Trash2, RefreshCw,
@@ -2130,6 +2131,7 @@ export default function DatabasePage() {
       </motion.div>
 
       {/* ── MODAL: Contexto para la IA ── */}
+      {createPortal(
       <AnimatePresence>
         {ctxOpen && (
           <motion.div
@@ -2235,9 +2237,12 @@ export default function DatabasePage() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {/* ── Popup: haciendo copia de seguridad completa ── */}
+      {createPortal(
       <AnimatePresence>
         {backupModal && (
           <motion.div
@@ -2273,9 +2278,12 @@ export default function DatabasePage() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {/* ═══════════ MODAL: Publicar (versión + mensaje) ═══════════ */}
+      {createPortal(
       <AnimatePresence>
         {ghPushModalOpen && (
           <motion.div
@@ -2354,9 +2362,12 @@ export default function DatabasePage() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {/* ═══════════ MODAL: Conectar con GitHub ═══════════ */}
+      {createPortal(
       <AnimatePresence>
         {ghConnectOpen && (
           <motion.div
@@ -2438,7 +2449,9 @@ export default function DatabasePage() {
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+      )}
 
       {/* ── Modal de contraseña — Soporte avanzado ── */}
       <Dialog open={pwdModalOpen} onOpenChange={(o) => {
