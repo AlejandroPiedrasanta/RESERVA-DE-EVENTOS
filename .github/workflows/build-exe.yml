@@ -1,0 +1,157 @@
+name: Build Windows .exe
+
+# Compila el ejecutable de Windows (sin Python requerido) con PyInstaller
+# y lo publica como asset del release. El backend consulta la Release
+# latest para servir el .exe instantáneamente al usuario.
+#
+# Triggers:
+#   · push de tag v*          → build + release automático
+#   · workflow_dispatch       → build manual (crea/actualiza release "latest-exe")
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag para la release (default: latest-exe)'
+        required: false
+        default: 'latest-exe'
+
+permissions:
+  contents: write
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller==6.11.1
+
+      - name: Install & build frontend
+        working-directory: frontend
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+        env:
+          # El .exe sirve la UI localmente (mismo host) → apunta a localhost:8001
+          REACT_APP_BACKEND_URL: http://127.0.0.1:8001
+          CI: false
+
+      - name: Prepare bundle payload
+        shell: pwsh
+        run: |
+          # Copiar el build del frontend al lado del standalone_app para que PyInstaller lo empaquete
+          New-Item -ItemType Directory -Force -Path backend/_bundle | Out-Null
+          Copy-Item -Recurse -Force frontend/build backend/_bundle/build
+          # Copiar assets extra que espera el runtime (ai_context, versión, temas)
+          if (Test-Path backend/ai_context_default.py) { Copy-Item backend/ai_context_default.py backend/_bundle/ }
+          if (Test-Path version.txt) { Copy-Item version.txt backend/_bundle/ }
+          if (Test-Path themes/saved_themes.json) {
+            New-Item -ItemType Directory -Force -Path backend/_bundle/themes | Out-Null
+            Copy-Item themes/saved_themes.json backend/_bundle/themes/
+          }
+
+      - name: Build .exe with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller `
+            --onefile `
+            --name CinemaProductions `
+            --icon frontend/public/favicon.ico `
+            --add-data "backend/_bundle/build;build" `
+            --add-data "backend/_bundle/ai_context_default.py;." `
+            --add-data "backend/_bundle/version.txt;." `
+            --add-data "backend/_bundle/themes;themes" `
+            --hidden-import motor.motor_asyncio `
+            --hidden-import pymongo `
+            --hidden-import bson `
+            --hidden-import apscheduler.schedulers.asyncio `
+            --hidden-import apscheduler.triggers.cron `
+            --hidden-import apscheduler.triggers.interval `
+            --hidden-import pywebpush `
+            --hidden-import PIL `
+            --collect-submodules uvicorn `
+            --collect-submodules fastapi `
+            backend/standalone_app.py
+
+      - name: Verify .exe & compute SHA256
+        id: hash
+        shell: pwsh
+        run: |
+          $exe = "dist/CinemaProductions.exe"
+          if (-not (Test-Path $exe)) { throw "No se generó el .exe" }
+          $size = (Get-Item $exe).Length / 1MB
+          Write-Host "✓ .exe generado: $([math]::Round($size,2)) MB"
+
+          # Calcular SHA256 y guardarlo como asset + outputs
+          $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          Write-Host "SHA256: $sha"
+          "$sha  CinemaProductions.exe" | Out-File -Encoding ascii -NoNewline dist/CinemaProductions.exe.sha256
+          "sha256=$sha" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
+          "size_mb=$([math]::Round($size,2))" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
+
+      - name: Determine release tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "name=Release ${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "name=Latest Windows Build" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.name }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          files: |
+            dist/CinemaProductions.exe
+            dist/CinemaProductions.exe.sha256
+          body: |
+            **CinemaProductions.exe** — Windows (sin Python requerido).
+
+            Descárgalo y ejecútalo. Se abre el navegador con la app corriendo
+            100 % local en tu equipo (base de datos embebida por defecto).
+
+            **Tamaño:** ${{ steps.hash.outputs.size_mb }} MB
+            **SHA256:** `${{ steps.hash.outputs.sha256 }}`
+
+            ### Verificar integridad (Windows PowerShell)
+            ```powershell
+            Get-FileHash .\CinemaProductions.exe -Algorithm SHA256
+            # Debe coincidir exactamente con el hash de arriba
+            ```
+
+            Si Windows SmartScreen te advierte: pulsa *Más información → Ejecutar de todos modos*.
+            El binario está compilado por GitHub Actions desde el commit `${{ github.sha }}`.
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

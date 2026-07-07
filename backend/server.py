@@ -2721,6 +2721,145 @@ async def get_build_status():
     return _build_state
 
 
+# ── Descarga .EXE (Windows, sin Python) desde GitHub Releases ─────────────────
+# El .exe se compila automáticamente por GitHub Actions (.github/workflows/build-exe.yml)
+# en cada push de tag v* o manualmente (workflow_dispatch). Aquí sólo consultamos
+# la Release y devolvemos la URL del asset .exe. Ventajas frente a compilar en
+# el servidor con PyInstaller bajo demanda:
+#   · descarga instantánea (no hay 3–5 min de espera)
+#   · sin consumo de CPU/RAM del servidor
+#   · el binario está firmado por el runner de GitHub (SHA verificable)
+#   · funciona igual en preview y en la app de escritorio empaquetada
+_DEFAULT_EXE_REPO = "AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
+
+
+def _github_exe_repo() -> str:
+    """owner/repo desde env GITHUB_EXE_REPO o fallback constante."""
+    v = (os.environ.get("GITHUB_EXE_REPO") or "").strip()
+    return v or _DEFAULT_EXE_REPO
+
+
+async def _find_latest_exe_asset() -> dict | None:
+    """Busca el asset .exe más reciente en Releases del repo. Devuelve dict con
+    keys: name, size, url, tag, published_at, browser_download_url, sha256 — o None.
+    El sha256 se resuelve leyendo el asset .sha256 hermano (si existe) o
+    extrayéndolo del body del release (patrón hexadecimal de 64 chars)."""
+    repo = _github_exe_repo()
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "cinema-productions"}
+    tok = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+
+    async def _extract(rel: dict, client: httpx.AsyncClient) -> dict | None:
+        exe_asset = None
+        sha_asset = None
+        for a in rel.get("assets") or []:
+            n = (a.get("name") or "").lower()
+            if n.endswith(".exe"):
+                exe_asset = a
+            elif n.endswith(".exe.sha256") or n.endswith(".sha256"):
+                sha_asset = a
+        if not exe_asset:
+            return None
+        sha256 = ""
+        # 1) Intentar leer del asset .sha256 hermano
+        if sha_asset:
+            try:
+                r = await client.get(sha_asset["browser_download_url"], timeout=8.0)
+                if r.status_code == 200:
+                    # formato típico: "<hex>  filename"
+                    m = re.search(r"\b([a-fA-F0-9]{64})\b", r.text or "")
+                    if m:
+                        sha256 = m.group(1).lower()
+            except Exception as e:
+                logger.warning(f"No se pudo leer sha256 asset: {e}")
+        # 2) Fallback: extraer del body del release
+        if not sha256:
+            body = rel.get("body") or ""
+            m = re.search(r"\b([a-fA-F0-9]{64})\b", body)
+            if m:
+                sha256 = m.group(1).lower()
+        return {
+            "name": exe_asset["name"], "size": exe_asset.get("size") or 0,
+            "url": exe_asset["browser_download_url"],
+            "browser_download_url": exe_asset["browser_download_url"],
+            "tag": rel.get("tag_name") or "", "published_at": rel.get("published_at") or "",
+            "sha256": sha256,
+        }
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # 1) Latest release (excluye prereleases y drafts)
+        try:
+            r = await client.get(f"https://api.github.com/repos/{repo}/releases/latest", headers=headers)
+            if r.status_code == 200:
+                res = await _extract(r.json(), client)
+                if res:
+                    return res
+        except Exception as e:
+            logger.warning(f"GitHub releases/latest falló: {e}")
+        # 2) Fallback: recorrer todos los releases (incluye prereleases como 'latest-exe')
+        try:
+            r = await client.get(f"https://api.github.com/repos/{repo}/releases?per_page=20", headers=headers)
+            if r.status_code == 200:
+                for rel in r.json() or []:
+                    res = await _extract(rel, client)
+                    if res:
+                        return res
+        except Exception as e:
+            logger.warning(f"GitHub releases list falló: {e}")
+    return None
+
+
+@api_router.get("/download/desktop-exe/info")
+async def download_desktop_exe_info():
+    """Metadata del último .exe disponible (tamaño, versión, URL). Si no hay
+    release aún, devuelve status='not_available' con instrucciones."""
+    asset = await _find_latest_exe_asset()
+    repo = _github_exe_repo()
+    if not asset:
+        return {
+            "status": "not_available",
+            "repo": repo,
+            "workflow_url": f"https://github.com/{repo}/actions/workflows/build-exe.yml",
+            "releases_url": f"https://github.com/{repo}/releases",
+            "message": (
+                "Aún no hay un .exe publicado. Ejecuta el workflow 'Build Windows .exe' "
+                "en GitHub Actions o publica un tag v* para generar y publicar el "
+                "instalador automáticamente."
+            ),
+        }
+    return {
+        "status": "ready",
+        "repo": repo,
+        "name": asset["name"],
+        "size": asset["size"],
+        "size_mb": round((asset["size"] or 0) / (1024 * 1024), 1),
+        "tag": asset["tag"],
+        "published_at": asset["published_at"],
+        "url": asset["url"],
+        "sha256": asset.get("sha256") or "",
+        "sha256_url": f"{asset['url']}.sha256",
+    }
+
+
+@api_router.get("/download/desktop-exe")
+async def download_desktop_exe():
+    """Redirige al .exe más reciente publicado en GitHub Releases."""
+    asset = await _find_latest_exe_asset()
+    if not asset:
+        repo = _github_exe_repo()
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Aún no hay un .exe publicado. Ejecuta el workflow "
+                f"'Build Windows .exe' en https://github.com/{repo}/actions "
+                f"o publica un tag v* para generar el instalador automáticamente."
+            ),
+        )
+    # 302 → GitHub CDN (descarga directa, sin proxy por nuestro servidor)
+    return RedirectResponse(url=asset["url"], status_code=302)
+
+
 @api_router.get("/download/package")
 async def download_package(request: Request):
     import zipfile

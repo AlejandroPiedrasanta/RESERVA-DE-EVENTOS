@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Monitor, Package, AlertCircle, CheckCircle, XCircle,
-  Loader2, Download, Rocket,
+  Loader2, Download, Rocket, HardDrive, ExternalLink, Shield, Copy,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -125,6 +125,73 @@ export function DesktopAppSection() {
   const isBusy = phase === "building" || phase === "downloading";
   const isError = phase === "error";
   const isDone = phase === "done";
+
+  // ── Descarga .EXE (Windows, sin Python) desde GitHub Releases ───────────
+  // El .exe se compila por GitHub Actions (.github/workflows/build-exe.yml) y
+  // se publica como asset de release: descarga instantánea, sin PyInstaller
+  // en el servidor.
+  const [exeInfo, setExeInfo] = useState(null); // {status, name, size_mb, tag, url, sha256, ...}
+  const [exePhase, setExePhase] = useState("idle"); // idle|loading|downloading|error
+  const [showHashInfo, setShowHashInfo] = useState(false);
+  const [hashCopied, setHashCopied] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setExePhase("loading");
+        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-exe/info`);
+        const j = await r.json();
+        setExeInfo(j);
+      } catch {
+        setExeInfo({ status: "not_available", message: "" });
+      } finally {
+        setExePhase("idle");
+      }
+    })();
+  }, []);
+
+  const handleDownloadExe = async () => {
+    if (!exeInfo || exeInfo.status !== "ready") {
+      // Aún no hay .exe publicado → abre GitHub Actions/Releases en pestaña nueva
+      const url = exeInfo?.workflow_url || exeInfo?.releases_url;
+      if (url) window.open(url, "_blank", "noopener");
+      toast({
+        title: language === "es" ? "Aún no hay .exe publicado" : "No .exe published yet",
+        description: language === "es"
+          ? "Ejecuta el workflow 'Build Windows .exe' en GitHub Actions o publica un tag v*."
+          : "Run the 'Build Windows .exe' workflow on GitHub Actions or push a v* tag.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setExePhase("downloading");
+    try {
+      // Enlace directo al asset (CDN de GitHub) — máxima velocidad, sin proxy
+      const a = document.createElement("a");
+      a.href = exeInfo.url;
+      a.download = exeInfo.name || "CinemaProductions.exe";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast({
+        title: language === "es" ? ".EXE descargando…" : ".EXE downloading…",
+        description: `${exeInfo.name} · ${exeInfo.size_mb} MB · ${exeInfo.tag}`,
+      });
+    } finally {
+      setTimeout(() => setExePhase("idle"), 800);
+    }
+  };
+
+  const copyHash = async () => {
+    if (!exeInfo?.sha256) return;
+    try {
+      await navigator.clipboard.writeText(exeInfo.sha256);
+      setHashCopied(true);
+      setTimeout(() => setHashCopied(false), 1600);
+      toast({ title: language === "es" ? "SHA256 copiado" : "SHA256 copied" });
+    } catch { /* noop */ }
+  };
 
   return (
     <Section
@@ -299,6 +366,130 @@ export function DesktopAppSection() {
                 ? <><Rocket size={16} /> {language === "es" ? "Reintentar" : "Retry"}</>
                 : <><Package size={16} /> {language === "es" ? "Compilar y descargar (.zip)" : "Build & download (.zip)"}</>}
             </motion.button>
+
+            {/* ══ BOTÓN SECUNDARIO: DESCARGAR .EXE (Windows, sin Python) ══ */}
+            <div className="pt-2 border-t border-slate-200/60">
+              <motion.button
+                whileHover={{ scale: exePhase === "downloading" ? 1 : 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={handleDownloadExe}
+                disabled={exePhase === "downloading" || exePhase === "loading"}
+                data-testid="desktop-download-exe-btn"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black text-white shadow-md transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                style={{
+                  background: exeInfo?.status === "ready"
+                    ? "linear-gradient(135deg, #0f172a, #1e293b)"
+                    : "linear-gradient(135deg, #64748b, #475569)"
+                }}
+              >
+                {exePhase === "loading"
+                  ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Consultando release…" : "Fetching release…"}</>
+                  : exePhase === "downloading"
+                  ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Descargando .EXE…" : "Downloading .EXE…"}</>
+                  : exeInfo?.status === "ready"
+                  ? <><HardDrive size={16} /> {language === "es" ? "Descargar .EXE (Windows, sin Python)" : "Download .EXE (Windows, no Python)"}</>
+                  : <><ExternalLink size={16} /> {language === "es" ? "Publicar .EXE en GitHub Actions" : "Publish .EXE via GitHub Actions"}</>}
+              </motion.button>
+
+              {/* Info del release / instrucciones */}
+              <div className="mt-2 flex items-center justify-between text-[10px] font-semibold">
+                {exeInfo?.status === "ready" ? (
+                  <>
+                    <span className="text-slate-500">
+                      {exeInfo.name} · <span className="text-slate-700">{exeInfo.size_mb} MB</span> · <span className="text-slate-700">{exeInfo.tag}</span>
+                    </span>
+                    <span className="text-emerald-600 flex items-center gap-1">
+                      <CheckCircle size={11} />
+                      {language === "es" ? "Descarga instantánea" : "Instant download"}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-500 leading-tight">
+                    {language === "es"
+                      ? "El .exe se compila por GitHub Actions (build-exe.yml) y se publica en Releases. Descarga inmediata, sin Python en el equipo del cliente."
+                      : "The .exe is built by GitHub Actions (build-exe.yml) and published to Releases. Instant download, no Python needed on the client."}
+                  </span>
+                )}
+              </div>
+
+              {/* ── SHA256 (verificación de integridad) ─────────────────── */}
+              {exeInfo?.status === "ready" && exeInfo?.sha256 && (
+                <div
+                  data-testid="desktop-exe-sha256"
+                  className="mt-2 rounded-xl border border-slate-200/70 bg-gradient-to-br from-slate-50 to-white overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowHashInfo(v => !v)}
+                    className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-50/80 transition-colors"
+                    data-testid="desktop-exe-sha256-toggle"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Shield size={12} className="text-emerald-600 flex-shrink-0" />
+                      <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex-shrink-0">
+                        SHA256
+                      </span>
+                      <code className="text-[10px] font-mono text-slate-700 truncate">
+                        {exeInfo.sha256.slice(0, 16)}…{exeInfo.sha256.slice(-8)}
+                      </code>
+                    </div>
+                    <div
+                      onClick={(e) => { e.stopPropagation(); copyHash(); }}
+                      role="button"
+                      tabIndex={0}
+                      data-testid="desktop-exe-sha256-copy"
+                      className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700 transition-colors flex-shrink-0 cursor-pointer"
+                    >
+                      {hashCopied ? <CheckCircle size={11} /> : <Copy size={11} />}
+                      {hashCopied
+                        ? (language === "es" ? "Copiado" : "Copied")
+                        : (language === "es" ? "Copiar" : "Copy")}
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showHashInfo && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="border-t border-slate-200/70"
+                      >
+                        <div className="px-3 py-2.5 space-y-2">
+                          <p className="text-[10px] text-slate-600 leading-relaxed">
+                            {language === "es"
+                              ? "Verifica que el .exe descargado no fue alterado. Abre PowerShell donde lo descargaste y ejecuta:"
+                              : "Verify the downloaded .exe was not tampered with. Open PowerShell where you downloaded it and run:"}
+                          </p>
+                          <code className="block px-2.5 py-1.5 rounded-md bg-slate-900 text-emerald-300 text-[10px] font-mono whitespace-pre overflow-x-auto">
+{`Get-FileHash .\\${exeInfo.name} -Algorithm SHA256`}
+                          </code>
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            {language === "es"
+                              ? "El hash devuelto debe coincidir exactamente con:"
+                              : "The returned hash must match exactly:"}
+                          </p>
+                          <code className="block px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-mono break-all">
+                            {exeInfo.sha256}
+                          </code>
+                          {exeInfo.sha256_url && (
+                            <a
+                              href={exeInfo.sha256_url}
+                              target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 underline"
+                            >
+                              <ExternalLink size={10} />
+                              {language === "es" ? "Descargar archivo .sha256" : "Download .sha256 file"}
+                            </a>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
