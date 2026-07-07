@@ -47,12 +47,12 @@ export const PRESETS = [
 ];
 
 export const CURRENCIES = [
-  { code: "GTQ", symbol: "Q",  name: "Quetzal Guatemalteco", locale: "es-GT" },
-  { code: "MXN", symbol: "$",  name: "Peso Mexicano",        locale: "es-MX" },
-  { code: "USD", symbol: "$",  name: "US Dollar",            locale: "en-US" },
-  { code: "EUR", symbol: "€",  name: "Euro",                 locale: "es-ES" },
-  { code: "COP", symbol: "$",  name: "Peso Colombiano",      locale: "es-CO" },
-  { code: "HNL", symbol: "L",  name: "Lempira Hondureño",    locale: "es-HN" },
+  { code: "GTQ", symbol: "Q",  name: "Quetzal Guatemalteco", locale: "es-GT", flag: "🇬🇹", country: "Guatemala" },
+  { code: "MXN", symbol: "$",  name: "Peso Mexicano",        locale: "es-MX", flag: "🇲🇽", country: "México" },
+  { code: "USD", symbol: "$",  name: "US Dollar",            locale: "en-US", flag: "🇺🇸", country: "Estados Unidos" },
+  { code: "EUR", symbol: "€",  name: "Euro",                 locale: "es-ES", flag: "🇪🇺", country: "Eurozona" },
+  { code: "COP", symbol: "$",  name: "Peso Colombiano",      locale: "es-CO", flag: "🇨🇴", country: "Colombia" },
+  { code: "HNL", symbol: "L",  name: "Lempira Hondureño",    locale: "es-HN", flag: "🇭🇳", country: "Honduras" },
 ];
 
 export const DEFAULT_STATUSES = [
@@ -1059,9 +1059,12 @@ export function SettingsProvider({ children }) {
     return new Intl.NumberFormat(cur.locale, { style: "currency", currency: cur.code, maximumFractionDigits: 0 }).format(n || 0);
   }, [currency]);
 
+  const currencyInfo = CURRENCIES.find(c => c.code === currency) || CURRENCIES[0];
+  const currencySymbol = currencyInfo.symbol;
+
   return (
     <SettingsContext.Provider value={{
-      language, currency, theme, tr, formatCurrency,
+      language, currency, theme, tr, formatCurrency, currencyInfo, currencySymbol,
       changeLanguage, changeCurrency, changeTheme,
       preset, animations, radius, pdfTheme,
       changePreset, changeAnimations, changeRadius, changePdfTheme,

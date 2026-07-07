@@ -31,10 +31,21 @@ const PACKAGES = [
 
 export default function ReservationForm({ reservation, onClose, onSaved }) {
   const { toast } = useToast();
-  const { tr, activeStatuses, formFieldsVisibility } = useSettings();
+  const { tr, activeStatuses, formFieldsVisibility, currencySymbol, formatCurrency, currencyInfo } = useSettings();
   const f = tr.form;
   const ff = formFieldsVisibility || {};
   const isEdit = !!reservation;
+
+  // Renders the active currency symbol styled like a lucide icon (Q, $, €, L…)
+  const CurrencyGlyph = ({ size = 16, className = "" }) => (
+    <span
+      className={className}
+      aria-hidden="true"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.95), fontWeight: 900, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+    >
+      {currencySymbol}
+    </span>
+  );
 
   const [form, setForm] = useState({
     client_name: "Desconocido", client_phone: "", client_email: "",
@@ -494,7 +505,7 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                <UField icon={DollarSign} label={`${f.totalAmount} *`} dirty={isDirtyField("total_amount")} testId="field-total">
+                <UField icon={CurrencyGlyph} label={`${f.totalAmount} *`} dirty={isDirtyField("total_amount")} testId="field-total">
                   <input type="number" value={form.total_amount} onChange={set("total_amount")} placeholder="50,000" min="0" step="0.01" required
                          data-testid="input-total" />
                 </UField>
@@ -505,10 +516,10 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
                   </UField>
                 )}
                 <div className="ultra-field flex flex-col justify-end">
-                  <label className="ultra-label"><DollarSign size={12} /> Saldo</label>
+                  <label className="ultra-label"><CurrencyGlyph size={12} /> Saldo</label>
                   <div className="relative rounded-2xl px-4 py-3.5 border border-white/15 bg-white/5 overflow-hidden">
                     <div className="text-white font-black text-lg tracking-tight">
-                      Q{balance.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {formatCurrency(balance)}
                     </div>
                     <div className="mt-2 h-1.5 rounded-full bg-white/10 overflow-hidden">
                       <motion.div

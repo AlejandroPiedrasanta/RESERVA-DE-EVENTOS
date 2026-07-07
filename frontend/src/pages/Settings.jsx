@@ -40,7 +40,7 @@ function buildWhatsappLink(phone, events) {
 
 export default function Settings() {
   const [searchQuery, setSearchQuery] = useState("");
-  const { language, currency, tr, changeLanguage, changeCurrency } = useSettings();
+  const { language, currency, tr, changeLanguage, changeCurrency, formatCurrency } = useSettings();
   const { requestPermission, showNotification, startPolling } = useNotifications();
   const { toast } = useToast();
   const s = tr.settings;
@@ -607,18 +607,119 @@ export default function Settings() {
           </div>
         </Section>
 
-        {/* Currency */}
+        {/* Currency — rediseñada con banderas e iconos animados */}
         <Section icon={DollarSign} title={s.currencyTitle} desc={s.currencyDesc}>
-          <div className="grid grid-cols-3 gap-2">
-            {CURRENCIES.map(c => (
-              <motion.button key={c.code} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                onClick={() => changeCurrency(c.code)} data-testid={`currency-${c.code}`}
-                className={`flex flex-col items-center py-3 px-2 rounded-2xl text-xs font-bold transition-all ${currency === c.code ? "btn-primary text-white" : "glass border-white/60 text-slate-600 hover:bg-white/50"}`}>
-                <span className="text-base font-black">{c.symbol} {c.code}</span>
-                <span className={`text-[10px] mt-0.5 ${currency === c.code ? "text-white/70" : "text-slate-400"}`}>{c.name}</span>
-              </motion.button>
-            ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {CURRENCIES.map((c, idx) => {
+              const active = currency === c.code;
+              return (
+                <motion.button
+                  key={c.code}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05, type: "spring", stiffness: 220, damping: 20 }}
+                  whileHover={{ y: -4, scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => {
+                    changeCurrency(c.code);
+                    toast({ title: `${c.flag} ${c.name}`, description: language === "es" ? `Moneda cambiada a ${c.code} (${c.symbol})` : `Currency changed to ${c.code} (${c.symbol})` });
+                  }}
+                  data-testid={`currency-${c.code}`}
+                  className={`relative overflow-hidden flex flex-col items-center gap-1.5 py-4 px-3 rounded-3xl transition-all duration-300 ${active ? "btn-primary text-white shadow-lg" : "glass border-white/60 text-slate-600 hover:bg-white/60 hover:shadow-md"}`}
+                >
+                  {/* Glow animado del fondo cuando está activo */}
+                  {active && (
+                    <motion.span
+                      layoutId="currency-active-glow"
+                      className="absolute inset-0 pointer-events-none"
+                      style={{ background: "radial-gradient(circle at 50% 20%, rgba(255,255,255,0.35), transparent 65%)" }}
+                      transition={{ type: "spring", damping: 24, stiffness: 260 }}
+                    />
+                  )}
+
+                  {/* Bandera animada */}
+                  <motion.span
+                    className="relative text-3xl leading-none"
+                    animate={active ? { rotate: [0, -8, 8, -4, 0], y: [0, -3, 0] } : { rotate: 0, y: 0 }}
+                    transition={active ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0.3 }}
+                    whileHover={{ scale: 1.25, rotate: [0, -12, 12, 0], transition: { duration: 0.5 } }}
+                    style={{ filter: "drop-shadow(0 3px 6px rgba(0,0,0,0.18))" }}
+                  >
+                    {c.flag}
+                  </motion.span>
+
+                  {/* Símbolo + código */}
+                  <span className="relative flex items-baseline gap-1">
+                    <motion.span
+                      className="text-lg font-black"
+                      animate={active ? { scale: [1, 1.15, 1] } : { scale: 1 }}
+                      transition={active ? { duration: 1.8, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+                    >
+                      {c.symbol}
+                    </motion.span>
+                    <span className="text-sm font-black tracking-wide">{c.code}</span>
+                  </span>
+
+                  {/* Nombre */}
+                  <span className={`relative text-[10px] font-semibold text-center leading-tight ${active ? "text-white/80" : "text-slate-400"}`}>
+                    {c.name}
+                  </span>
+
+                  {/* Check animado */}
+                  <AnimatePresence>
+                    {active && (
+                      <motion.span
+                        initial={{ scale: 0, rotate: -90, opacity: 0 }}
+                        animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 16 }}
+                        className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow-md"
+                      >
+                        <CheckCircle2 size={14} className="text-emerald-500" strokeWidth={3} />
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </motion.button>
+              );
+            })}
           </div>
+
+          {/* Vista previa en vivo del formato de moneda */}
+          <motion.div
+            key={currency}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="mt-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3 glass border-white/60"
+          >
+            <div className="flex items-center gap-2.5">
+              <motion.span
+                animate={{ rotate: [0, -6, 6, 0] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                className="text-2xl leading-none"
+              >
+                {(CURRENCIES.find(c => c.code === currency) || CURRENCIES[0]).flag}
+              </motion.span>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  {language === "es" ? "Vista previa" : "Preview"}
+                </p>
+                <p className="text-[11px] font-semibold text-slate-500 leading-tight">
+                  {(CURRENCIES.find(c => c.code === currency) || CURRENCIES[0]).country}
+                </p>
+              </div>
+            </div>
+            <motion.span
+              key={`prev-${currency}`}
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 240, damping: 18 }}
+              className="text-xl font-black gradient-text"
+              style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+            >
+              {formatCurrency(1250)}
+            </motion.span>
+          </motion.div>
         </Section>
 
         {/* ── ZONA HORARIA ───────────────────────── */}
