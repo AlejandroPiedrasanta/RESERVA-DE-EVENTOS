@@ -64,10 +64,49 @@ Aplicación **full-stack** para la gestión y reserva de eventos de Cinema Produ
 
 ---
 
+## ⬇️ Descargas por plataforma
+
+Todos los binarios llevan el nuevo ícono de la app y se publican automáticamente desde GitHub Actions. Un solo clic → doble clic → funciona.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/latest/download/CinemaProductions-Setup.exe">
+        <img src="https://img.shields.io/badge/Windows-Instalador-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Descargar instalador Windows" />
+      </a><br/><sub>Windows 10/11 · Recomendado</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/latest/download/CinemaProductions.exe">
+        <img src="https://img.shields.io/badge/Windows-Portable-1E90FF?style=for-the-badge&logo=windows&logoColor=white" alt="Descargar exe portable" />
+      </a><br/><sub>Windows · Sin instalar</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/latest/download/CinemaProductions-macos-arm64">
+        <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Descargar binario macOS ARM64" />
+      </a><br/><sub>Apple Silicon (M1/M2/M3/M4)</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/latest/download/CinemaProductions-linux-x86_64">
+        <img src="https://img.shields.io/badge/Linux-x86__64-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Descargar binario Linux x86_64" />
+      </a><br/><sub>Ubuntu, Debian, Fedora…</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/latest/download/CinemaProductions-linux-arm64">
+        <img src="https://img.shields.io/badge/Linux-ARM64-A81D33?style=for-the-badge&logo=linux&logoColor=white" alt="Descargar binario Linux ARM64" />
+      </a><br/><sub>Raspberry Pi 4/5 · Graviton</sub>
+    </td>
+  </tr>
+</table>
+
+<sub>Cada asset incluye su archivo `.sha256`. Verifica la integridad antes de ejecutar en producción. [Ver todas las releases →](https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases)</sub>
+
+---
+
 ## 📚 Tabla de contenido
 
 - [Planes y precios](#-planes-y-precios)
 - [Vista previa](#-vista-previa)
+- [Descargas por plataforma](#️-descargas-por-plataforma)
 - [Descarga rápida (Windows)](#-descarga-rápida-windows)
 - [Características](#-características)
 - [Arquitectura](#-arquitectura)
