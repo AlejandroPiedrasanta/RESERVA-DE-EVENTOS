@@ -5078,6 +5078,27 @@ def _get_local_commit_sha():
     return ""
 
 
+def _is_frozen_bundle() -> bool:
+    """True cuando la app corre desde un ejecutable empaquetado (PyInstaller
+    onefile/onedir) — en este caso las actualizaciones vía `git` no aplican
+    porque no existe un repositorio funcional junto al binario congelado."""
+    import sys as _sys
+    return bool(getattr(_sys, "frozen", False) or hasattr(_sys, "_MEIPASS"))
+
+
+def _bundle_kind() -> str:
+    """Distingue 'portable' vs 'installer' cuando corremos como .exe.
+    Portable => el ejecutable está dentro de una carpeta temporal _MEIPASS
+    junto a un onefile; el instalador de Inno Setup deja el .exe en
+    'Program Files' o similar y define un valor típico en la ruta."""
+    import sys as _sys
+    exe = Path(getattr(_sys, "executable", "") or "").resolve()
+    exe_str = str(exe).lower()
+    if "program files" in exe_str or "\\programdata\\" in exe_str:
+        return "installer"
+    return "portable"
+
+
 @api_router.get("/github/check-updates")
 async def check_github_updates():
     cfg = await _get_github_config()
@@ -5210,6 +5231,52 @@ async def apply_github_update(payload: dict = Body(default={})):
     repo_url = cfg.get("repo_url", "")
     if not repo_url:
         raise HTTPException(status_code=400, detail="No hay repositorio configurado")
+
+    # ── Caso .exe (portable o instalador) ────────────────────────────
+    # En Windows empaquetado con PyInstaller no existe .git ni supervisor,
+    # así que `git fetch/reset` fallaría. En su lugar devolvemos las URLs
+    # de los binarios más recientes publicados en GitHub Releases para que
+    # la UI muestre el botón "Descargar nueva versión".
+    if _is_frozen_bundle():
+        kind = _bundle_kind()
+        portable = await _find_latest_exe_asset("portable")
+        installer = await _find_latest_exe_asset("installer")
+        asset = installer if kind == "installer" else portable
+        if not asset:
+            return {
+                "success": False,
+                "status": "desktop_update",
+                "mode": "desktop_bundle",
+                "bundle_kind": kind,
+                "message": (
+                    "No hay una versión nueva publicada aún. Ejecuta el workflow "
+                    "'Build Windows .exe' en GitHub Actions o publica un tag v* "
+                    "para generar el instalador y el portable."
+                ),
+                "portable": portable,
+                "installer": installer,
+            }
+        friendly = (
+            "Estás usando la versión portable: no puede reemplazarse a sí misma "
+            "en caliente. Descarga la nueva versión desde el enlace, cierra la app "
+            "y sustituye el .exe (o instala el instalador para futuras "
+            "actualizaciones automáticas)."
+            if kind == "portable"
+            else "Descarga e inicia el instalador. Se actualizará sobre la instalación actual y reiniciará la app."
+        )
+        return {
+            "success": False,
+            "status": "desktop_update",
+            "mode": "desktop_bundle",
+            "bundle_kind": kind,
+            "message": friendly,
+            "download_url": asset["url"],
+            "download_name": asset["name"],
+            "download_size_mb": round((asset.get("size") or 0) / (1024 * 1024), 1),
+            "tag": asset.get("tag"),
+            "portable": portable,
+            "installer": installer,
+        }
 
     branch = cfg.get("branch") or "main"
     force = bool(payload.get("force", True))  # por defecto reset --hard
