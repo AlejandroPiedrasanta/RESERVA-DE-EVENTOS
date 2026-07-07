@@ -2739,9 +2739,12 @@ def _github_exe_repo() -> str:
     return v or _DEFAULT_EXE_REPO
 
 
-async def _find_latest_exe_asset() -> dict | None:
-    """Busca el asset .exe más reciente en Releases del repo. Devuelve dict con
-    keys: name, size, url, tag, published_at, browser_download_url, sha256 — o None.
+async def _find_latest_exe_asset(kind: str = "portable") -> dict | None:
+    """Busca el asset .exe más reciente en Releases del repo.
+    kind='portable' → excluye archivos con 'setup' en el nombre.
+    kind='installer' → sólo archivos que contengan 'setup' (case-insensitive).
+    Devuelve dict con keys: name, size, url, tag, published_at,
+    browser_download_url, sha256 — o None.
     El sha256 se resuelve leyendo el asset .sha256 hermano (si existe) o
     extrayéndolo del body del release (patrón hexadecimal de 64 chars)."""
     repo = _github_exe_repo()
@@ -2750,17 +2753,29 @@ async def _find_latest_exe_asset() -> dict | None:
     if tok:
         headers["Authorization"] = f"Bearer {tok}"
 
+    def _matches(name: str) -> bool:
+        n = (name or "").lower()
+        if not n.endswith(".exe"):
+            return False
+        is_setup = "setup" in n or "installer" in n
+        return is_setup if kind == "installer" else not is_setup
+
     async def _extract(rel: dict, client: httpx.AsyncClient) -> dict | None:
         exe_asset = None
         sha_asset = None
         for a in rel.get("assets") or []:
-            n = (a.get("name") or "").lower()
-            if n.endswith(".exe"):
+            n = (a.get("name") or "")
+            if _matches(n):
                 exe_asset = a
-            elif n.endswith(".exe.sha256") or n.endswith(".sha256"):
-                sha_asset = a
         if not exe_asset:
             return None
+        # Buscar el .sha256 hermano cuyo nombre empiece con el del .exe
+        exe_name_lower = exe_asset["name"].lower()
+        for a in rel.get("assets") or []:
+            an = (a.get("name") or "").lower()
+            if an.endswith(".sha256") and an.startswith(exe_name_lower):
+                sha_asset = a
+                break
         sha256 = ""
         # 1) Intentar leer del asset .sha256 hermano
         if sha_asset:
@@ -2773,12 +2788,21 @@ async def _find_latest_exe_asset() -> dict | None:
                         sha256 = m.group(1).lower()
             except Exception as e:
                 logger.warning(f"No se pudo leer sha256 asset: {e}")
-        # 2) Fallback: extraer del body del release
+        # 2) Fallback: extraer del body del release (busca hash junto al nombre del asset)
         if not sha256:
             body = rel.get("body") or ""
-            m = re.search(r"\b([a-fA-F0-9]{64})\b", body)
-            if m:
-                sha256 = m.group(1).lower()
+            # Buscar hash específico para este exe (línea que mencione el nombre)
+            for line in body.splitlines():
+                if exe_asset["name"] in line:
+                    m = re.search(r"\b([a-fA-F0-9]{64})\b", line)
+                    if m:
+                        sha256 = m.group(1).lower()
+                        break
+            # Último fallback: cualquier hash del body (sólo si sólo hay 1 tipo)
+            if not sha256:
+                m = re.search(r"\b([a-fA-F0-9]{64})\b", body)
+                if m and kind == "portable":  # evitar mezclar hashes entre kinds
+                    sha256 = m.group(1).lower()
         return {
             "name": exe_asset["name"], "size": exe_asset.get("size") or 0,
             "url": exe_asset["browser_download_url"],
@@ -2814,7 +2838,7 @@ async def _find_latest_exe_asset() -> dict | None:
 async def download_desktop_exe_info():
     """Metadata del último .exe disponible (tamaño, versión, URL). Si no hay
     release aún, devuelve status='not_available' con instrucciones."""
-    asset = await _find_latest_exe_asset()
+    asset = await _find_latest_exe_asset("portable")
     repo = _github_exe_repo()
     if not asset:
         return {
@@ -2845,7 +2869,7 @@ async def download_desktop_exe_info():
 @api_router.get("/download/desktop-exe")
 async def download_desktop_exe():
     """Redirige al .exe más reciente publicado en GitHub Releases."""
-    asset = await _find_latest_exe_asset()
+    asset = await _find_latest_exe_asset("portable")
     if not asset:
         repo = _github_exe_repo()
         raise HTTPException(
@@ -2857,6 +2881,54 @@ async def download_desktop_exe():
             ),
         )
     # 302 → GitHub CDN (descarga directa, sin proxy por nuestro servidor)
+    return RedirectResponse(url=asset["url"], status_code=302)
+
+
+@api_router.get("/download/desktop-installer/info")
+async def download_desktop_installer_info():
+    """Metadata del último instalador .exe (Inno Setup) publicado en GitHub
+    Releases. Filtra assets cuyo nombre contenga 'Setup' o 'installer'."""
+    asset = await _find_latest_exe_asset("installer")
+    repo = _github_exe_repo()
+    if not asset:
+        return {
+            "status": "not_available",
+            "repo": repo,
+            "workflow_url": f"https://github.com/{repo}/actions/workflows/build-exe.yml",
+            "releases_url": f"https://github.com/{repo}/releases",
+            "message": (
+                "Aún no hay un instalador publicado. Ejecuta el workflow "
+                "'Build Windows .exe' en GitHub Actions — genera CinemaProductions-Setup.exe "
+                "automáticamente además del portable."
+            ),
+        }
+    return {
+        "status": "ready",
+        "repo": repo,
+        "name": asset["name"],
+        "size": asset["size"],
+        "size_mb": round((asset["size"] or 0) / (1024 * 1024), 1),
+        "tag": asset["tag"],
+        "published_at": asset["published_at"],
+        "url": asset["url"],
+        "sha256": asset.get("sha256") or "",
+        "sha256_url": f"{asset['url']}.sha256",
+    }
+
+
+@api_router.get("/download/desktop-installer")
+async def download_desktop_installer():
+    """Redirige al instalador (.exe con Inno Setup) más reciente."""
+    asset = await _find_latest_exe_asset("installer")
+    if not asset:
+        repo = _github_exe_repo()
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Aún no hay un instalador publicado. Ejecuta el workflow "
+                f"'Build Windows .exe' en https://github.com/{repo}/actions."
+            ),
+        )
     return RedirectResponse(url=asset["url"], status_code=302)
 
 

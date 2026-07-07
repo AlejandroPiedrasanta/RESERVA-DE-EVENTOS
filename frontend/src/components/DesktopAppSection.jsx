@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Monitor, Package, AlertCircle, CheckCircle, XCircle,
   Loader2, Download, Rocket, HardDrive, ExternalLink, Shield, Copy,
+  DownloadCloud, Sparkles,
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -130,30 +131,41 @@ export function DesktopAppSection() {
   // El .exe se compila por GitHub Actions (.github/workflows/build-exe.yml) y
   // se publica como asset de release: descarga instantánea, sin PyInstaller
   // en el servidor.
+  //   · exeInfo       → CinemaProductions.exe (portable)
+  //   · installerInfo → CinemaProductions-Setup.exe (Inno Setup, se instala)
   const [exeInfo, setExeInfo] = useState(null); // {status, name, size_mb, tag, url, sha256, ...}
   const [exePhase, setExePhase] = useState("idle"); // idle|loading|downloading|error
+  const [installerInfo, setInstallerInfo] = useState(null);
+  const [installerPhase, setInstallerPhase] = useState("idle");
   const [showHashInfo, setShowHashInfo] = useState(false);
   const [hashCopied, setHashCopied] = useState(false);
+  const [showInstallerHashInfo, setShowInstallerHashInfo] = useState(false);
+  const [installerHashCopied, setInstallerHashCopied] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         setExePhase("loading");
-        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-exe/info`);
-        const j = await r.json();
-        setExeInfo(j);
+        setInstallerPhase("loading");
+        const [r1, r2] = await Promise.all([
+          fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-exe/info`),
+          fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-installer/info`),
+        ]);
+        setExeInfo(await r1.json());
+        setInstallerInfo(await r2.json());
       } catch {
         setExeInfo({ status: "not_available", message: "" });
+        setInstallerInfo({ status: "not_available", message: "" });
       } finally {
         setExePhase("idle");
+        setInstallerPhase("idle");
       }
     })();
   }, []);
 
-  const handleDownloadExe = async () => {
-    if (!exeInfo || exeInfo.status !== "ready") {
-      // Aún no hay .exe publicado → abre GitHub Actions/Releases en pestaña nueva
-      const url = exeInfo?.workflow_url || exeInfo?.releases_url;
+  const _triggerDownload = (info, phaseSetter, fallbackName) => {
+    if (!info || info.status !== "ready") {
+      const url = info?.workflow_url || info?.releases_url;
       if (url) window.open(url, "_blank", "noopener");
       toast({
         title: language === "es" ? "Aún no hay .exe publicado" : "No .exe published yet",
@@ -164,24 +176,26 @@ export function DesktopAppSection() {
       });
       return;
     }
-    setExePhase("downloading");
+    phaseSetter("downloading");
     try {
-      // Enlace directo al asset (CDN de GitHub) — máxima velocidad, sin proxy
       const a = document.createElement("a");
-      a.href = exeInfo.url;
-      a.download = exeInfo.name || "CinemaProductions.exe";
+      a.href = info.url;
+      a.download = info.name || fallbackName;
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       toast({
         title: language === "es" ? ".EXE descargando…" : ".EXE downloading…",
-        description: `${exeInfo.name} · ${exeInfo.size_mb} MB · ${exeInfo.tag}`,
+        description: `${info.name} · ${info.size_mb} MB · ${info.tag}`,
       });
     } finally {
-      setTimeout(() => setExePhase("idle"), 800);
+      setTimeout(() => phaseSetter("idle"), 800);
     }
   };
+
+  const handleDownloadExe = () => _triggerDownload(exeInfo, setExePhase, "CinemaProductions.exe");
+  const handleDownloadInstaller = () => _triggerDownload(installerInfo, setInstallerPhase, "CinemaProductions-Setup.exe");
 
   const copyHash = async () => {
     if (!exeInfo?.sha256) return;
@@ -189,6 +203,16 @@ export function DesktopAppSection() {
       await navigator.clipboard.writeText(exeInfo.sha256);
       setHashCopied(true);
       setTimeout(() => setHashCopied(false), 1600);
+      toast({ title: language === "es" ? "SHA256 copiado" : "SHA256 copied" });
+    } catch { /* noop */ }
+  };
+
+  const copyInstallerHash = async () => {
+    if (!installerInfo?.sha256) return;
+    try {
+      await navigator.clipboard.writeText(installerInfo.sha256);
+      setInstallerHashCopied(true);
+      setTimeout(() => setInstallerHashCopied(false), 1600);
       toast({ title: language === "es" ? "SHA256 copiado" : "SHA256 copied" });
     } catch { /* noop */ }
   };

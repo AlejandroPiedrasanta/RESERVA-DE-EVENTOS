@@ -112,6 +112,108 @@ jobs:
           "sha256=$sha" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
           "size_mb=$([math]::Round($size,2))" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
 
+      # ── INSTALADOR (Inno Setup) ─────────────────────────────────────────
+      # Envuelve el .exe portable en un instalador de Windows que:
+      #   · Se instala en %LocalAppData%\CinemaProductions (sin permisos admin)
+      #   · Crea acceso directo en Escritorio + menú Inicio
+      #   · Auto-lanza la app al terminar la instalación
+      #   · Registra un desinstalador en Aplicaciones y Características
+      - name: Determine app version
+        id: appver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            V="${GITHUB_REF#refs/tags/v}"
+          elif [ -f version.txt ]; then
+            V=$(cat version.txt | tr -d '[:space:]')
+          else
+            V="1.0.0"
+          fi
+          # Inno Setup requiere formato X.Y[.Z[.W]] con solo dígitos
+          V_CLEAN=$(echo "$V" | grep -oE '^[0-9]+(\.[0-9]+){0,3}' || echo "1.0.0")
+          [ -z "$V_CLEAN" ] && V_CLEAN="1.0.0"
+          echo "version=$V_CLEAN" >> $GITHUB_OUTPUT
+
+      - name: Write Inno Setup script
+        shell: pwsh
+        run: |
+          $iss = @'
+#define MyAppName        "Cinema Productions"
+#define MyAppExeName     "CinemaProductions.exe"
+#define MyAppPublisher   "Alejandro Piedrasanta"
+#define MyAppURL         "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
+
+[Setup]
+AppId={{9D5F3BCE-4E1B-4B4F-A0F8-CINEMAPROD01}}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}/releases
+; Instala en %LocalAppData% → NO requiere permisos de administrador
+DefaultDirName={localappdata}\CinemaProductions
+DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+OutputDir=..\dist
+OutputBaseFilename=CinemaProductions-Setup
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed=x64compatible
+UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayName={#MyAppName} {#MyAppVersion}
+SetupIconFile=..\frontend\public\favicon.ico
+CloseApplications=force
+RestartApplications=no
+
+[Languages]
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+
+[Files]
+Source: "CinemaProductions.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+; Auto-ejecuta la app al finalizar la instalación
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+'@
+          # Escribir en dist/ para que las rutas relativas resuelvan a los archivos ya compilados
+          Set-Content -Path dist/installer.iss -Value $iss -Encoding UTF8
+
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup no encontrado en $iscc" }
+          & $iscc "/DMyAppVersion=${{ steps.appver.outputs.version }}" dist\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup falló con exit $LASTEXITCODE" }
+
+      - name: Verify installer & compute SHA256
+        id: hashsetup
+        shell: pwsh
+        run: |
+          $setup = "dist/CinemaProductions-Setup.exe"
+          if (-not (Test-Path $setup)) { throw "No se generó el instalador" }
+          $size = (Get-Item $setup).Length / 1MB
+          Write-Host "✓ Instalador generado: $([math]::Round($size,2)) MB"
+          $sha = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
+          Write-Host "Setup SHA256: $sha"
+          "$sha  CinemaProductions-Setup.exe" | Out-File -Encoding ascii -NoNewline dist/CinemaProductions-Setup.exe.sha256
+          "sha256=$sha" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
+          "size_mb=$([math]::Round($size,2))" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
+
       - name: Determine release tag
         id: tag
         shell: bash
@@ -135,23 +237,34 @@ jobs:
           files: |
             dist/CinemaProductions.exe
             dist/CinemaProductions.exe.sha256
+            dist/CinemaProductions-Setup.exe
+            dist/CinemaProductions-Setup.exe.sha256
           body: |
-            **CinemaProductions.exe** — Windows (sin Python requerido).
+            ## Cinema Productions — Windows
 
-            Descárgalo y ejecútalo. Se abre el navegador con la app corriendo
-            100 % local en tu equipo (base de datos embebida por defecto).
+            Dos opciones de descarga, ambas sin necesidad de Python:
 
-            **Tamaño:** ${{ steps.hash.outputs.size_mb }} MB
-            **SHA256:** `${{ steps.hash.outputs.sha256 }}`
+            ### 📥 Instalador (recomendado)
+            **`CinemaProductions-Setup.exe`** — `${{ steps.hashsetup.outputs.size_mb }} MB`
+            Doble clic → se instala en `%LocalAppData%\CinemaProductions`, crea accesos directos y lanza la app automáticamente. No requiere permisos de administrador.
 
+            SHA256: `${{ steps.hashsetup.outputs.sha256 }}`
+
+            ### 💾 Ejecutable portable
+            **`CinemaProductions.exe`** — `${{ steps.hash.outputs.size_mb }} MB`
+            Doble clic → arranca la app sin instalar nada. Ideal para USB o pruebas rápidas.
+
+            SHA256: `${{ steps.hash.outputs.sha256 }}`
+
+            ---
             ### Verificar integridad (Windows PowerShell)
             ```powershell
-            Get-FileHash .\CinemaProductions.exe -Algorithm SHA256
-            # Debe coincidir exactamente con el hash de arriba
+            Get-FileHash .\CinemaProductions-Setup.exe -Algorithm SHA256
+            Get-FileHash .\CinemaProductions.exe       -Algorithm SHA256
             ```
 
             Si Windows SmartScreen te advierte: pulsa *Más información → Ejecutar de todos modos*.
-            El binario está compilado por GitHub Actions desde el commit `${{ github.sha }}`.
+            Compilado por GitHub Actions desde el commit `${{ github.sha }}`.
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
