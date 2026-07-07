@@ -8,6 +8,7 @@ import ReservationForm from "@/components/ReservationForm";
 import { getEventConfig } from "@/lib/eventConfig";
 import MonthlyEventsBanner from "@/components/MonthlyEventsBanner";
 import EventNotificationPopup from "@/components/EventNotificationPopup";
+import NextEventReminderPopup from "@/components/NextEventReminderPopup";
 import AnimatedEventTypeCard from "@/components/AnimatedEventTypeCard";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
@@ -362,6 +363,16 @@ export default function Dashboard() {
           monthName={currentMonthName}
           language={language}
           onView={() => navigate("/reservaciones")}
+        />
+      )}
+
+      {/* One-time reminder popup for the next upcoming event (today / tomorrow / soon) */}
+      {!loading && nextEvent && (
+        <NextEventReminderPopup
+          event={nextEvent}
+          daysToNext={daysToNext}
+          language={language}
+          onView={(ev) => navigate(`/reservaciones/${ev.id}`)}
         />
       )}
 
