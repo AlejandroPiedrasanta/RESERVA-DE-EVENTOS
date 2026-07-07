@@ -151,9 +151,24 @@ jobs:
           else
             V="1.0.0"
           fi
-          # Inno Setup requiere formato X.Y[.Z[.W]] con solo dígitos
-          V_CLEAN=$(echo "$V" | grep -oE '^[0-9]+(\.[0-9]+){0,3}' || echo "1.0.0")
+          # Inno Setup requiere formato X.Y[.Z[.W]] con cada segmento entre 0-65535.
+          # Normalizamos: extraemos hasta 4 números, capamos cada uno a 65535 y
+          # garantizamos al menos X.Y.Z (si venía "286811" → "65535.0.0").
+          V_CLEAN=$(echo "$V" | awk -F. '
+            {
+              n = 0
+              for (i = 1; i <= NF && n < 4; i++) {
+                gsub(/[^0-9]/, "", $i)
+                if ($i == "") continue
+                v = $i + 0
+                if (v > 65535) v = 65535
+                out[n++] = v
+              }
+              while (n < 3) out[n++] = 0
+              for (i = 0; i < n; i++) printf (i ? ".%s" : "%s"), out[i]
+            }')
           [ -z "$V_CLEAN" ] && V_CLEAN="1.0.0"
+          echo "Version normalizada: $V (raw) → $V_CLEAN (Inno-safe)"
           echo "version=$V_CLEAN" >> $GITHUB_OUTPUT
 
       - name: Write Inno Setup script
