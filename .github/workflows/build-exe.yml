@@ -47,7 +47,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install pyinstaller==6.11.1
+          pip install "pyinstaller>=6.10,<7"
 
       - name: Install & build frontend
         working-directory: frontend
@@ -58,6 +58,15 @@ jobs:
           # El .exe sirve la UI localmente (mismo host) → apunta a localhost:8001
           REACT_APP_BACKEND_URL: http://127.0.0.1:8001
           CI: false
+
+      - name: Generate favicon.ico from logo.png
+        shell: pwsh
+        run: |
+          # PyInstaller e Inno Setup requieren un .ico válido para --icon.
+          # El repo sólo tiene logo.png, así que lo convertimos multi-tamaño.
+          python -c "from PIL import Image; im=Image.open('frontend/public/logo.png').convert('RGBA'); w,h=im.size; s=max(w,h); c=Image.new('RGBA',(s,s),(0,0,0,0)); c.paste(im,((s-w)//2,(s-h)//2)); c.save('frontend/public/favicon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          if (-not (Test-Path "frontend/public/favicon.ico")) { throw "No se pudo generar favicon.ico" }
+          Write-Host "✓ favicon.ico generado"
 
       - name: Prepare bundle payload
         shell: pwsh
@@ -137,60 +146,10 @@ jobs:
       - name: Write Inno Setup script
         shell: pwsh
         run: |
-          $iss = @'
-#define MyAppName        "Cinema Productions"
-#define MyAppExeName     "CinemaProductions.exe"
-#define MyAppPublisher   "Alejandro Piedrasanta"
-#define MyAppURL         "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
-
-[Setup]
-AppId={{9D5F3BCE-4E1B-4B4F-A0F8-CINEMAPROD01}}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}/releases
-; Instala en %LocalAppData% → NO requiere permisos de administrador
-DefaultDirName={localappdata}\CinemaProductions
-DefaultGroupName={#MyAppName}
-DisableProgramGroupPage=yes
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=..\dist
-OutputBaseFilename=CinemaProductions-Setup
-Compression=lzma2/max
-SolidCompression=yes
-WizardStyle=modern
-ArchitecturesInstallIn64BitMode=x64compatible
-ArchitecturesAllowed=x64compatible
-UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName={#MyAppName} {#MyAppVersion}
-SetupIconFile=..\frontend\public\favicon.ico
-CloseApplications=force
-RestartApplications=no
-
-[Languages]
-Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
-
-[Files]
-Source: "CinemaProductions.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-[Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-[Run]
-; Auto-ejecuta la app al finalizar la instalación
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
-'@
-          # Escribir en dist/ para que las rutas relativas resuelvan a los archivos ya compilados
-          Set-Content -Path dist/installer.iss -Value $iss -Encoding UTF8
+          # Copiar el .iss del repo a dist/ para que las rutas relativas apunten a dist/CinemaProductions.exe
+          if (-not (Test-Path build/installer.iss)) { throw "No existe build/installer.iss en el repo" }
+          Copy-Item build/installer.iss dist/installer.iss -Force
+          Write-Host "✓ installer.iss copiado a dist/"
 
       - name: Build installer with Inno Setup
         shell: pwsh
