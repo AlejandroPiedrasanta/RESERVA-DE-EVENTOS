@@ -255,3 +255,246 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ────────────────────────────────────────────────────────────────────────
+  #  LINUX build (portable binary)
+  # ────────────────────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt
+          pip install "pyinstaller>=6.10,<7" pillow
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          REACT_APP_BACKEND_URL: http://127.0.0.1:8001
+          CI: false
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - name: Prepare bundle payload
+        run: |
+          mkdir -p backend/_bundle
+          cp -r frontend/build backend/_bundle/build
+          [ -f backend/ai_context_default.py ] && cp backend/ai_context_default.py backend/_bundle/
+          [ -f version.txt ] && cp version.txt backend/_bundle/
+          if [ -f themes/saved_themes.json ]; then
+            mkdir -p backend/_bundle/themes
+            cp themes/saved_themes.json backend/_bundle/themes/
+          fi
+
+      - name: Build binary with PyInstaller
+        run: |
+          pyinstaller \
+            --onefile \
+            --name CinemaProductions-linux-x86_64 \
+            --add-data "backend/_bundle/build:build" \
+            --add-data "backend/_bundle/ai_context_default.py:." \
+            --add-data "backend/_bundle/version.txt:." \
+            --add-data "backend/_bundle/themes:themes" \
+            --hidden-import motor.motor_asyncio \
+            --hidden-import pymongo \
+            --hidden-import bson \
+            --hidden-import apscheduler.schedulers.asyncio \
+            --hidden-import apscheduler.triggers.cron \
+            --hidden-import apscheduler.triggers.interval \
+            --hidden-import pywebpush \
+            --hidden-import PIL \
+            --collect-submodules uvicorn \
+            --collect-submodules fastapi \
+            backend/standalone_app.py
+
+      - name: Compute SHA256
+        id: hash
+        run: |
+          BIN="dist/CinemaProductions-linux-x86_64"
+          [ -f "$BIN" ] || { echo "::error::binary no generado"; exit 1; }
+          chmod +x "$BIN"
+          SIZE=$(du -m "$BIN" | cut -f1)
+          SHA=$(sha256sum "$BIN" | awk '{print $1}')
+          echo "$SHA  CinemaProductions-linux-x86_64" > "$BIN.sha256"
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "size_mb=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          files: |
+            dist/CinemaProductions-linux-x86_64
+            dist/CinemaProductions-linux-x86_64.sha256
+          append_body: true
+          body: |
+
+            ---
+            ### 🐧 Linux (portable binary — x86_64)
+            **`CinemaProductions-linux-x86_64`** — `${{ steps.hash.outputs.size_mb }} MB`
+            ```bash
+            chmod +x CinemaProductions-linux-x86_64
+            ./CinemaProductions-linux-x86_64
+            ```
+            SHA256: `${{ steps.hash.outputs.sha256 }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ────────────────────────────────────────────────────────────────────────
+  #  macOS build (portable binary — Apple Silicon)
+  #  Nota: sin firma ni notarización, Gatekeeper pedirá "Abrir de todos modos"
+  #  desde Ajustes → Privacidad y Seguridad la primera vez.
+  # ────────────────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt
+          pip install "pyinstaller>=6.10,<7" pillow
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          REACT_APP_BACKEND_URL: http://127.0.0.1:8001
+          CI: false
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - name: Prepare bundle payload
+        run: |
+          mkdir -p backend/_bundle
+          cp -R frontend/build backend/_bundle/build
+          [ -f backend/ai_context_default.py ] && cp backend/ai_context_default.py backend/_bundle/
+          [ -f version.txt ] && cp version.txt backend/_bundle/
+          if [ -f themes/saved_themes.json ]; then
+            mkdir -p backend/_bundle/themes
+            cp themes/saved_themes.json backend/_bundle/themes/
+          fi
+
+      - name: Generate .icns from logo.png
+        run: |
+          python -c "
+          from PIL import Image
+          import os
+          im = Image.open('frontend/public/logo.png').convert('RGBA')
+          os.makedirs('iconset.iconset', exist_ok=True)
+          sizes = [16,32,64,128,256,512,1024]
+          for s in sizes:
+              im.resize((s,s), Image.LANCZOS).save(f'iconset.iconset/icon_{s}x{s}.png')
+              if s < 1024:
+                  im.resize((s*2,s*2), Image.LANCZOS).save(f'iconset.iconset/icon_{s}x{s}@2x.png')
+          "
+          iconutil -c icns iconset.iconset -o app.icns
+          ls -la app.icns
+
+      - name: Build binary with PyInstaller
+        run: |
+          pyinstaller \
+            --onefile \
+            --name CinemaProductions-macos-arm64 \
+            --icon app.icns \
+            --add-data "backend/_bundle/build:build" \
+            --add-data "backend/_bundle/ai_context_default.py:." \
+            --add-data "backend/_bundle/version.txt:." \
+            --add-data "backend/_bundle/themes:themes" \
+            --hidden-import motor.motor_asyncio \
+            --hidden-import pymongo \
+            --hidden-import bson \
+            --hidden-import apscheduler.schedulers.asyncio \
+            --hidden-import apscheduler.triggers.cron \
+            --hidden-import apscheduler.triggers.interval \
+            --hidden-import pywebpush \
+            --hidden-import PIL \
+            --collect-submodules uvicorn \
+            --collect-submodules fastapi \
+            backend/standalone_app.py
+
+      - name: Compute SHA256
+        id: hash
+        run: |
+          BIN="dist/CinemaProductions-macos-arm64"
+          [ -f "$BIN" ] || { echo "::error::binary no generado"; exit 1; }
+          chmod +x "$BIN"
+          SIZE=$(du -m "$BIN" | cut -f1)
+          SHA=$(shasum -a 256 "$BIN" | awk '{print $1}')
+          echo "$SHA  CinemaProductions-macos-arm64" > "$BIN.sha256"
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "size_mb=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          files: |
+            dist/CinemaProductions-macos-arm64
+            dist/CinemaProductions-macos-arm64.sha256
+          append_body: true
+          body: |
+
+            ---
+            ### 🍎 macOS (portable binary — Apple Silicon)
+            **`CinemaProductions-macos-arm64`** — `${{ steps.hash.outputs.size_mb }} MB`
+            ```bash
+            chmod +x CinemaProductions-macos-arm64
+            xattr -d com.apple.quarantine CinemaProductions-macos-arm64 2>/dev/null || true
+            ./CinemaProductions-macos-arm64
+            ```
+            Sin firma/notarización: la primera vez, Gatekeeper puede bloquearlo. Ve a *Ajustes → Privacidad y Seguridad → Abrir de todos modos*.
+            SHA256: `${{ steps.hash.outputs.sha256 }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
