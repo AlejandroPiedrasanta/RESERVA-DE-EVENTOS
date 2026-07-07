@@ -45,6 +45,10 @@ class OrderReq(BaseModel):
     plan: str  # "monthly" or "lifetime"
 
 
+class RedeemReq(BaseModel):
+    code: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 async def _get_user_by_token(token: Optional[str]):
     if not token:
@@ -324,5 +328,114 @@ async def paypal_capture(
         "raw": data,
         "created_at": now.isoformat(),
     })
+    user = await _db.app_users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {"ok": True, "user": user, "subscription": _subscription_state(user)}
+
+
+
+# ── Referral Endpoints ────────────────────────────────────────────────
+import secrets as _secrets
+import string as _string
+
+
+def _generate_referral_code() -> str:
+    alphabet = _string.ascii_uppercase + _string.digits
+    return "".join(_secrets.choice(alphabet) for _ in range(6))
+
+
+async def _ensure_referral_code(user: dict) -> str:
+    if user.get("referral_code"):
+        return user["referral_code"]
+    for _ in range(20):
+        code = _generate_referral_code()
+        existing = await _db.app_users.find_one({"referral_code": code}, {"_id": 0})
+        if not existing:
+            await _db.app_users.update_one(
+                {"user_id": user["user_id"]}, {"$set": {"referral_code": code}}
+            )
+            return code
+    raise HTTPException(500, "No se pudo generar el código de referido")
+
+
+def _extend_monthly_plan(u: dict) -> Optional[dict]:
+    """Return an $set update dict extending u's monthly plan by 30 days, or None if lifetime."""
+    if u.get("plan") == "lifetime":
+        return None
+    now = datetime.now(timezone.utc)
+    cur_exp = u.get("plan_expires_at")
+    if isinstance(cur_exp, str):
+        try:
+            cur = datetime.fromisoformat(cur_exp)
+            if cur.tzinfo is None:
+                cur = cur.replace(tzinfo=timezone.utc)
+        except Exception:
+            cur = now
+    else:
+        cur = now
+    base = cur if cur > now else now
+    return {"plan": "monthly", "plan_expires_at": (base + timedelta(days=30)).isoformat()}
+
+
+@router.get("/referral/me")
+async def referral_me(
+    session_token: Optional[str] = Cookie(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    token = _extract_token(session_token, authorization)
+    user = await _get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, "No autenticado")
+    code = await _ensure_referral_code(user)
+    count = await _db.referrals.count_documents({"referrer_user_id": user["user_id"]})
+    return {
+        "code": code,
+        "redeemed_count": count,
+        "months_earned": count,
+        "already_redeemed": bool(user.get("referred_by")),
+    }
+
+
+@router.post("/referral/redeem")
+async def referral_redeem(
+    body: RedeemReq,
+    session_token: Optional[str] = Cookie(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    token = _extract_token(session_token, authorization)
+    user = await _get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, "No autenticado")
+    if user.get("referred_by"):
+        raise HTTPException(400, "Ya canjeaste un código de referido")
+
+    code = (body.code or "").strip().upper()
+    if len(code) < 4:
+        raise HTTPException(400, "Código inválido")
+
+    referrer = await _db.app_users.find_one({"referral_code": code}, {"_id": 0})
+    if not referrer:
+        raise HTTPException(404, "Código no encontrado")
+    if referrer["user_id"] == user["user_id"]:
+        raise HTTPException(400, "No puedes canjear tu propio código")
+
+    now = datetime.now(timezone.utc)
+
+    # Extend referred user (the one redeeming)
+    ru_upd = _extend_monthly_plan(user) or {}
+    ru_upd["referred_by"] = referrer["user_id"]
+    await _db.app_users.update_one({"user_id": user["user_id"]}, {"$set": ru_upd})
+
+    # Extend referrer
+    rf_upd = _extend_monthly_plan(referrer)
+    if rf_upd:
+        await _db.app_users.update_one({"user_id": referrer["user_id"]}, {"$set": rf_upd})
+
+    await _db.referrals.insert_one({
+        "referrer_user_id": referrer["user_id"],
+        "referred_user_id": user["user_id"],
+        "code": code,
+        "created_at": now.isoformat(),
+    })
+
     user = await _db.app_users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     return {"ok": True, "user": user, "subscription": _subscription_state(user)}

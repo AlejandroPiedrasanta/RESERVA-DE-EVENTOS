@@ -5,7 +5,7 @@ import { useAuth, authHeaders } from "@/context/AuthContext";
 import { Section } from "@/components/appearance/SectionShell";
 import {
   Crown, Sparkles, Infinity as InfinityIcon, CheckCircle2,
-  Calendar, Zap, ShieldCheck, TrendingUp, Star,
+  Calendar, Zap, ShieldCheck, TrendingUp, Star, Gift, Copy, Check, Users, Share2, Ticket,
 } from "lucide-react";
 
 function loadPayPalSdk(clientId) {
@@ -195,6 +195,231 @@ function PlanCard({
   );
 }
 
+function ReferralCard({ isLifetime }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+  const [redeeming, setRedeeming] = useState(false);
+  const { refresh, setSubscription } = useAuth();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data: d } = await api.get("/referral/me", { headers: authHeaders() });
+      setData(d);
+    } catch (e) {
+      // silent — no auth or first-load fail
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const link = data?.code ? `${window.location.origin}/?ref=${data.code}` : "";
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setErr("No se pudo copiar. Copia el enlace manualmente.");
+    }
+  };
+
+  const handleShare = async () => {
+    if (!navigator.share) return handleCopy();
+    try {
+      await navigator.share({
+        title: "Reserva de Eventos — 1 mes gratis",
+        text: "Usa mi código y ambos ganamos 1 mes gratis en Reserva de Eventos:",
+        url: link,
+      });
+    } catch { /* user cancelled */ }
+  };
+
+  const handleRedeem = async () => {
+    setErr(null); setMsg(null);
+    const c = code.trim().toUpperCase();
+    if (!c) { setErr("Ingresa un código"); return; }
+    setRedeeming(true);
+    try {
+      const { data: res } = await api.post("/referral/redeem", { code: c }, { headers: authHeaders() });
+      setSubscription(res.subscription);
+      setMsg("¡Código canjeado! +30 días agregados a tu plan mensual.");
+      setCode("");
+      await load();
+      setTimeout(() => refresh(), 400);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "No se pudo canjear el código");
+    } finally { setRedeeming(false); }
+  };
+
+  const canRedeem = !data?.already_redeemed && !isLifetime;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="relative overflow-hidden rounded-3xl p-5 border-2 border-emerald-200/70 bg-gradient-to-br from-emerald-50 via-white to-teal-50"
+      data-testid="referral-card"
+    >
+      <motion.div
+        animate={{ x: [0, 30, 0], y: [0, -20, 0] }}
+        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-emerald-300/30 blur-3xl pointer-events-none"
+      />
+      <motion.div
+        animate={{ x: [0, -20, 0], y: [0, 15, 0] }}
+        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute -bottom-12 -left-12 w-44 h-44 rounded-full bg-teal-300/30 blur-3xl pointer-events-none"
+      />
+
+      <div className="relative z-10">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <motion.div
+              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.08, 1] }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+              className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg"
+            >
+              <Gift size={20} className="text-white" />
+            </motion.div>
+            <div>
+              <h3 className="text-base font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                Comparte y ganen <span className="text-emerald-600">1 mes gratis</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">Tú y tu amigo reciben +30 días cuando canjee tu código.</p>
+            </div>
+          </div>
+          {data && (
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-right">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Invitados</div>
+                <div className="flex items-center gap-1 justify-end">
+                  <Users size={12} className="text-emerald-500" />
+                  <div className="text-lg font-black text-slate-900 tabular-nums" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="referral-count">
+                    {data.redeemed_count}
+                  </div>
+                </div>
+              </div>
+              <div className="w-px h-8 bg-slate-200" />
+              <div className="text-right">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Ganados</div>
+                <div className="flex items-center gap-1 justify-end">
+                  <Ticket size={12} className="text-emerald-500" />
+                  <div className="text-lg font-black text-emerald-600 tabular-nums" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="referral-months-earned">
+                    {data.months_earned}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* My code + share */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="flex-1 min-w-[200px] flex items-center gap-2 px-3 py-2.5 rounded-2xl bg-white border border-emerald-200 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">Tu código</span>
+            <span className="text-base font-black text-slate-900 tracking-[0.2em] flex-1 truncate" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="referral-code">
+              {loading ? "···" : (data?.code || "···")}
+            </span>
+          </div>
+          <button
+            onClick={handleCopy}
+            disabled={!data?.code}
+            data-testid="referral-copy-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition-all disabled:opacity-50"
+          >
+            <AnimatePresence mode="wait">
+              {copied ? (
+                <motion.span key="ok" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }} className="inline-flex items-center gap-1.5 text-emerald-600">
+                  <Check size={14} /> ¡Copiado!
+                </motion.span>
+              ) : (
+                <motion.span key="cp" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="inline-flex items-center gap-1.5">
+                  <Copy size={14} /> Copiar enlace
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </button>
+          <button
+            onClick={handleShare}
+            disabled={!data?.code}
+            data-testid="referral-share-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-xs font-bold shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
+          >
+            <Share2 size={14} /> Compartir
+          </button>
+        </div>
+
+        {/* Redeem input */}
+        {canRedeem && (
+          <div className="mt-4 pt-4 border-t border-emerald-100/70">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+              ¿Tienes un código de un amigo?
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 12))}
+                placeholder="Ej. 8XK2QP"
+                data-testid="referral-input"
+                className="flex-1 min-w-[160px] px-3 py-2.5 rounded-2xl bg-white border border-slate-200 text-sm font-black tracking-[0.2em] text-slate-800 placeholder:text-slate-300 placeholder:font-normal placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
+                style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+              />
+              <button
+                onClick={handleRedeem}
+                disabled={redeeming || !code.trim()}
+                data-testid="referral-redeem-btn"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs font-bold shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50"
+              >
+                {redeeming ? (
+                  <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full" />
+                ) : <Ticket size={14} />}
+                {redeeming ? "Canjeando…" : "Canjear"}
+              </button>
+            </div>
+          </div>
+        )}
+        {data?.already_redeemed && (
+          <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
+            <CheckCircle2 size={12} /> Ya canjeaste un código de referido
+          </div>
+        )}
+        {isLifetime && !data?.already_redeemed && (
+          <div className="mt-3 text-[11px] text-slate-500">
+            Tienes acceso permanente — comparte tu código para que tus amigos ganen 1 mes gratis.
+          </div>
+        )}
+
+        <AnimatePresence>
+          {msg && (
+            <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="mt-3 p-2.5 rounded-xl bg-emerald-100 border border-emerald-200 text-xs font-bold text-emerald-800"
+              data-testid="referral-success">
+              {msg}
+            </motion.div>
+          )}
+          {err && (
+            <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="mt-3 p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700"
+              data-testid="referral-error">
+              {err}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
+
+
 export default function SubscriptionSection() {
   const { subscription, refresh, setSubscription } = useAuth();
   const [config, setConfig] = useState(null);
@@ -328,6 +553,9 @@ export default function SubscriptionSection() {
             )}
           </div>
         </motion.div>
+
+        {/* Referral: viral growth loop — share code, both get +30 days */}
+        <ReferralCard isLifetime={isLifetime} />
 
         {/* Success/Error messages */}
         <AnimatePresence>
