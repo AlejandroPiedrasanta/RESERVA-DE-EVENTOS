@@ -1,6 +1,8 @@
-# Cinema Productions · Reserva de Eventos
-
 <div align="center">
+
+<img src="frontend/public/logo.png" alt="Cinema Productions — Reserva de Eventos" width="180" />
+
+# Cinema Productions · Reserva de Eventos
 
 ![Bandera de Guatemala](https://flagcdn.com/w80/gt.png)
 
