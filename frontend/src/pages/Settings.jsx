@@ -5,7 +5,7 @@ import {
   Download, Globe, DollarSign,
   Bell, BellRing, Database, CheckCircle, XCircle, RefreshCw,
   Wifi, WifiOff, MessageCircle, Mail, Loader2, Monitor,
-  Package, AlertCircle, Zap, Clock, ChevronDown,
+  Package, AlertCircle, Zap, Clock, ChevronDown, ChevronRight, Clipboard,
   Github, GitBranch, GitCommit, AlertTriangle, ArrowDownCircle, ExternalLink, CheckCircle2, Cog,
 } from "lucide-react";
 import { useSettings, CURRENCIES } from "@/context/SettingsContext";
@@ -96,6 +96,20 @@ export default function Settings() {
   const [waVerifyBusy, setWaVerifyBusy] = useState(false);
   const [waTestBusy, setWaTestBusy] = useState(false);
   const [waResult, setWaResult] = useState(null);
+  // Reminders UI: which channel accordion is expanded (only one at a time)
+  const [openChannel, setOpenChannel] = useState(null);
+
+  // Helper: paste from clipboard into a notif field
+  const pasteInto = async (field) => {
+    try {
+      const text = (await navigator.clipboard.readText())?.trim();
+      if (!text) { toast({ title: "Portapapeles vacío", variant: "destructive" }); return; }
+      setNotif(p => ({ ...p, [field]: text }));
+      toast({ title: "Pegado ✓" });
+    } catch {
+      toast({ title: "No se pudo leer el portapapeles", description: "Permite el acceso o pega manualmente", variant: "destructive" });
+    }
+  };
 
   // Desktop app has been moved to Database page → "Soporte avanzado"
 
@@ -1031,565 +1045,688 @@ export default function Settings() {
 
             </div> {/* close grid-cols-2 */}
 
-            {/* ═══════════════════════════════════════════════════════════ */}
-            {/* ── CANALES PRINCIPALES DE RECORDATORIO (REDISEÑO) ─────── */}
-            {/* ═══════════════════════════════════════════════════════════ */}
-            <div className="space-y-4" data-testid="notification-channels-redesign">
+
+            {/* ═══════════════════════════════════════════════════════════════ */}
+            {/* ── CANALES DE RECORDATORIO — DISEÑO COMPACTO 2026 ─────────── */}
+            {/* ═══════════════════════════════════════════════════════════════ */}
+            <div className="space-y-3" data-testid="notification-channels-compact">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                  {language === "es" ? "Cómo quieres recibir los recordatorios" : "How you want to receive reminders"}
+                  {language === "es" ? "Canales · un clic para conectar" : "Channels · one-click connect"}
                 </p>
                 <span className="text-[10px] font-bold text-slate-400">
-                  {language === "es" ? "Selecciona uno o varios" : "Pick one or more"}
+                  {language === "es" ? "Toca para expandir" : "Tap to expand"}
                 </span>
               </div>
 
-              {/* ─── 1. Gmail (OAuth Google) ─── */}
-              <div className="rounded-3xl p-5 space-y-4 border border-rose-200/60 bg-gradient-to-br from-rose-50/70 to-white/40 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-rose-200/60 flex items-center justify-center shrink-0">
-                    <Mail size={20} className="text-rose-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-black text-slate-800">Gmail (Google)</p>
-                      <span data-testid="gmail-status-badge"
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${gmailStatus.connected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                        {gmailStatus.connected ? "CONECTADO" : "SIN CONECTAR"}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {gmailStatus.connected
-                        ? <>Enviando desde <b>{gmailStatus.email}</b></>
-                        : "Envía recordatorios desde tu propia cuenta de Gmail (recomendado)"}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Credentials fields (only if not connected yet) */}
-                {!gmailStatus.connected && (
-                  <div className="space-y-2.5 bg-white/60 rounded-2xl p-3.5 border border-rose-100/60">
-                    <p className="text-[10px] font-bold text-rose-700 flex items-center gap-1.5">
-                      <AlertCircle size={11} /> {language === "es" ? "Configura tus credenciales de Google (Cloud Console)" : "Configure your Google credentials"}
-                    </p>
-                    <details className="text-[10px] text-slate-600 bg-rose-50/70 rounded-xl px-3 py-2">
-                      <summary className="cursor-pointer font-black text-rose-700">
-                        {language === "es" ? "¿Cómo obtenerlas? (paso a paso)" : "How to get them?"}
-                      </summary>
-                      <ol className="mt-2 space-y-1 list-decimal list-inside">
-                        <li>Ve a <a className="underline font-bold text-rose-600" href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a> → crea un proyecto</li>
-                        <li>APIs & Services → Library → busca <b>Gmail API</b> → Enable</li>
-                        <li>OAuth consent screen → External → añade tu email como <b>Test user</b></li>
-                        <li>Credentials → Create Credentials → <b>OAuth Client ID</b> → Web application</li>
-                        <li>Authorized redirect URI: <code className="bg-white px-1 rounded text-[9px] break-all">{gmailStatus.redirect_uri || "(pendiente)"}</code></li>
-                        <li>Copia el Client ID y Client Secret abajo y pulsa <b>Conectar con Google</b></li>
-                      </ol>
-                    </details>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Google Client ID</label>
-                      <input type="text" value={notif.google_client_id || ""}
-                        onChange={e => setNotif(p => ({ ...p, google_client_id: e.target.value }))}
-                        placeholder="1234567890-abc123.apps.googleusercontent.com"
-                        data-testid="google-client-id-input"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Google Client Secret</label>
-                      <input type="password" value={notif.google_client_secret || ""}
-                        onChange={e => setNotif(p => ({ ...p, google_client_secret: e.target.value }))}
-                        placeholder="GOCSPX-xxxxxxxxxxxxxxxxx"
-                        data-testid="google-client-secret-input"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2">
-                  {!gmailStatus.connected ? (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleConnectGmail}
-                      disabled={gmailBusy || !notif.google_client_id || !notif.google_client_secret}
-                      data-testid="gmail-connect-btn"
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs font-black shadow-sm hover:shadow disabled:opacity-50">
-                      {gmailBusy ? <Loader2 size={13} className="animate-spin" /> : (
-                        <svg width="14" height="14" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              {/* ─── 1. Gmail (Google OAuth — auto login real) ─── */}
+              {(() => {
+                const isOpen = openChannel === "gmail";
+                const active = gmailStatus.connected;
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-rose-300/70 bg-gradient-to-br from-rose-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button
+                      type="button"
+                      data-testid="gmail-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "gmail")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-rose-200/60 flex items-center justify-center shrink-0">
+                        <Mail size={16} className="text-rose-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">Gmail</p>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "CONECTADO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {active ? <>Desde <b>{gmailStatus.email}</b></> : (language === "es" ? "Login con Google — recomendado" : "Sign in with Google — recommended")}
+                        </p>
+                      </div>
+                      {!active && (notif.google_client_id && notif.google_client_secret) && (
+                        <motion.div whileHover={{ scale: 1.03 }} onClick={(e) => { e.stopPropagation(); handleConnectGmail(); }}
+                          data-testid="gmail-quick-connect"
+                          className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-black shadow-sm hover:shadow">
+                          <svg width="12" height="12" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                          Login
+                        </motion.div>
                       )}
-                      {language === "es" ? "Conectar con Google" : "Sign in with Google"}
-                    </motion.button>
-                  ) : (
-                    <>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleTestGmail} disabled={gmailBusy}
-                        data-testid="gmail-test-btn"
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black shadow-sm disabled:opacity-50">
-                        {gmailBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                        {language === "es" ? "Enviar prueba" : "Send test"}
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleDisconnectGmail} disabled={gmailBusy}
-                        data-testid="gmail-disconnect-btn"
-                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-black hover:bg-slate-50 disabled:opacity-50">
-                        <XCircle size={13} /> {language === "es" ? "Desconectar" : "Disconnect"}
-                      </motion.button>
-                    </>
-                  )}
-                </div>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
 
-                {gmailTestResult && (
-                  <div data-testid="gmail-test-result"
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold ${gmailTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
-                    {gmailTestResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                    {gmailTestResult.msg}
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-rose-100/60 pt-3">
+                            {!active && (
+                              <>
+                                <details className="text-[10px] text-slate-600 bg-rose-50/70 rounded-xl px-3 py-2">
+                                  <summary className="cursor-pointer font-black text-rose-700">
+                                    {language === "es" ? "¿Cómo obtener credenciales de Google?" : "How to get Google credentials?"}
+                                  </summary>
+                                  <ol className="mt-2 space-y-1 list-decimal list-inside">
+                                    <li>Ve a <a className="underline font-bold text-rose-600" href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a> → crea un proyecto</li>
+                                    <li>APIs & Services → Library → busca <b>Gmail API</b> → Enable</li>
+                                    <li>OAuth consent screen → External → añade tu email como <b>Test user</b></li>
+                                    <li>Credentials → Create Credentials → <b>OAuth Client ID</b> → Web application</li>
+                                    <li>Authorized redirect URI: <code className="bg-white px-1 rounded text-[9px] break-all">{gmailStatus.redirect_uri || "(pendiente)"}</code></li>
+                                  </ol>
+                                </details>
+                                <div className="flex gap-2 flex-wrap">
+                                  <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer"
+                                    data-testid="google-open-console-btn"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-[11px] font-black">
+                                    <ExternalLink size={11} /> {language === "es" ? "Abrir Google Console" : "Open Google Console"}
+                                  </a>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Client ID</label>
+                                  <div className="flex gap-1.5">
+                                    <input type="text" value={notif.google_client_id || ""}
+                                      onChange={e => setNotif(p => ({ ...p, google_client_id: e.target.value }))}
+                                      placeholder="1234...apps.googleusercontent.com"
+                                      data-testid="google-client-id-input"
+                                      className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
+                                    <button type="button" onClick={() => pasteInto("google_client_id")}
+                                      data-testid="google-client-id-paste"
+                                      title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300">
+                                      <Clipboard size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Client Secret</label>
+                                  <div className="flex gap-1.5">
+                                    <input type="password" value={notif.google_client_secret || ""}
+                                      onChange={e => setNotif(p => ({ ...p, google_client_secret: e.target.value }))}
+                                      placeholder="GOCSPX-..."
+                                      data-testid="google-client-secret-input"
+                                      className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
+                                    <button type="button" onClick={() => pasteInto("google_client_secret")}
+                                      data-testid="google-client-secret-paste"
+                                      title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300">
+                                      <Clipboard size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                  onClick={handleConnectGmail}
+                                  disabled={gmailBusy || !notif.google_client_id || !notif.google_client_secret}
+                                  data-testid="gmail-connect-btn"
+                                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs font-black shadow-sm hover:shadow disabled:opacity-50">
+                                  {gmailBusy ? <Loader2 size={13} className="animate-spin" /> : (
+                                    <svg width="14" height="14" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                                  )}
+                                  {language === "es" ? "Iniciar sesión con Google" : "Sign in with Google"}
+                                </motion.button>
+                              </>
+                            )}
+                            {active && (
+                              <div className="flex flex-wrap gap-2">
+                                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                  onClick={handleTestGmail} disabled={gmailBusy}
+                                  data-testid="gmail-test-btn"
+                                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black shadow-sm disabled:opacity-50">
+                                  {gmailBusy ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                                  {language === "es" ? "Enviar prueba" : "Send test"}
+                                </motion.button>
+                                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                  onClick={handleDisconnectGmail} disabled={gmailBusy}
+                                  data-testid="gmail-disconnect-btn"
+                                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-black hover:bg-slate-50 disabled:opacity-50">
+                                  <XCircle size={12} /> {language === "es" ? "Desconectar" : "Disconnect"}
+                                </motion.button>
+                              </div>
+                            )}
+                            {gmailTestResult && (
+                              <div data-testid="gmail-test-result"
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-bold ${gmailTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                                {gmailTestResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                                {gmailTestResult.msg}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
-              {/* ─── 2. WhatsApp Cloud API (Meta) ─── */}
-              <div className="rounded-3xl p-5 space-y-4 border border-emerald-200/60 bg-gradient-to-br from-emerald-50/70 to-white/40 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-emerald-200/60 flex items-center justify-center shrink-0">
-                    <MessageCircle size={20} className="text-emerald-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-black text-slate-800">WhatsApp (Meta Cloud API)</p>
-                      <span data-testid="whatsapp-status-badge"
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${notif.whatsapp_enabled && notif.whatsapp_phone_number_id ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                        {notif.whatsapp_enabled ? "ACTIVO" : "INACTIVO"}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {language === "es" ? "Envía recordatorios oficiales por WhatsApp (requiere Meta Business)" : "Send official reminders via WhatsApp (requires Meta Business)"}
-                    </p>
-                  </div>
-                  <button
-                    data-testid="whatsapp-toggle"
-                    onClick={() => setNotif(p => ({ ...p, whatsapp_enabled: !p.whatsapp_enabled }))}
-                    className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${notif.whatsapp_enabled ? "bg-emerald-500" : "bg-slate-200"}`}>
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${notif.whatsapp_enabled ? "left-[22px]" : "left-0.5"}`} />
-                  </button>
-                </div>
-
-                {notif.whatsapp_enabled && (
-                  <div className="space-y-2.5 bg-white/60 rounded-2xl p-3.5 border border-emerald-100/60">
-                    <details className="text-[10px] text-slate-600 bg-emerald-50/70 rounded-xl px-3 py-2">
-                      <summary className="cursor-pointer font-black text-emerald-700">
-                        {language === "es" ? "¿Cómo obtener credenciales de Meta?" : "How to get Meta credentials?"}
-                      </summary>
-                      <ol className="mt-2 space-y-1 list-decimal list-inside">
-                        <li>Ve a <a className="underline font-bold text-emerald-600" href="https://developers.facebook.com" target="_blank" rel="noreferrer">developers.facebook.com</a> → crea una app tipo <b>Business</b></li>
-                        <li>Añade el producto <b>WhatsApp</b> → API Setup</li>
-                        <li>Copia el <b>Access Token</b> (temporal 24h — genera uno permanente con System User)</li>
-                        <li>Copia el <b>Phone Number ID</b> (no es el número, es el ID que Meta le asigna)</li>
-                        <li>Añade tu número personal como <b>Recipient</b> en la lista de números de prueba y verifícalo</li>
-                      </ol>
-                    </details>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Access Token</label>
-                      <input type="password" value={notif.whatsapp_access_token || ""}
-                        onChange={e => setNotif(p => ({ ...p, whatsapp_access_token: e.target.value }))}
-                        placeholder="EAAxxxxxxxxxxxxxxxxxxx"
-                        data-testid="whatsapp-token-input"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Phone Number ID</label>
-                        <input type="text" value={notif.whatsapp_phone_number_id || ""}
-                          onChange={e => setNotif(p => ({ ...p, whatsapp_phone_number_id: e.target.value }))}
-                          placeholder="123456789012345"
-                          data-testid="whatsapp-pnid-input"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+              {/* ─── 2. WhatsApp (Meta Cloud API) ─── */}
+              {(() => {
+                const isOpen = openChannel === "whatsapp";
+                const active = notif.whatsapp_enabled && notif.whatsapp_phone_number_id;
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-emerald-300/70 bg-gradient-to-br from-emerald-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button type="button"
+                      data-testid="whatsapp-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "whatsapp")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-emerald-200/60 flex items-center justify-center shrink-0">
+                        <MessageCircle size={16} className="text-emerald-600" />
                       </div>
-                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Destinatario (E.164)</label>
-                        <input type="text" value={notif.whatsapp_recipient || ""}
-                          onChange={e => setNotif(p => ({ ...p, whatsapp_recipient: e.target.value }))}
-                          placeholder="50212345678 (sin +)"
-                          data-testid="whatsapp-recipient-input"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">WhatsApp <span className="text-[10px] font-bold text-slate-400">Meta Cloud</span></p>
+                          <span data-testid="whatsapp-status-badge" className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "ACTIVO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {language === "es" ? "Envía por WhatsApp oficial (Meta Business)" : "Send via official WhatsApp"}
+                        </p>
                       </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">
-                        {language === "es" ? "Plantilla (opcional, fallback fuera de 24 h)" : "Template name (optional, 24h fallback)"}
-                      </label>
-                      <input type="text" value={notif.whatsapp_template_name || ""}
-                        onChange={e => setNotif(p => ({ ...p, whatsapp_template_name: e.target.value }))}
-                        placeholder="hello_world"
-                        data-testid="whatsapp-template-input"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleVerifyWhatsApp} disabled={waVerifyBusy}
-                        data-testid="whatsapp-verify-btn"
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-emerald-300 text-emerald-700 text-xs font-black hover:bg-emerald-50 disabled:opacity-50">
-                        {waVerifyBusy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
-                        {language === "es" ? "Verificar credenciales" : "Verify credentials"}
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleTestWhatsApp} disabled={waTestBusy || !notif.whatsapp_recipient}
-                        data-testid="whatsapp-test-btn"
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black disabled:opacity-50">
-                        {waTestBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                        {language === "es" ? "Enviar prueba" : "Send test"}
-                      </motion.button>
-                    </div>
-                    {waResult && (
-                      <div data-testid="whatsapp-test-result"
-                        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold ${waResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
-                        {waResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                        {waResult.msg}
+                      <button data-testid="whatsapp-toggle"
+                        onClick={(e) => { e.stopPropagation(); setNotif(p => ({ ...p, whatsapp_enabled: !p.whatsapp_enabled })); }}
+                        className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${notif.whatsapp_enabled ? "bg-emerald-500" : "bg-slate-200"}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.whatsapp_enabled ? "left-[18px]" : "left-0.5"}`} />
+                      </button>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-emerald-100/60 pt-3">
+                            {/* Prominent auto-login buttons */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <a href="https://business.facebook.com/wa/manage/home" target="_blank" rel="noreferrer"
+                                data-testid="whatsapp-open-business-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#1877F2] hover:bg-[#166FE0] text-white text-[11px] font-black shadow-sm">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                                {language === "es" ? "Login con Meta" : "Login with Meta"}
+                              </a>
+                              <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer"
+                                data-testid="whatsapp-open-devs-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "App / API Setup" : "App / API Setup"}
+                              </a>
+                            </div>
+                            <details className="text-[10px] text-slate-600 bg-emerald-50/70 rounded-xl px-3 py-2">
+                              <summary className="cursor-pointer font-black text-emerald-700">
+                                {language === "es" ? "Cómo conectar en 4 pasos" : "Connect in 4 steps"}
+                              </summary>
+                              <ol className="mt-2 space-y-1 list-decimal list-inside">
+                                <li>Pulsa <b>Login con Meta</b> arriba (usa tu cuenta de Facebook)</li>
+                                <li>Ve a tu app → <b>WhatsApp → API Setup</b> → copia el <b>Access Token</b></li>
+                                <li>Copia el <b>Phone Number ID</b> (aparece justo debajo)</li>
+                                <li>Pega ambos aquí (usa el botón 📋) y pulsa <b>Verificar</b></li>
+                              </ol>
+                            </details>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Access Token</label>
+                              <div className="flex gap-1.5">
+                                <input type="password" value={notif.whatsapp_access_token || ""}
+                                  onChange={e => setNotif(p => ({ ...p, whatsapp_access_token: e.target.value }))}
+                                  placeholder="EAAxxxxxxxxxxxxxxx"
+                                  data-testid="whatsapp-token-input"
+                                  className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                                <button type="button" onClick={() => pasteInto("whatsapp_access_token")}
+                                  data-testid="whatsapp-token-paste"
+                                  title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300">
+                                  <Clipboard size={13} />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Phone Number ID</label>
+                                <div className="flex gap-1.5">
+                                  <input type="text" value={notif.whatsapp_phone_number_id || ""}
+                                    onChange={e => setNotif(p => ({ ...p, whatsapp_phone_number_id: e.target.value }))}
+                                    placeholder="123456789012345"
+                                    data-testid="whatsapp-pnid-input"
+                                    className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                                  <button type="button" onClick={() => pasteInto("whatsapp_phone_number_id")}
+                                    data-testid="whatsapp-pnid-paste"
+                                    title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300">
+                                    <Clipboard size={13} />
+                                  </button>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Destino (E.164)</label>
+                                <input type="text" value={notif.whatsapp_recipient || ""}
+                                  onChange={e => setNotif(p => ({ ...p, whatsapp_recipient: e.target.value }))}
+                                  placeholder="50212345678"
+                                  data-testid="whatsapp-recipient-input"
+                                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">
+                                {language === "es" ? "Plantilla (opcional)" : "Template (optional)"}
+                              </label>
+                              <input type="text" value={notif.whatsapp_template_name || ""}
+                                onChange={e => setNotif(p => ({ ...p, whatsapp_template_name: e.target.value }))}
+                                placeholder="hello_world"
+                                data-testid="whatsapp-template-input"
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                onClick={handleVerifyWhatsApp} disabled={waVerifyBusy}
+                                data-testid="whatsapp-verify-btn"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-emerald-300 text-emerald-700 text-[11px] font-black hover:bg-emerald-50 disabled:opacity-50">
+                                {waVerifyBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                                {language === "es" ? "Verificar" : "Verify"}
+                              </motion.button>
+                              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                onClick={handleTestWhatsApp} disabled={waTestBusy || !notif.whatsapp_recipient}
+                                data-testid="whatsapp-test-btn"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-black disabled:opacity-50">
+                                {waTestBusy ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                                {language === "es" ? "Enviar prueba" : "Send test"}
+                              </motion.button>
+                            </div>
+                            {waResult && (
+                              <div data-testid="whatsapp-test-result"
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-bold ${waResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                                {waResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                                {waResult.msg}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()}
+
+              {/* ─── 3. Resend (Email transaccional) ─── */}
+              {(() => {
+                const isOpen = openChannel === "resend";
+                const active = notif.resend_api_key && notif.resend_api_key.includes("•");
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-blue-300/70 bg-gradient-to-br from-blue-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button type="button"
+                      data-testid="resend-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "resend")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-blue-200/60 flex items-center justify-center shrink-0">
+                        <Mail size={16} className="text-blue-600" />
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">Resend <span className="text-[10px] font-bold text-slate-400">Email API</span></p>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "ACTIVO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {language === "es" ? "Gratis 3,000/mes · alternativa a Gmail" : "Free 3k/mo · Gmail alternative"}
+                        </p>
+                      </div>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
 
-              {/* ─── 3. PC / Windows notifications ─── */}
-              <div className="rounded-3xl p-5 space-y-3 border border-indigo-200/60 bg-gradient-to-br from-indigo-50/70 to-white/40 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-indigo-200/60 flex items-center justify-center shrink-0">
-                    <Monitor size={20} className="text-indigo-600" />
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-blue-100/60 pt-3">
+                            {/* Prominent Resend auto-login buttons */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <a href="https://resend.com/login" target="_blank" rel="noreferrer"
+                                data-testid="resend-login-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black shadow-sm">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M2 12l1.4-1.4 4.6 4.6L18 4l2 2L8 18z"/></svg>
+                                {language === "es" ? "Login Resend (Google)" : "Login (Google)"}
+                              </a>
+                              <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer"
+                                data-testid="resend-apikeys-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "Crear API Key" : "Create API Key"}
+                              </a>
+                            </div>
+                            <div className="text-[10px] text-slate-500 bg-blue-50/60 rounded-lg px-2.5 py-1.5">
+                              💡 {language === "es"
+                                ? "Resend permite login con Google/GitHub en un clic. Crea el API key y pégalo aquí con 📋"
+                                : "Resend supports one-click Google/GitHub login. Create the API key and paste here with 📋"}
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">API Key</label>
+                              <div className="flex gap-1.5">
+                                <input type="password" value={notif.resend_api_key}
+                                  onChange={e => setNotif(p => ({ ...p, resend_api_key: e.target.value }))}
+                                  placeholder="re_xxxxxxxxxxxxxxx"
+                                  data-testid="notif-resend-key-input"
+                                  className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                                <button type="button" onClick={() => pasteInto("resend_api_key")}
+                                  data-testid="resend-key-paste"
+                                  title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300">
+                                  <Clipboard size={13} />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Email Admin</label>
+                                <input type="email" value={notif.admin_email}
+                                  onChange={e => setNotif(p => ({ ...p, admin_email: e.target.value }))}
+                                  placeholder="tu@email.com"
+                                  data-testid="notif-email-input"
+                                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Remitente</label>
+                                <input type="text" value={notif.sender_name || ""}
+                                  onChange={e => setNotif(p => ({ ...p, sender_name: e.target.value }))}
+                                  placeholder="Cinema Productions"
+                                  data-testid="notif-sender-name"
+                                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">
+                                {language === "es" ? "Asunto (opcional)" : "Subject (optional)"}
+                              </label>
+                              <input type="text" value={notif.email_subject || ""}
+                                onChange={e => setNotif(p => ({ ...p, email_subject: e.target.value }))}
+                                placeholder="Recordatorio: eventos próximos"
+                                data-testid="notif-email-subject"
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">CC (coma)</label>
+                              <input type="text" value={notif.cc_emails || ""}
+                                onChange={e => setNotif(p => ({ ...p, cc_emails: e.target.value }))}
+                                placeholder="socio@email.com, asistente@email.com"
+                                data-testid="notif-cc-emails"
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                            </div>
+                            <div className="flex items-center justify-between bg-white/50 rounded-lg px-3 py-2">
+                              <div>
+                                <p className="text-[11px] font-bold text-slate-700">
+                                  {language === "es" ? "Enviar también al cliente" : "Also send to client"}
+                                </p>
+                                <p className="text-[9px] text-slate-400">
+                                  {language === "es" ? "Al email del cliente en la reserva" : "To the client's reservation email"}
+                                </p>
+                              </div>
+                              <button data-testid="notify-client-toggle"
+                                onClick={() => setNotif(p => ({ ...p, notify_client: !p.notify_client }))}
+                                className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${notif.notify_client ? "bg-blue-500" : "bg-slate-200"}`}>
+                                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.notify_client ? "left-[18px]" : "left-0.5"}`} />
+                              </button>
+                            </div>
+                            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                              onClick={handleTestEmail} disabled={emailTestLoading}
+                              data-testid="test-email-btn"
+                              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-[11px] font-black disabled:opacity-50">
+                              {emailTestLoading ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+                              {emailTestLoading ? "Enviando…" : (language === "es" ? "Probar conexión" : "Test connection")}
+                            </motion.button>
+                            {emailTestResult && (
+                              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-bold ${emailTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                                {emailTestResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                                {emailTestResult.msg}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-black text-slate-800">
-                        {language === "es" ? "Notificaciones en la PC (Windows / macOS)" : "PC notifications (Windows / macOS)"}
-                      </p>
-                      <span data-testid="pc-status-badge"
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${notifPermission === "granted" ? "bg-emerald-100 text-emerald-700" : notifPermission === "denied" ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"}`}>
-                        {notifPermission === "granted" ? "ACTIVO" : notifPermission === "denied" ? "BLOQUEADO" : "INACTIVO"}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {language === "es" ? "Pop-ups nativos del sistema mientras el navegador está abierto — sin costo" : "Native OS pop-ups while the browser is open — free"}
-                    </p>
-                  </div>
-                </div>
+                );
+              })()}
 
-                {notifPermission === "denied" ? (
-                  <p className="text-[11px] text-red-600 font-semibold bg-red-50 rounded-xl p-2.5">
-                    {language === "es" ? "Permiso denegado. Ve a Configuración del navegador → Privacidad → Notificaciones y permite este sitio." : "Permission denied. Go to your browser settings and allow this site."}
-                  </p>
-                ) : notifPermission === "granted" ? (
-                  <div className="flex flex-wrap gap-2">
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleNotifyImmediate} disabled={immediateLoading}
-                      data-testid="pc-notify-immediate-btn"
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl btn-primary text-white text-xs font-black disabled:opacity-60">
-                      {immediateLoading ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />}
-                      {language === "es" ? "Notificar próximo evento" : "Notify next event"}
-                    </motion.button>
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleTestSystemNotif}
-                      data-testid="pc-test-btn"
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-indigo-300 text-indigo-700 text-xs font-black hover:bg-indigo-50">
-                      <Zap size={13} /> {language === "es" ? "Enviar prueba" : "Test"}
-                    </motion.button>
-                  </div>
-                ) : (
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                    onClick={handleRequestPermission}
-                    data-testid="pc-enable-btn"
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-primary text-white text-xs font-black">
-                    <BellRing size={13} /> {language === "es" ? "Activar notificaciones del sistema" : "Enable system notifications"}
-                  </motion.button>
-                )}
+              {/* ─── 4. Telegram Bot ─── */}
+              {(() => {
+                const isOpen = openChannel === "telegram";
+                const active = notif.telegram_enabled && notif.telegram_bot_token && notif.telegram_chat_id;
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-sky-300/70 bg-gradient-to-br from-sky-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button type="button"
+                      data-testid="telegram-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "telegram")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-sky-200/60 flex items-center justify-center shrink-0">
+                        <MessageCircle size={16} className="text-sky-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">Telegram Bot</p>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "ACTIVO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">100% gratis · instantáneo</p>
+                      </div>
+                      <button data-testid="telegram-toggle"
+                        onClick={(e) => { e.stopPropagation(); setNotif(p => ({ ...p, telegram_enabled: !p.telegram_enabled })); }}
+                        className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${notif.telegram_enabled ? "bg-sky-500" : "bg-slate-200"}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.telegram_enabled ? "left-[18px]" : "left-0.5"}`} />
+                      </button>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
 
-                <div className="mt-2 rounded-2xl bg-indigo-50/70 border border-indigo-100/60 p-3">
-                  <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wider mb-1">
-                    {language === "es" ? "¿Quieres una app nativa de Windows?" : "Want a native Windows app?"}
-                  </p>
-                  <p className="text-[11px] text-slate-600">
-                    {language === "es"
-                      ? "Descarga el paquete de escritorio desde Base de datos → Soporte avanzado. Recibirás notificaciones incluso con el navegador cerrado."
-                      : "Download the desktop package from Database → Advanced. Receive notifications even when the browser is closed."}
-                  </p>
-                  <Link to="/base-datos" data-testid="desktop-app-link"
-                    className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-black text-indigo-600 hover:text-indigo-700">
-                    <Package size={11} /> {language === "es" ? "Ir a paquete de escritorio" : "Go to desktop package"} <ExternalLink size={10} />
-                  </Link>
-                </div>
-              </div>
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-sky-100/60 pt-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <a href="https://t.me/BotFather" target="_blank" rel="noreferrer"
+                                data-testid="telegram-botfather-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500 hover:bg-sky-600 text-white text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "Abrir @BotFather" : "Open @BotFather"}
+                              </a>
+                              <a
+                                href={notif.telegram_bot_token ? `https://api.telegram.org/bot${notif.telegram_bot_token}/getUpdates` : "#"}
+                                target="_blank" rel="noreferrer"
+                                onClick={(e) => { if (!notif.telegram_bot_token) { e.preventDefault(); toast({ title: "Ingresa primero el token del bot" }); } }}
+                                data-testid="telegram-getupdates-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-sky-300 text-sky-700 hover:bg-sky-50 text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "Obtener Chat ID" : "Get Chat ID"}
+                              </a>
+                            </div>
+                            <div className="text-[10px] text-slate-600 bg-sky-50/70 rounded-lg px-2.5 py-1.5 space-y-0.5">
+                              <p><b>1.</b> Abre @BotFather → <code className="bg-white px-1 rounded">/newbot</code> → copia el token</p>
+                              <p><b>2.</b> Abre tu bot y envía cualquier mensaje</p>
+                              <p><b>3.</b> Pulsa <b>Obtener Chat ID</b> → busca <code className="bg-white px-1 rounded">&quot;id&quot;</code> dentro de <code className="bg-white px-1 rounded">&quot;chat&quot;</code></p>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Bot Token</label>
+                              <div className="flex gap-1.5">
+                                <input type="password" value={notif.telegram_bot_token}
+                                  onChange={e => setNotif(p => ({ ...p, telegram_bot_token: e.target.value }))}
+                                  placeholder="1234567890:AAF..."
+                                  data-testid="telegram-token-input"
+                                  className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-300" />
+                                <button type="button" onClick={() => pasteInto("telegram_bot_token")}
+                                  data-testid="telegram-token-paste"
+                                  title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-sky-600 hover:border-sky-300">
+                                  <Clipboard size={13} />
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Chat ID</label>
+                              <div className="flex gap-1.5">
+                                <input type="text" value={notif.telegram_chat_id}
+                                  onChange={e => setNotif(p => ({ ...p, telegram_chat_id: e.target.value }))}
+                                  placeholder="123456789"
+                                  data-testid="telegram-chatid-input"
+                                  className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-300" />
+                                <button type="button" onClick={() => pasteInto("telegram_chat_id")}
+                                  data-testid="telegram-chatid-paste"
+                                  title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-sky-600 hover:border-sky-300">
+                                  <Clipboard size={13} />
+                                </button>
+                                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                  onClick={handleTelegramTest} disabled={telegramTestLoading}
+                                  data-testid="telegram-test-btn"
+                                  className="px-3 rounded-lg bg-sky-500 text-white text-[11px] font-black disabled:opacity-60 whitespace-nowrap">
+                                  {telegramTestLoading ? <Loader2 size={12} className="animate-spin" /> : (language === "es" ? "Probar" : "Test")}
+                                </motion.button>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()}
 
-              {/* ─── 4. SMS (placeholder — coming soon) ─── */}
-              <div className="rounded-3xl p-5 space-y-2 border border-slate-200/60 bg-slate-50/50 opacity-80" data-testid="sms-channel">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-slate-200/60 flex items-center justify-center shrink-0">
-                    <MessageCircle size={20} className="text-slate-400" />
+              {/* ─── 5. ntfy.sh ─── */}
+              {(() => {
+                const isOpen = openChannel === "ntfy";
+                const active = notif.ntfy_enabled && notif.ntfy_topic;
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-orange-300/70 bg-gradient-to-br from-orange-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button type="button"
+                      data-testid="ntfy-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "ntfy")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-orange-200/60 flex items-center justify-center shrink-0">
+                        <Bell size={16} className="text-orange-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">ntfy.sh <span className="text-[10px] font-bold text-slate-400">Push móvil/PC</span></p>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "ACTIVO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">Gratis, sin cuenta · iOS/Android/PC</p>
+                      </div>
+                      <button data-testid="ntfy-toggle"
+                        onClick={(e) => { e.stopPropagation(); setNotif(p => ({ ...p, ntfy_enabled: !p.ntfy_enabled })); }}
+                        className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${notif.ntfy_enabled ? "bg-orange-500" : "bg-slate-200"}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.ntfy_enabled ? "left-[18px]" : "left-0.5"}`} />
+                      </button>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-orange-100/60 pt-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <a href="https://ntfy.sh/app" target="_blank" rel="noreferrer"
+                                data-testid="ntfy-open-app-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "Abrir ntfy Web" : "Open ntfy Web"}
+                              </a>
+                              <a href="https://ntfy.sh/docs/subscribe/phone/" target="_blank" rel="noreferrer"
+                                data-testid="ntfy-mobile-btn"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-orange-300 text-orange-700 hover:bg-orange-50 text-[11px] font-black">
+                                <ExternalLink size={11} /> {language === "es" ? "App móvil" : "Mobile app"}
+                              </a>
+                            </div>
+                            <div className="text-[10px] text-slate-600 bg-orange-50/70 rounded-lg px-2.5 py-1.5">
+                              💡 {language === "es"
+                                ? "Instala ntfy en tu celular/PC, elige un nombre único de tema y pégalo aquí."
+                                : "Install ntfy, pick a unique topic name and paste it here."}
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">
+                                {language === "es" ? "Nombre del tema" : "Topic name"}
+                              </label>
+                              <div className="flex gap-1.5">
+                                <input type="text" value={notif.ntfy_topic}
+                                  onChange={e => setNotif(p => ({ ...p, ntfy_topic: e.target.value }))}
+                                  placeholder="cinema-alex-2026"
+                                  data-testid="ntfy-topic-input"
+                                  className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-300" />
+                                <button type="button" onClick={() => pasteInto("ntfy_topic")}
+                                  data-testid="ntfy-topic-paste"
+                                  title="Pegar" className="px-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-orange-600 hover:border-orange-300">
+                                  <Clipboard size={13} />
+                                </button>
+                                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                  onClick={handleNtfyTest} disabled={ntfyTestLoading}
+                                  data-testid="ntfy-test-btn"
+                                  className="px-3 rounded-lg bg-orange-500 text-white text-[11px] font-black disabled:opacity-60 whitespace-nowrap">
+                                  {ntfyTestLoading ? <Loader2 size={12} className="animate-spin" /> : (language === "es" ? "Probar" : "Test")}
+                                </motion.button>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-black text-slate-500">SMS</p>
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                        {language === "es" ? "PRÓXIMAMENTE" : "COMING SOON"}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {language === "es" ? "Integración con Twilio SMS — disponible en próxima versión" : "Twilio SMS integration — available in next release"}
-                    </p>
+                );
+              })()}
+
+              {/* ─── 6. PC / navegador (notificaciones nativas) ─── */}
+              {(() => {
+                const isOpen = openChannel === "pc";
+                const active = notifPermission === "granted";
+                return (
+                  <div className={`rounded-2xl border transition-all ${active ? "border-indigo-300/70 bg-gradient-to-br from-indigo-50/70 to-white/40" : "border-slate-200/70 bg-white/40"}`}>
+                    <button type="button"
+                      data-testid="pc-channel-header"
+                      onClick={() => setOpenChannel(isOpen ? null : "pc")}
+                      className="w-full flex items-center gap-3 p-3.5 text-left">
+                      <div className="w-9 h-9 rounded-xl bg-white shadow-inner border border-indigo-200/60 flex items-center justify-center shrink-0">
+                        <Monitor size={16} className="text-indigo-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-slate-800 truncate">PC / Navegador</p>
+                          <span data-testid="pc-status-badge"
+                            className={`text-[9px] font-black px-2 py-0.5 rounded-full ${active ? "bg-emerald-100 text-emerald-700" : notifPermission === "denied" ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"}`}>
+                            {active ? "ACTIVO" : notifPermission === "denied" ? "BLOQUEADO" : "OFF"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {language === "es" ? "Pop-ups nativos Windows/macOS · gratis" : "Native pop-ups · free"}
+                        </p>
+                      </div>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-indigo-100/60 pt-3">
+                            {notifPermission === "denied" ? (
+                              <p className="text-[11px] text-red-600 font-semibold bg-red-50 rounded-lg p-2.5">
+                                {language === "es" ? "Permiso denegado. Ve a Configuración del navegador → Privacidad → Notificaciones y permite este sitio." : "Permission denied. Allow this site in browser settings."}
+                              </p>
+                            ) : notifPermission === "granted" ? (
+                              <div className="flex flex-wrap gap-2">
+                                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                  onClick={handleNotifyImmediate} disabled={immediateLoading}
+                                  data-testid="pc-notify-immediate-btn"
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg btn-primary text-white text-[11px] font-black disabled:opacity-60">
+                                  {immediateLoading ? <Loader2 size={12} className="animate-spin" /> : <BellRing size={12} />}
+                                  {language === "es" ? "Notificar próximo evento" : "Notify next event"}
+                                </motion.button>
+                                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                  onClick={handleTestSystemNotif}
+                                  data-testid="pc-test-btn"
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-indigo-300 text-indigo-700 text-[11px] font-black hover:bg-indigo-50">
+                                  <Zap size={12} /> {language === "es" ? "Enviar prueba" : "Test"}
+                                </motion.button>
+                              </div>
+                            ) : (
+                              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                onClick={handleRequestPermission}
+                                data-testid="pc-enable-btn"
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg btn-primary text-white text-[11px] font-black">
+                                <BellRing size={12} /> {language === "es" ? "Activar notificaciones" : "Enable notifications"}
+                              </motion.button>
+                            )}
+                            <Link to="/base-datos" data-testid="desktop-app-link"
+                              className="inline-flex items-center gap-1.5 text-[10px] font-black text-indigo-600 hover:text-indigo-700">
+                              <Package size={11} /> {language === "es" ? "¿App de escritorio nativa? Ver paquete →" : "Native desktop app? See package →"}
+                            </Link>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <button disabled aria-disabled="true"
-                    data-testid="sms-toggle-disabled"
-                    className="w-11 h-6 rounded-full bg-slate-200 relative cursor-not-allowed">
-                    <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow" />
-                  </button>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
-            {/* ── Canales de notificación ── */}
-            <div className="space-y-3">
-              <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                {language === "es" ? "Canales alternativos (opcional)" : "Alternative channels (optional)"}
-              </p>
 
-              {/* Email Resend */}
-              <div className="bg-white/40 rounded-2xl p-4 space-y-3 border border-blue-100/60">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Mail size={14} className="text-blue-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-black text-slate-800">Email — Resend</p>
-                    <p className="text-[10px] text-slate-400">Gratis hasta 3,000 emails/mes · <a href="https://resend.com" target="_blank" rel="noreferrer" className="text-indigo-500 underline">resend.com</a></p>
-                  </div>
-                  {notif.resend_api_key && notif.resend_api_key.includes("•") && (
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">ACTIVO</span>
-                  )}
-                </div>
-
-                {/* API Key */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">API Key</label>
-                  <input type="password" value={notif.resend_api_key}
-                    onChange={e => setNotif(p => ({ ...p, resend_api_key: e.target.value }))}
-                    placeholder="re_xxxxx — Obtén la clave en resend.com"
-                    data-testid="notif-resend-key-input"
-                    className="w-full bg-white/70 border border-white/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                </div>
-
-                {/* Email destino */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Email Destino (Admin)</label>
-                  <input type="email" value={notif.admin_email}
-                    onChange={e => setNotif(p => ({ ...p, admin_email: e.target.value }))}
-                    placeholder="tu@email.com"
-                    data-testid="notif-email-input"
-                    className="w-full bg-white/70 border border-white/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                </div>
-
-                {/* Nombre del remitente */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Nombre del Remitente</label>
-                  <input type="text" value={notif.sender_name || ""}
-                    onChange={e => setNotif(p => ({ ...p, sender_name: e.target.value }))}
-                    placeholder="Cinema Productions"
-                    data-testid="notif-sender-name"
-                    className="w-full bg-white/70 border border-white/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                </div>
-
-                {/* Asunto personalizado */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Asunto del Email (opcional)</label>
-                  <input type="text" value={notif.email_subject || ""}
-                    onChange={e => setNotif(p => ({ ...p, email_subject: e.target.value }))}
-                    placeholder="Recordatorio: eventos próximos"
-                    data-testid="notif-email-subject"
-                    className="w-full bg-white/70 border border-white/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                </div>
-
-                {/* CC adicionales */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Emails adicionales (CC, separados por coma)</label>
-                  <input type="text" value={notif.cc_emails || ""}
-                    onChange={e => setNotif(p => ({ ...p, cc_emails: e.target.value }))}
-                    placeholder="socio@email.com, asistente@email.com"
-                    data-testid="notif-cc-emails"
-                    className="w-full bg-white/70 border border-white/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                  <p className="text-[10px] text-slate-400 mt-1">Recibirán copia de cada recordatorio</p>
-                </div>
-
-                {/* Notificar al cliente */}
-                <div className="flex items-center justify-between bg-white/50 rounded-xl px-3 py-2.5">
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Enviar también al cliente</p>
-                    <p className="text-[10px] text-slate-400">Envía un recordatorio al email del cliente en la reserva</p>
-                  </div>
-                  <button
-                    data-testid="notify-client-toggle"
-                    onClick={() => setNotif(p => ({ ...p, notify_client: !p.notify_client }))}
-                    className={`w-9 h-5 rounded-full transition-all relative shrink-0 ${notif.notify_client ? "bg-blue-500" : "bg-slate-200"}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.notify_client ? "left-[18px]" : "left-0.5"}`} />
-                  </button>
-                </div>
-
-                {/* Test result */}
-                {emailTestResult && (
-                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold ${emailTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
-                    {emailTestResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                    {emailTestResult.msg}
-                  </motion.div>
-                )}
-
-                {/* Botones */}
-                <div className="flex gap-2 pt-1">
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                    onClick={handleTestEmail} disabled={emailTestLoading}
-                    data-testid="test-email-btn"
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold transition-all disabled:opacity-50">
-                    {emailTestLoading ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-                    {emailTestLoading ? "Enviando…" : "Probar conexión"}
-                  </motion.button>
-                </div>
-              </div>
-
-              {/* Telegram */}
-              <div className="bg-white/40 rounded-2xl p-4 space-y-3 border border-sky-100/60">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-sky-100 flex items-center justify-center">
-                    <MessageCircle size={14} className="text-sky-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-black text-slate-800">Telegram Bot</p>
-                    <p className="text-[10px] text-slate-400">100% gratis, ilimitado — mensajes instantáneos</p>
-                  </div>
-                  <button
-                    data-testid="telegram-toggle"
-                    onClick={() => setNotif(p => ({ ...p, telegram_enabled: !p.telegram_enabled }))}
-                    className={`w-9 h-5 rounded-full transition-all relative ${notif.telegram_enabled ? "bg-sky-500" : "bg-slate-200"}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.telegram_enabled ? "left-[18px]" : "left-0.5"}`} />
-                  </button>
-                </div>
-
-                {notif.telegram_enabled && (
-                  <div className="space-y-2">
-                    {/* Setup guide */}
-                    <div className="bg-sky-50/80 rounded-xl p-3 text-[10px] text-sky-700 space-y-1">
-                      <p className="font-black uppercase tracking-wide">Cómo configurarlo (3 pasos):</p>
-                      <p>1. En Telegram busca <b>@BotFather</b> → escribe <b>/newbot</b> → obtén el <b>token</b></p>
-                      <p>2. Abre tu bot nuevo → escribe cualquier mensaje para activarlo</p>
-                      <p>3. Abre este link para obtener tu Chat ID:
-                        <br /><code className="bg-white/60 px-1 rounded">https://api.telegram.org/bot{"<TOKEN>"}/getUpdates</code>
-                        <br />Busca el número en "id" dentro de "chat"
-                      </p>
-                    </div>
-                    <input type="password" value={notif.telegram_bot_token}
-                      onChange={e => setNotif(p => ({ ...p, telegram_bot_token: e.target.value }))}
-                      placeholder="1234567890:AAFxxxxxxxxxxxxxxxx (token del bot)"
-                      data-testid="telegram-token-input"
-                      className="w-full bg-white/70 border border-white/80 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                    <div className="flex gap-2">
-                      <input type="text" value={notif.telegram_chat_id}
-                        onChange={e => setNotif(p => ({ ...p, telegram_chat_id: e.target.value }))}
-                        placeholder="Chat ID (ej: 123456789)"
-                        data-testid="telegram-chatid-input"
-                        className="flex-1 bg-white/70 border border-white/80 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                        onClick={handleTelegramTest} disabled={telegramTestLoading}
-                        data-testid="telegram-test-btn"
-                        className="px-3 py-2 rounded-xl bg-sky-500 text-white text-xs font-bold disabled:opacity-60 whitespace-nowrap">
-                        {telegramTestLoading ? <Loader2 size={12} className="animate-spin" /> : "Probar"}
-                      </motion.button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ntfy.sh */}
-              <div className="bg-white/40 rounded-2xl p-4 space-y-3 border border-orange-100/60">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
-                    <Bell size={14} className="text-orange-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-black text-slate-800">ntfy.sh — Push al celular/PC</p>
-                    <p className="text-[10px] text-slate-400">Gratis, sin cuenta — app para iOS, Android, Windows</p>
-                  </div>
-                  <button
-                    data-testid="ntfy-toggle"
-                    onClick={() => setNotif(p => ({ ...p, ntfy_enabled: !p.ntfy_enabled }))}
-                    className={`w-9 h-5 rounded-full transition-all relative ${notif.ntfy_enabled ? "bg-orange-500" : "bg-slate-200"}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${notif.ntfy_enabled ? "left-[18px]" : "left-0.5"}`} />
-                  </button>
-                </div>
-
-                {notif.ntfy_enabled && (
-                  <div className="space-y-2">
-                    <div className="bg-orange-50/80 rounded-xl p-3 text-[10px] text-orange-700 space-y-1">
-                      <p className="font-black uppercase tracking-wide">Cómo configurarlo (2 pasos):</p>
-                      <p>1. Instala la app <b>ntfy</b> en tu celular (iOS / Android) o PC — es gratis</p>
-                      <p>2. Escribe un nombre único para tu tema (ej: <b>cinema-alex-2024</b>) y suscríbete desde la app</p>
-                      <p>Luego ingresa ese mismo nombre aquí. <a href="https://ntfy.sh" target="_blank" rel="noreferrer" className="underline font-bold">ntfy.sh</a></p>
-                    </div>
-                    <div className="flex gap-2">
-                      <input type="text" value={notif.ntfy_topic}
-                        onChange={e => setNotif(p => ({ ...p, ntfy_topic: e.target.value }))}
-                        placeholder="cinema-alex-2024 (tu tema único)"
-                        data-testid="ntfy-topic-input"
-                        className="flex-1 bg-white/70 border border-white/80 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-300" />
-                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                        onClick={handleNtfyTest} disabled={ntfyTestLoading}
-                        data-testid="ntfy-test-btn"
-                        className="px-3 py-2 rounded-xl bg-orange-500 text-white text-xs font-bold disabled:opacity-60 whitespace-nowrap">
-                        {ntfyTestLoading ? <Loader2 size={12} className="animate-spin" /> : "Probar"}
-                      </motion.button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Browser Push */}
-              <div className="rounded-2xl overflow-hidden border border-slate-200/60 bg-white/40">
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${notifPermission === "granted" ? "bg-emerald-100" : notifPermission === "denied" ? "bg-red-50" : "bg-slate-100"}`}>
-                    <Monitor size={14} className={notifPermission === "granted" ? "text-emerald-600" : notifPermission === "denied" ? "text-red-500" : "text-slate-400"} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-black text-slate-800">Notificaciones del navegador</p>
-                    <p className="text-[10px] text-slate-400">Pop-up en Windows / macOS — gratis</p>
-                  </div>
-                  <span data-testid="system-notif-status"
-                    className={`text-[10px] font-black px-2.5 py-1 rounded-full ${notifPermission === "granted" ? "bg-emerald-100 text-emerald-700" : notifPermission === "denied" ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-400"}`}>
-                    {notifPermission === "granted" ? "ACTIVO" : notifPermission === "denied" ? "BLOQUEADO" : "INACTIVO"}
-                  </span>
-                </div>
-                <div className="px-4 pb-3">
-                  {notifPermission === "denied" ? (
-                    <p className="text-[10px] text-red-500 font-medium">
-                      Permiso denegado. Ve a Configuración del navegador → Privacidad → Notificaciones y permite este sitio.
-                    </p>
-                  ) : notifPermission === "granted" ? (
-                    <div className="flex gap-2">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleNotifyImmediate} disabled={immediateLoading}
-                        data-testid="system-notif-immediate-btn"
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl btn-primary text-white text-xs font-bold disabled:opacity-60">
-                        {immediateLoading ? <Loader2 size={12} className="animate-spin" /> : <BellRing size={12} />}
-                        Notificar evento próximo
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                        onClick={handleTestSystemNotif}
-                        data-testid="system-notif-test-btn"
-                        className="px-3 py-2 rounded-xl glass text-slate-700 text-xs font-bold hover:bg-white/50 border border-white/60">
-                        Probar
-                      </motion.button>
-                    </div>
-                  ) : (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleRequestPermission}
-                      data-testid="system-notif-enable-btn"
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl btn-primary text-white text-xs font-bold">
-                      <BellRing size={13} /> Activar notificaciones del navegador
-                    </motion.button>
-                  )}
-                </div>
-              </div>
-            </div>
 
             {/* ── WhatsApp manual ── */}
             {(notif.notification_channel === "whatsapp" || notif.notification_channel === "both") && (
