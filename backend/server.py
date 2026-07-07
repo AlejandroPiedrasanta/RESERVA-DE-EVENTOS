@@ -389,6 +389,17 @@ class NotificationSettingsModel(BaseModel):
     telegram_chat_id: Optional[str] = None
     ntfy_enabled: bool = False
     ntfy_topic: Optional[str] = None
+    # ── WhatsApp Cloud API (Meta) ──────────────────────────────
+    whatsapp_enabled: bool = False
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
+    whatsapp_recipient: Optional[str] = None   # E.164 without '+'
+    whatsapp_template_name: Optional[str] = None
+    # ── Google OAuth (Gmail) config — self-hosted credentials ──
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    # ── SMS (placeholder, not implemented) ─────────────────────
+    sms_enabled: bool = False
     # ── Business config ────────────────────────────────────────
     company_name: Optional[str] = None
     company_address: Optional[str] = None
@@ -539,16 +550,25 @@ async def check_and_send_reminders():
 
 
 # ─── Gmail Helper ─────────────────────────────────────────────
+async def _get_google_credentials_config():
+    """Prefer DB-stored credentials (self-hosted UI config); fallback to env."""
+    doc = await db.app_settings.find_one({}, {"google_client_id": 1, "google_client_secret": 1, "_id": 0})
+    cid = (doc or {}).get("google_client_id") or GOOGLE_CLIENT_ID
+    csec = (doc or {}).get("google_client_secret") or GOOGLE_CLIENT_SECRET
+    return cid, csec
+
+
 async def _get_gmail_service():
     """Return authenticated Gmail API service using stored refresh token."""
     token_doc = await db.oauth_tokens.find_one({"provider": "gmail"}, {"_id": 0})
     if not token_doc or not token_doc.get("refresh_token"):
         raise Exception("Gmail not connected. Connect via Settings → Notificaciones.")
+    cid, csec = await _get_google_credentials_config()
     creds = Credentials(
         token=token_doc.get("access_token"),
         refresh_token=token_doc["refresh_token"],
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
+        client_id=cid,
+        client_secret=csec,
         token_uri="https://oauth2.googleapis.com/token",
         scopes=GMAIL_SCOPES,
     )
@@ -639,6 +659,68 @@ async def _send_ntfy(topic: str, title: str, message: str, priority: str = "defa
         r.raise_for_status()
 
 
+# ─── WhatsApp Cloud API Helper (Meta) ─────────────────────────
+def _normalize_e164(number: str) -> str:
+    """Strip +, spaces, and dashes. Meta expects digits only."""
+    if not number:
+        return ""
+    return "".join(ch for ch in str(number) if ch.isdigit())
+
+
+async def _send_whatsapp_text(access_token: str, phone_number_id: str, to: str, body: str):
+    """Send a plain WhatsApp text message via Meta Graph API v20.0."""
+    url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": _normalize_e164(to),
+        "type": "text",
+        "text": {"preview_url": False, "body": body[:4000]},
+    }
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(
+            url,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        if r.status_code != 200:
+            raise Exception(f"WhatsApp API {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+
+async def _send_whatsapp_template(access_token: str, phone_number_id: str, to: str, template_name: str, lang: str = "es"):
+    """Send an approved template message (needed outside 24-hour window)."""
+    url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": _normalize_e164(to),
+        "type": "template",
+        "template": {"name": template_name, "language": {"code": lang}},
+    }
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(
+            url,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        if r.status_code != 200:
+            raise Exception(f"WhatsApp Template {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+
+def _build_whatsapp_text(events: list, days_label: str) -> str:
+    lines = ["*Cinema Productions* — Recordatorio", ""]
+    lines.append(f"Tienes {len(events)} evento(s) en {days_label}:")
+    lines.append("")
+    for ev in events[:10]:
+        date = ev.get("event_date", "")
+        time_str = ev.get("event_time", "")
+        when = f"{date} {time_str}".strip()
+        lines.append(f"• *{ev.get('client_name','?')}* — {ev.get('event_type','?')}")
+        lines.append(f"  {when} — {ev.get('venue') or 'Sin lugar'}")
+    return "\n".join(lines)
+
+
 # ─── Per-minute reminder check (all channels) ────────────────
 async def _dispatch_reminders(events: list, days_label: str, settings: dict):
     """Send a reminder for `events` via every enabled channel."""
@@ -686,6 +768,26 @@ async def _dispatch_reminders(events: list, days_label: str, settings: dict):
             logger.info("[Reminders] ntfy sent")
         except Exception as e:
             logger.warning(f"[Reminders] ntfy failed: {e}")
+
+    # ── WhatsApp Cloud API (Meta) ───────────────
+    if (
+        settings.get("whatsapp_enabled")
+        and settings.get("whatsapp_access_token")
+        and settings.get("whatsapp_phone_number_id")
+        and settings.get("whatsapp_recipient")
+    ):
+        try:
+            wa_days_int = int(days_label.split()[0]) if days_label and days_label[0].isdigit() else 0
+            wa_body = _build_whatsapp_text(events, f"{wa_days_int} día(s)" if wa_days_int else days_label)
+            await _send_whatsapp_text(
+                settings["whatsapp_access_token"],
+                settings["whatsapp_phone_number_id"],
+                settings["whatsapp_recipient"],
+                wa_body,
+            )
+            logger.info("[Reminders] WhatsApp sent")
+        except Exception as e:
+            logger.warning(f"[Reminders] WhatsApp failed: {e}")
 
     # ── Browser Push ────────────────────────────
     await _send_push_to_all(title, body, "/dashboard")
@@ -1736,6 +1838,20 @@ async def get_app_settings():
         doc["has_telegram_token"] = True
     else:
         doc["has_telegram_token"] = False
+    # Mask WhatsApp access token
+    if doc.get("whatsapp_access_token"):
+        wa = doc["whatsapp_access_token"]
+        doc["whatsapp_access_token"] = "•" * 24 + wa[-4:] if len(wa) > 8 else "****"
+        doc["has_whatsapp_token"] = True
+    else:
+        doc["has_whatsapp_token"] = False
+    # Mask Google client secret
+    if doc.get("google_client_secret"):
+        gs = doc["google_client_secret"]
+        doc["google_client_secret"] = "•" * 24 + gs[-4:] if len(gs) > 8 else "****"
+        doc["has_google_client_secret"] = True
+    else:
+        doc["has_google_client_secret"] = False
     # Ensure reminder_periods is always a list
     if "reminder_periods" not in doc:
         doc["reminder_periods"] = [doc.get("reminder_days", 3)]
@@ -1755,6 +1871,16 @@ async def update_app_settings(settings: NotificationSettingsModel):
     tok = update_doc.get("telegram_bot_token") or ""
     if "****" in tok or "•" in tok:
         update_doc.pop("telegram_bot_token", None)
+
+    # If WhatsApp token is masked, don't overwrite
+    wa = update_doc.get("whatsapp_access_token") or ""
+    if "****" in wa or "•" in wa:
+        update_doc.pop("whatsapp_access_token", None)
+
+    # If Google client secret is masked, don't overwrite
+    gs = update_doc.get("google_client_secret") or ""
+    if "****" in gs or "•" in gs:
+        update_doc.pop("google_client_secret", None)
 
     existing = await db.app_settings.find_one({}, {"_id": 0})
     if existing:
@@ -1776,6 +1902,18 @@ async def update_app_settings(settings: NotificationSettingsModel):
             saved["has_telegram_token"] = True
         else:
             saved["has_telegram_token"] = False
+        if saved.get("whatsapp_access_token"):
+            wa2 = saved["whatsapp_access_token"]
+            saved["whatsapp_access_token"] = "•" * 24 + wa2[-4:] if len(wa2) > 8 else "****"
+            saved["has_whatsapp_token"] = True
+        else:
+            saved["has_whatsapp_token"] = False
+        if saved.get("google_client_secret"):
+            gs2 = saved["google_client_secret"]
+            saved["google_client_secret"] = "•" * 24 + gs2[-4:] if len(gs2) > 8 else "****"
+            saved["has_google_client_secret"] = True
+        else:
+            saved["has_google_client_secret"] = False
     return saved or {}
 
 
@@ -2158,12 +2296,15 @@ from desktop_package import (
 @api_router.get("/oauth/gmail/start")
 async def gmail_oauth_start():
     """Return Google OAuth2 authorization URL."""
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google credentials not configured")
+    cid, csec = await _get_google_credentials_config()
+    if not cid or not csec:
+        raise HTTPException(status_code=400, detail="Google credentials not configured. Guarda Client ID y Secret en Ajustes.")
+    if not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="GOOGLE_REDIRECT_URI not configured (missing APP_PUBLIC_URL)")
     flow = Flow.from_client_config(
         {"web": {
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": cid,
+            "client_secret": csec,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [GOOGLE_REDIRECT_URI],
@@ -2176,7 +2317,7 @@ async def gmail_oauth_start():
         prompt="consent",
         include_granted_scopes="true",
     )
-    return {"url": auth_url}
+    return {"url": auth_url, "redirect_uri": GOOGLE_REDIRECT_URI}
 
 
 @api_router.get("/oauth/gmail/callback")
@@ -2185,10 +2326,11 @@ async def gmail_oauth_callback(code: str = None, error: str = None):
     if error or not code:
         return RedirectResponse(url=f"{APP_PUBLIC_URL}/ajustes?gmail_error={error or 'cancelled'}")
     try:
+        cid, csec = await _get_google_credentials_config()
         flow = Flow.from_client_config(
             {"web": {
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": cid,
+                "client_secret": csec,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [GOOGLE_REDIRECT_URI],
@@ -2223,10 +2365,24 @@ async def gmail_oauth_callback(code: str = None, error: str = None):
 
 @api_router.get("/oauth/gmail/status")
 async def gmail_status():
+    cid, csec = await _get_google_credentials_config()
     doc = await db.oauth_tokens.find_one({"provider": "gmail"}, {"_id": 0})
+    creds_configured = bool(cid and csec)
     if doc and doc.get("refresh_token"):
-        return {"connected": True, "email": doc.get("email", ""), "connected_at": doc.get("connected_at")}
-    return {"connected": False, "email": "", "connected_at": None}
+        return {
+            "connected": True,
+            "email": doc.get("email", ""),
+            "connected_at": doc.get("connected_at"),
+            "credentials_configured": creds_configured,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+        }
+    return {
+        "connected": False,
+        "email": "",
+        "connected_at": None,
+        "credentials_configured": creds_configured,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+    }
 
 
 @api_router.delete("/oauth/gmail/disconnect")
@@ -2252,6 +2408,66 @@ async def gmail_test():
         return {"ok": True, "message": f"Correo enviado a {doc['email']}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── WhatsApp Cloud API Endpoints ─────────────────────────────
+class WhatsAppTestPayload(BaseModel):
+    access_token: Optional[str] = None
+    phone_number_id: Optional[str] = None
+    recipient: Optional[str] = None
+    template_name: Optional[str] = None
+
+
+@api_router.post("/whatsapp/verify")
+async def whatsapp_verify(payload: WhatsAppTestPayload):
+    """Ping the Graph API to verify token + phone_number_id are valid."""
+    doc = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    token = payload.access_token or doc.get("whatsapp_access_token")
+    pnid = payload.phone_number_id or doc.get("whatsapp_phone_number_id")
+    if not token or not pnid:
+        return {"ok": False, "error": "Faltan credenciales de WhatsApp (Access Token y Phone Number ID)"}
+    try:
+        url = f"https://graph.facebook.com/v20.0/{pnid}"
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                "ok": True,
+                "verified_name": data.get("verified_name") or data.get("display_phone_number", ""),
+                "display_phone_number": data.get("display_phone_number", ""),
+            }
+        return {"ok": False, "error": f"Meta API {r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Error: {e}"}
+
+
+@api_router.post("/whatsapp/test")
+async def whatsapp_test(payload: WhatsAppTestPayload):
+    """Send a plain-text test WhatsApp message. Falls back to template if 24h window is closed."""
+    doc = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    token = payload.access_token or doc.get("whatsapp_access_token")
+    pnid = payload.phone_number_id or doc.get("whatsapp_phone_number_id")
+    recipient = payload.recipient or doc.get("whatsapp_recipient")
+    template = payload.template_name or doc.get("whatsapp_template_name")
+    if not token or not pnid or not recipient:
+        return {"ok": False, "error": "Faltan credenciales o número destinatario"}
+    try:
+        await _send_whatsapp_text(
+            token, pnid, recipient,
+            "*Cinema Productions* — Prueba ✓\n\nWhatsApp conectado correctamente. Recibirás recordatorios de eventos aquí.",
+        )
+        return {"ok": True, "message": f"Mensaje enviado a +{_normalize_e164(recipient)}"}
+    except Exception as e:
+        err = str(e)
+        # If failure is 131047 (outside 24h window) and template configured -> fallback
+        if template and ("131047" in err or "outside" in err.lower() or "re-engagement" in err.lower()):
+            try:
+                await _send_whatsapp_template(token, pnid, recipient, template)
+                return {"ok": True, "message": f"Plantilla '{template}' enviada (fuera de la ventana de 24 h)"}
+            except Exception as e2:
+                return {"ok": False, "error": f"Texto y plantilla fallaron: {e2}"}
+        return {"ok": False, "error": err}
 
 
 # ─── Web Push Endpoints ───────────────────────────────────────

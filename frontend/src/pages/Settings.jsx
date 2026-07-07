@@ -59,6 +59,17 @@ export default function Settings() {
     telegram_chat_id: "",
     ntfy_enabled: false,
     ntfy_topic: "",
+    // WhatsApp Cloud API (Meta)
+    whatsapp_enabled: false,
+    whatsapp_access_token: "",
+    whatsapp_phone_number_id: "",
+    whatsapp_recipient: "",
+    whatsapp_template_name: "",
+    // Google OAuth (Gmail) — user-provided credentials
+    google_client_id: "",
+    google_client_secret: "",
+    // SMS placeholder
+    sms_enabled: false,
     // Business config
     company_name: "",
     company_address: "",
@@ -77,6 +88,14 @@ export default function Settings() {
   const [testResult, setTestResult] = useState(null);
   const [telegramTestLoading, setTelegramTestLoading] = useState(false);
   const [ntfyTestLoading, setNtfyTestLoading] = useState(false);
+  // Gmail OAuth state
+  const [gmailStatus, setGmailStatus] = useState({ connected: false, email: "", credentials_configured: false, redirect_uri: "" });
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const [gmailTestResult, setGmailTestResult] = useState(null);
+  // WhatsApp state
+  const [waVerifyBusy, setWaVerifyBusy] = useState(false);
+  const [waTestBusy, setWaTestBusy] = useState(false);
+  const [waResult, setWaResult] = useState(null);
 
   // Desktop app has been moved to Database page → "Soporte avanzado"
 
@@ -250,6 +269,17 @@ export default function Settings() {
           telegram_chat_id: data.telegram_chat_id ?? "",
           ntfy_enabled: data.ntfy_enabled ?? false,
           ntfy_topic: data.ntfy_topic ?? "",
+          // WhatsApp Cloud API
+          whatsapp_enabled: data.whatsapp_enabled ?? false,
+          whatsapp_access_token: data.has_whatsapp_token ? "•".repeat(24) + "••••" : "",
+          whatsapp_phone_number_id: data.whatsapp_phone_number_id ?? "",
+          whatsapp_recipient: data.whatsapp_recipient ?? "",
+          whatsapp_template_name: data.whatsapp_template_name ?? "",
+          // Google OAuth credentials
+          google_client_id: data.google_client_id ?? "",
+          google_client_secret: data.has_google_client_secret ? "•".repeat(24) + "••••" : "",
+          // SMS
+          sms_enabled: data.sms_enabled ?? false,
           // Business config
           company_name: data.company_name ?? "",
           company_address: data.company_address ?? "",
@@ -266,7 +296,113 @@ export default function Settings() {
       }
     }).catch(() => {});
     loadDbStats();
+    loadGmailStatus();
+    // Handle OAuth redirect toast
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("gmail_ok")) {
+        toast({ title: "✓ Gmail conectado correctamente" });
+        window.history.replaceState({}, "", window.location.pathname);
+      } else if (params.get("gmail_error")) {
+        toast({ title: "Error al conectar Gmail", description: params.get("gmail_error"), variant: "destructive" });
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    } catch { /* noop */ }
   }, []);
+
+  const loadGmailStatus = async () => {
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      const r = await fetch(`${API}/api/oauth/gmail/status`);
+      if (r.ok) setGmailStatus(await r.json());
+    } catch { /* noop */ }
+  };
+
+  const handleConnectGmail = async () => {
+    setGmailBusy(true);
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      // First save credentials + settings so backend has them
+      await updateAppSettings({
+        google_client_id: notif.google_client_id,
+        ...(notif.google_client_secret && !notif.google_client_secret.includes("•") ? { google_client_secret: notif.google_client_secret } : {}),
+      });
+      const r = await fetch(`${API}/api/oauth/gmail/start`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || "Error al iniciar OAuth");
+      window.location.href = j.url;
+    } catch (e) {
+      toast({ title: "Error al conectar Gmail", description: e.message, variant: "destructive" });
+      setGmailBusy(false);
+    }
+  };
+
+  const handleDisconnectGmail = async () => {
+    if (!window.confirm("¿Desconectar Gmail? Los recordatorios ya no llegarán por este canal.")) return;
+    setGmailBusy(true);
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      await fetch(`${API}/api/oauth/gmail/disconnect`, { method: "DELETE" });
+      toast({ title: "Gmail desconectado" });
+      await loadGmailStatus();
+    } catch (e) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setGmailBusy(false); }
+  };
+
+  const handleTestGmail = async () => {
+    setGmailBusy(true);
+    setGmailTestResult(null);
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      const r = await fetch(`${API}/api/oauth/gmail/test`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || "Error al enviar prueba");
+      setGmailTestResult({ ok: true, msg: j.message });
+    } catch (e) {
+      setGmailTestResult({ ok: false, msg: e.message });
+    } finally { setGmailBusy(false); }
+  };
+
+  const handleVerifyWhatsApp = async () => {
+    setWaVerifyBusy(true);
+    setWaResult(null);
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      // Save first if user typed new credentials
+      const payload = {};
+      if (notif.whatsapp_access_token && !notif.whatsapp_access_token.includes("•")) payload.access_token = notif.whatsapp_access_token;
+      if (notif.whatsapp_phone_number_id) payload.phone_number_id = notif.whatsapp_phone_number_id;
+      const r = await fetch(`${API}/api/whatsapp/verify`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (j.ok) setWaResult({ ok: true, msg: `Conectado: ${j.verified_name || j.display_phone_number || "OK"}` });
+      else setWaResult({ ok: false, msg: j.error || "Error" });
+    } catch (e) { setWaResult({ ok: false, msg: e.message }); }
+    finally { setWaVerifyBusy(false); }
+  };
+
+  const handleTestWhatsApp = async () => {
+    setWaTestBusy(true);
+    setWaResult(null);
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      const payload = { recipient: notif.whatsapp_recipient };
+      if (notif.whatsapp_access_token && !notif.whatsapp_access_token.includes("•")) payload.access_token = notif.whatsapp_access_token;
+      if (notif.whatsapp_phone_number_id) payload.phone_number_id = notif.whatsapp_phone_number_id;
+      if (notif.whatsapp_template_name) payload.template_name = notif.whatsapp_template_name;
+      const r = await fetch(`${API}/api/whatsapp/test`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (j.ok) setWaResult({ ok: true, msg: j.message });
+      else setWaResult({ ok: false, msg: j.error || "Error" });
+    } catch (e) { setWaResult({ ok: false, msg: e.message }); }
+    finally { setWaTestBusy(false); }
+  };
 
   // Build status polling & desktop handlers moved to DesktopAppSection component
   // (rendered inside DatabasePage → "Soporte avanzado")
@@ -369,6 +505,15 @@ export default function Settings() {
       // If key looks like masked dots, don't send it (keep existing)
       if (payload.resend_api_key && payload.resend_api_key.includes("•")) {
         delete payload.resend_api_key;
+      }
+      if (payload.whatsapp_access_token && payload.whatsapp_access_token.includes("•")) {
+        delete payload.whatsapp_access_token;
+      }
+      if (payload.google_client_secret && payload.google_client_secret.includes("•")) {
+        delete payload.google_client_secret;
+      }
+      if (payload.telegram_bot_token && payload.telegram_bot_token.includes("•")) {
+        delete payload.telegram_bot_token;
       }
       // Convert empty string to null for optional integer fields
       if (payload.auto_cleanup_months === "" || payload.auto_cleanup_months === undefined) {
@@ -886,10 +1031,320 @@ export default function Settings() {
 
             </div> {/* close grid-cols-2 */}
 
+            {/* ═══════════════════════════════════════════════════════════ */}
+            {/* ── CANALES PRINCIPALES DE RECORDATORIO (REDISEÑO) ─────── */}
+            {/* ═══════════════════════════════════════════════════════════ */}
+            <div className="space-y-4" data-testid="notification-channels-redesign">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                  {language === "es" ? "Cómo quieres recibir los recordatorios" : "How you want to receive reminders"}
+                </p>
+                <span className="text-[10px] font-bold text-slate-400">
+                  {language === "es" ? "Selecciona uno o varios" : "Pick one or more"}
+                </span>
+              </div>
+
+              {/* ─── 1. Gmail (OAuth Google) ─── */}
+              <div className="rounded-3xl p-5 space-y-4 border border-rose-200/60 bg-gradient-to-br from-rose-50/70 to-white/40 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-rose-200/60 flex items-center justify-center shrink-0">
+                    <Mail size={20} className="text-rose-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-black text-slate-800">Gmail (Google)</p>
+                      <span data-testid="gmail-status-badge"
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${gmailStatus.connected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        {gmailStatus.connected ? "CONECTADO" : "SIN CONECTAR"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {gmailStatus.connected
+                        ? <>Enviando desde <b>{gmailStatus.email}</b></>
+                        : "Envía recordatorios desde tu propia cuenta de Gmail (recomendado)"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Credentials fields (only if not connected yet) */}
+                {!gmailStatus.connected && (
+                  <div className="space-y-2.5 bg-white/60 rounded-2xl p-3.5 border border-rose-100/60">
+                    <p className="text-[10px] font-bold text-rose-700 flex items-center gap-1.5">
+                      <AlertCircle size={11} /> {language === "es" ? "Configura tus credenciales de Google (Cloud Console)" : "Configure your Google credentials"}
+                    </p>
+                    <details className="text-[10px] text-slate-600 bg-rose-50/70 rounded-xl px-3 py-2">
+                      <summary className="cursor-pointer font-black text-rose-700">
+                        {language === "es" ? "¿Cómo obtenerlas? (paso a paso)" : "How to get them?"}
+                      </summary>
+                      <ol className="mt-2 space-y-1 list-decimal list-inside">
+                        <li>Ve a <a className="underline font-bold text-rose-600" href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a> → crea un proyecto</li>
+                        <li>APIs & Services → Library → busca <b>Gmail API</b> → Enable</li>
+                        <li>OAuth consent screen → External → añade tu email como <b>Test user</b></li>
+                        <li>Credentials → Create Credentials → <b>OAuth Client ID</b> → Web application</li>
+                        <li>Authorized redirect URI: <code className="bg-white px-1 rounded text-[9px] break-all">{gmailStatus.redirect_uri || "(pendiente)"}</code></li>
+                        <li>Copia el Client ID y Client Secret abajo y pulsa <b>Conectar con Google</b></li>
+                      </ol>
+                    </details>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Google Client ID</label>
+                      <input type="text" value={notif.google_client_id || ""}
+                        onChange={e => setNotif(p => ({ ...p, google_client_id: e.target.value }))}
+                        placeholder="1234567890-abc123.apps.googleusercontent.com"
+                        data-testid="google-client-id-input"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Google Client Secret</label>
+                      <input type="password" value={notif.google_client_secret || ""}
+                        onChange={e => setNotif(p => ({ ...p, google_client_secret: e.target.value }))}
+                        placeholder="GOCSPX-xxxxxxxxxxxxxxxxx"
+                        data-testid="google-client-secret-input"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-300" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2">
+                  {!gmailStatus.connected ? (
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleConnectGmail}
+                      disabled={gmailBusy || !notif.google_client_id || !notif.google_client_secret}
+                      data-testid="gmail-connect-btn"
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs font-black shadow-sm hover:shadow disabled:opacity-50">
+                      {gmailBusy ? <Loader2 size={13} className="animate-spin" /> : (
+                        <svg width="14" height="14" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                      )}
+                      {language === "es" ? "Conectar con Google" : "Sign in with Google"}
+                    </motion.button>
+                  ) : (
+                    <>
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleTestGmail} disabled={gmailBusy}
+                        data-testid="gmail-test-btn"
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black shadow-sm disabled:opacity-50">
+                        {gmailBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                        {language === "es" ? "Enviar prueba" : "Send test"}
+                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleDisconnectGmail} disabled={gmailBusy}
+                        data-testid="gmail-disconnect-btn"
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-black hover:bg-slate-50 disabled:opacity-50">
+                        <XCircle size={13} /> {language === "es" ? "Desconectar" : "Disconnect"}
+                      </motion.button>
+                    </>
+                  )}
+                </div>
+
+                {gmailTestResult && (
+                  <div data-testid="gmail-test-result"
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold ${gmailTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                    {gmailTestResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                    {gmailTestResult.msg}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── 2. WhatsApp Cloud API (Meta) ─── */}
+              <div className="rounded-3xl p-5 space-y-4 border border-emerald-200/60 bg-gradient-to-br from-emerald-50/70 to-white/40 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-emerald-200/60 flex items-center justify-center shrink-0">
+                    <MessageCircle size={20} className="text-emerald-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-black text-slate-800">WhatsApp (Meta Cloud API)</p>
+                      <span data-testid="whatsapp-status-badge"
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${notif.whatsapp_enabled && notif.whatsapp_phone_number_id ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        {notif.whatsapp_enabled ? "ACTIVO" : "INACTIVO"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {language === "es" ? "Envía recordatorios oficiales por WhatsApp (requiere Meta Business)" : "Send official reminders via WhatsApp (requires Meta Business)"}
+                    </p>
+                  </div>
+                  <button
+                    data-testid="whatsapp-toggle"
+                    onClick={() => setNotif(p => ({ ...p, whatsapp_enabled: !p.whatsapp_enabled }))}
+                    className={`w-11 h-6 rounded-full transition-all relative shrink-0 ${notif.whatsapp_enabled ? "bg-emerald-500" : "bg-slate-200"}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${notif.whatsapp_enabled ? "left-[22px]" : "left-0.5"}`} />
+                  </button>
+                </div>
+
+                {notif.whatsapp_enabled && (
+                  <div className="space-y-2.5 bg-white/60 rounded-2xl p-3.5 border border-emerald-100/60">
+                    <details className="text-[10px] text-slate-600 bg-emerald-50/70 rounded-xl px-3 py-2">
+                      <summary className="cursor-pointer font-black text-emerald-700">
+                        {language === "es" ? "¿Cómo obtener credenciales de Meta?" : "How to get Meta credentials?"}
+                      </summary>
+                      <ol className="mt-2 space-y-1 list-decimal list-inside">
+                        <li>Ve a <a className="underline font-bold text-emerald-600" href="https://developers.facebook.com" target="_blank" rel="noreferrer">developers.facebook.com</a> → crea una app tipo <b>Business</b></li>
+                        <li>Añade el producto <b>WhatsApp</b> → API Setup</li>
+                        <li>Copia el <b>Access Token</b> (temporal 24h — genera uno permanente con System User)</li>
+                        <li>Copia el <b>Phone Number ID</b> (no es el número, es el ID que Meta le asigna)</li>
+                        <li>Añade tu número personal como <b>Recipient</b> en la lista de números de prueba y verifícalo</li>
+                      </ol>
+                    </details>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Access Token</label>
+                      <input type="password" value={notif.whatsapp_access_token || ""}
+                        onChange={e => setNotif(p => ({ ...p, whatsapp_access_token: e.target.value }))}
+                        placeholder="EAAxxxxxxxxxxxxxxxxxxx"
+                        data-testid="whatsapp-token-input"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Phone Number ID</label>
+                        <input type="text" value={notif.whatsapp_phone_number_id || ""}
+                          onChange={e => setNotif(p => ({ ...p, whatsapp_phone_number_id: e.target.value }))}
+                          placeholder="123456789012345"
+                          data-testid="whatsapp-pnid-input"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">Destinatario (E.164)</label>
+                        <input type="text" value={notif.whatsapp_recipient || ""}
+                          onChange={e => setNotif(p => ({ ...p, whatsapp_recipient: e.target.value }))}
+                          placeholder="50212345678 (sin +)"
+                          data-testid="whatsapp-recipient-input"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1 block">
+                        {language === "es" ? "Plantilla (opcional, fallback fuera de 24 h)" : "Template name (optional, 24h fallback)"}
+                      </label>
+                      <input type="text" value={notif.whatsapp_template_name || ""}
+                        onChange={e => setNotif(p => ({ ...p, whatsapp_template_name: e.target.value }))}
+                        placeholder="hello_world"
+                        data-testid="whatsapp-template-input"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleVerifyWhatsApp} disabled={waVerifyBusy}
+                        data-testid="whatsapp-verify-btn"
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-emerald-300 text-emerald-700 text-xs font-black hover:bg-emerald-50 disabled:opacity-50">
+                        {waVerifyBusy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                        {language === "es" ? "Verificar credenciales" : "Verify credentials"}
+                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                        onClick={handleTestWhatsApp} disabled={waTestBusy || !notif.whatsapp_recipient}
+                        data-testid="whatsapp-test-btn"
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black disabled:opacity-50">
+                        {waTestBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                        {language === "es" ? "Enviar prueba" : "Send test"}
+                      </motion.button>
+                    </div>
+                    {waResult && (
+                      <div data-testid="whatsapp-test-result"
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold ${waResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                        {waResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                        {waResult.msg}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── 3. PC / Windows notifications ─── */}
+              <div className="rounded-3xl p-5 space-y-3 border border-indigo-200/60 bg-gradient-to-br from-indigo-50/70 to-white/40 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-indigo-200/60 flex items-center justify-center shrink-0">
+                    <Monitor size={20} className="text-indigo-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-black text-slate-800">
+                        {language === "es" ? "Notificaciones en la PC (Windows / macOS)" : "PC notifications (Windows / macOS)"}
+                      </p>
+                      <span data-testid="pc-status-badge"
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full ${notifPermission === "granted" ? "bg-emerald-100 text-emerald-700" : notifPermission === "denied" ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"}`}>
+                        {notifPermission === "granted" ? "ACTIVO" : notifPermission === "denied" ? "BLOQUEADO" : "INACTIVO"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {language === "es" ? "Pop-ups nativos del sistema mientras el navegador está abierto — sin costo" : "Native OS pop-ups while the browser is open — free"}
+                    </p>
+                  </div>
+                </div>
+
+                {notifPermission === "denied" ? (
+                  <p className="text-[11px] text-red-600 font-semibold bg-red-50 rounded-xl p-2.5">
+                    {language === "es" ? "Permiso denegado. Ve a Configuración del navegador → Privacidad → Notificaciones y permite este sitio." : "Permission denied. Go to your browser settings and allow this site."}
+                  </p>
+                ) : notifPermission === "granted" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleNotifyImmediate} disabled={immediateLoading}
+                      data-testid="pc-notify-immediate-btn"
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl btn-primary text-white text-xs font-black disabled:opacity-60">
+                      {immediateLoading ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />}
+                      {language === "es" ? "Notificar próximo evento" : "Notify next event"}
+                    </motion.button>
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleTestSystemNotif}
+                      data-testid="pc-test-btn"
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-indigo-300 text-indigo-700 text-xs font-black hover:bg-indigo-50">
+                      <Zap size={13} /> {language === "es" ? "Enviar prueba" : "Test"}
+                    </motion.button>
+                  </div>
+                ) : (
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                    onClick={handleRequestPermission}
+                    data-testid="pc-enable-btn"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl btn-primary text-white text-xs font-black">
+                    <BellRing size={13} /> {language === "es" ? "Activar notificaciones del sistema" : "Enable system notifications"}
+                  </motion.button>
+                )}
+
+                <div className="mt-2 rounded-2xl bg-indigo-50/70 border border-indigo-100/60 p-3">
+                  <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wider mb-1">
+                    {language === "es" ? "¿Quieres una app nativa de Windows?" : "Want a native Windows app?"}
+                  </p>
+                  <p className="text-[11px] text-slate-600">
+                    {language === "es"
+                      ? "Descarga el paquete de escritorio desde Base de datos → Soporte avanzado. Recibirás notificaciones incluso con el navegador cerrado."
+                      : "Download the desktop package from Database → Advanced. Receive notifications even when the browser is closed."}
+                  </p>
+                  <Link to="/base-datos" data-testid="desktop-app-link"
+                    className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-black text-indigo-600 hover:text-indigo-700">
+                    <Package size={11} /> {language === "es" ? "Ir a paquete de escritorio" : "Go to desktop package"} <ExternalLink size={10} />
+                  </Link>
+                </div>
+              </div>
+
+              {/* ─── 4. SMS (placeholder — coming soon) ─── */}
+              <div className="rounded-3xl p-5 space-y-2 border border-slate-200/60 bg-slate-50/50 opacity-80" data-testid="sms-channel">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white shadow-inner border border-slate-200/60 flex items-center justify-center shrink-0">
+                    <MessageCircle size={20} className="text-slate-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-black text-slate-500">SMS</p>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                        {language === "es" ? "PRÓXIMAMENTE" : "COMING SOON"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {language === "es" ? "Integración con Twilio SMS — disponible en próxima versión" : "Twilio SMS integration — available in next release"}
+                    </p>
+                  </div>
+                  <button disabled aria-disabled="true"
+                    data-testid="sms-toggle-disabled"
+                    className="w-11 h-6 rounded-full bg-slate-200 relative cursor-not-allowed">
+                    <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* ── Canales de notificación ── */}
             <div className="space-y-3">
               <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                {language === "es" ? "Canales de notificación" : "Notification channels"}
+                {language === "es" ? "Canales alternativos (opcional)" : "Alternative channels (optional)"}
               </p>
 
               {/* Email Resend */}
