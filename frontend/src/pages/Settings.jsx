@@ -600,7 +600,7 @@ export default function Settings() {
               <motion.button key={l.code} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                 onClick={() => changeLanguage(l.code)} data-testid={`lang-${l.code}`}
                 className={`flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold transition-all flex-1 justify-center ${language === l.code ? "btn-primary text-white" : "glass border-white/60 text-slate-600 hover:bg-white/50"}`}>
-                <span className="text-base">{l.flag}</span> {l.label}
+                <span className="text-base flag-emoji">{l.flag}</span> {l.label}
                 {language === l.code && <span className="text-[10px] opacity-70 ml-1">✓</span>}
               </motion.button>
             ))}
@@ -639,7 +639,7 @@ export default function Settings() {
 
                   {/* Bandera animada */}
                   <motion.span
-                    className="relative text-3xl leading-none"
+                    className="relative text-3xl leading-none flag-emoji"
                     animate={active ? { rotate: [0, -8, 8, -4, 0], y: [0, -3, 0] } : { rotate: 0, y: 0 }}
                     transition={active ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0.3 }}
                     whileHover={{ scale: 1.25, rotate: [0, -12, 12, 0], transition: { duration: 0.5 } }}
@@ -696,7 +696,7 @@ export default function Settings() {
               <motion.span
                 animate={{ rotate: [0, -6, 6, 0] }}
                 transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                className="text-2xl leading-none"
+                className="text-2xl leading-none flag-emoji"
               >
                 {(CURRENCIES.find(c => c.code === currency) || CURRENCIES[0]).flag}
               </motion.span>

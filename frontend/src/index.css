@@ -4,9 +4,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Twemoji Country Flags — fixes flag emojis not rendering on Windows/Linux */
+@font-face {
+  font-family: 'Twemoji Country Flags';
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  src: url('https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.8/dist/TwemojiCountryFlags.woff2') format('woff2');
+  font-display: swap;
+}
+
 body {
   margin: 0;
-  font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Twemoji Country Flags', 'Satoshi', -apple-system, BlinkMacSystemFont, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #f8fafc;
@@ -14,8 +22,14 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Cabinet Grotesk', sans-serif;
+  font-family: 'Twemoji Country Flags', 'Cabinet Grotesk', sans-serif;
   letter-spacing: -0.03em;
+}
+
+/* Flag helper class for guaranteed emoji-flag rendering */
+.flag-emoji {
+  font-family: 'Twemoji Country Flags', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif !important;
+  font-style: normal;
 }
 
 /* Scrollbar */
