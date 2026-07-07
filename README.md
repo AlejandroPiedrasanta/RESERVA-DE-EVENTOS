@@ -8,7 +8,27 @@
 
 *Software desarrollado localmente en Guatemala por [@AlejandroPiedrasanta](https://github.com/AlejandroPiedrasanta).*
 
+[![Prueba gratis 3 días](https://img.shields.io/badge/Prueba%20gratis-3%20d%C3%ADas-2ea44f?style=for-the-badge)](#-planes-y-precios)
+[![Pago permanente](https://img.shields.io/badge/Pago-permanente-1f6feb?style=for-the-badge)](#-planes-y-precios)
+[![Suscripción mensual](https://img.shields.io/badge/Suscripci%C3%B3n-mensual-8250df?style=for-the-badge)](#-planes-y-precios)
+
 </div>
+
+---
+
+## 💳 Planes y precios
+
+Cinema Productions es un **producto comercial**. Puedes probarlo gratis durante 3 días y luego elegir el plan que mejor se adapte a tu negocio.
+
+| Plan | Precio | Ideal para |
+|---|---|---|
+| 🆓 **Prueba gratuita** | **3 días** sin costo · sin tarjeta | Evaluar todas las funciones antes de comprar |
+| 💎 **Pago único (permanente)** | Pago único · licencia vitalicia | Empresas que quieren instalación local para siempre, sin cuotas recurrentes |
+| 🔁 **Suscripción mensual** | Pago mensual · actualizaciones incluidas | Quienes prefieren cuotas bajas + soporte y updates continuos |
+
+> Al iniciar la app por primera vez recibes automáticamente **72 horas de prueba completa**. Al terminar la prueba, la aplicación pedirá una licencia (permanente o suscripción activa) para seguir funcionando.
+
+**Para adquirir una licencia** o solicitar una demo comercial, contacta con [@AlejandroPiedrasanta](https://github.com/AlejandroPiedrasanta).
 
 ---
 
@@ -21,6 +41,7 @@ Aplicación **full-stack** para la gestión y reserva de eventos de Cinema Produ
 
 ## 📚 Tabla de contenido
 
+- [Planes y precios](#-planes-y-precios)
 - [Descarga rápida (Windows)](#-descarga-rápida-windows)
 - [Características](#-características)
 - [Arquitectura](#-arquitectura)
@@ -305,7 +326,13 @@ yarn build
 ## 📄 Licencia
 
 Copyright © Cinema Productions.
-Uso interno. Contacta al autor para condiciones de reutilización.
+**Software comercial** — se ofrece con:
+
+- 🆓 **Versión de prueba de 3 días** (72 h) al iniciar el `.exe` por primera vez.
+- 💎 **Licencia de pago permanente** (pago único, sin caducidad).
+- 🔁 **Suscripción mensual** (actualizaciones y soporte incluidos).
+
+Cualquier redistribución, revenda o uso comercial sin licencia válida está prohibido. Contacta al autor para adquirir una licencia o solicitar una demo.
 
 ---
 
