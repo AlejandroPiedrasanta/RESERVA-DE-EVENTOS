@@ -391,8 +391,128 @@ export function DesktopAppSection() {
                 : <><Package size={16} /> {language === "es" ? "Compilar y descargar (.zip)" : "Build & download (.zip)"}</>}
             </motion.button>
 
+            {/* ══ BOTÓN RECOMENDADO: INSTALADOR .EXE (Inno Setup) ══════════ */}
+            <div className="pt-2 border-t border-slate-200/60 space-y-2">
+              <div className="flex items-center gap-2">
+                <Sparkles size={12} className="text-amber-500" />
+                <span className="text-[10px] font-black text-slate-700 uppercase tracking-wider">
+                  {language === "es" ? "Recomendado — Instalador Windows" : "Recommended — Windows Installer"}
+                </span>
+              </div>
+              <motion.button
+                whileHover={{ scale: installerPhase === "downloading" ? 1 : 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={handleDownloadInstaller}
+                disabled={installerPhase === "downloading" || installerPhase === "loading"}
+                data-testid="desktop-download-installer-btn"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black text-white shadow-md transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                style={{
+                  background: installerInfo?.status === "ready"
+                    ? "linear-gradient(135deg, #6366f1, #8b5cf6)"
+                    : "linear-gradient(135deg, #64748b, #475569)"
+                }}
+              >
+                {installerPhase === "loading"
+                  ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Consultando release…" : "Fetching release…"}</>
+                  : installerPhase === "downloading"
+                  ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Descargando instalador…" : "Downloading installer…"}</>
+                  : installerInfo?.status === "ready"
+                  ? <><DownloadCloud size={16} /> {language === "es" ? "Descargar instalador .EXE (auto-instala)" : "Download .EXE installer (auto-install)"}</>
+                  : <><ExternalLink size={16} /> {language === "es" ? "Publicar instalador en GitHub Actions" : "Publish installer via GitHub Actions"}</>}
+              </motion.button>
+
+              <div className="flex items-center justify-between text-[10px] font-semibold">
+                {installerInfo?.status === "ready" ? (
+                  <>
+                    <span className="text-slate-500">
+                      {installerInfo.name} · <span className="text-slate-700">{installerInfo.size_mb} MB</span> · <span className="text-slate-700">{installerInfo.tag}</span>
+                    </span>
+                    <span className="text-indigo-600 flex items-center gap-1">
+                      <CheckCircle size={11} />
+                      {language === "es" ? "Auto-instala + accesos" : "Auto-installs + shortcuts"}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-500 leading-tight">
+                    {language === "es"
+                      ? "Doble clic → se instala en %LocalAppData%, crea accesos directos y lanza la app. Sin permisos admin."
+                      : "Double-click → installs to %LocalAppData%, creates shortcuts and launches the app. No admin rights."}
+                  </span>
+                )}
+              </div>
+
+              {/* SHA256 del instalador */}
+              {installerInfo?.status === "ready" && installerInfo?.sha256 && (
+                <div
+                  data-testid="desktop-installer-sha256"
+                  className="rounded-xl border border-indigo-200/70 bg-gradient-to-br from-indigo-50/60 to-white overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowInstallerHashInfo(v => !v)}
+                    className="w-full flex items-center justify-between px-3 py-2 hover:bg-indigo-50/40 transition-colors"
+                    data-testid="desktop-installer-sha256-toggle"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Shield size={12} className="text-indigo-600 flex-shrink-0" />
+                      <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex-shrink-0">
+                        SHA256
+                      </span>
+                      <code className="text-[10px] font-mono text-slate-700 truncate">
+                        {installerInfo.sha256.slice(0, 16)}…{installerInfo.sha256.slice(-8)}
+                      </code>
+                    </div>
+                    <div
+                      onClick={(e) => { e.stopPropagation(); copyInstallerHash(); }}
+                      role="button"
+                      tabIndex={0}
+                      data-testid="desktop-installer-sha256-copy"
+                      className="flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex-shrink-0 cursor-pointer"
+                    >
+                      {installerHashCopied ? <CheckCircle size={11} /> : <Copy size={11} />}
+                      {installerHashCopied
+                        ? (language === "es" ? "Copiado" : "Copied")
+                        : (language === "es" ? "Copiar" : "Copy")}
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {showInstallerHashInfo && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="border-t border-indigo-200/70"
+                      >
+                        <div className="px-3 py-2.5 space-y-2">
+                          <p className="text-[10px] text-slate-600 leading-relaxed">
+                            {language === "es"
+                              ? "Verifica el instalador antes de ejecutarlo:"
+                              : "Verify the installer before running it:"}
+                          </p>
+                          <code className="block px-2.5 py-1.5 rounded-md bg-slate-900 text-emerald-300 text-[10px] font-mono whitespace-pre overflow-x-auto">
+{`Get-FileHash .\\${installerInfo.name} -Algorithm SHA256`}
+                          </code>
+                          <code className="block px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-mono break-all">
+                            {installerInfo.sha256}
+                          </code>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </div>
+
             {/* ══ BOTÓN SECUNDARIO: DESCARGAR .EXE (Windows, sin Python) ══ */}
             <div className="pt-2 border-t border-slate-200/60">
+              <div className="flex items-center gap-2 mb-2">
+                <HardDrive size={12} className="text-slate-500" />
+                <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">
+                  {language === "es" ? "Alternativa — Ejecutable portable" : "Alternative — Portable executable"}
+                </span>
+              </div>
               <motion.button
                 whileHover={{ scale: exePhase === "downloading" ? 1 : 1.02 }}
                 whileTap={{ scale: 0.97 }}
@@ -411,7 +531,7 @@ export function DesktopAppSection() {
                   : exePhase === "downloading"
                   ? <><Loader2 size={16} className="animate-spin" /> {language === "es" ? "Descargando .EXE…" : "Downloading .EXE…"}</>
                   : exeInfo?.status === "ready"
-                  ? <><HardDrive size={16} /> {language === "es" ? "Descargar .EXE (Windows, sin Python)" : "Download .EXE (Windows, no Python)"}</>
+                  ? <><HardDrive size={16} /> {language === "es" ? "Descargar .EXE portable (sin instalar)" : "Download portable .EXE (no install)"}</>
                   : <><ExternalLink size={16} /> {language === "es" ? "Publicar .EXE en GitHub Actions" : "Publish .EXE via GitHub Actions"}</>}
               </motion.button>
 
