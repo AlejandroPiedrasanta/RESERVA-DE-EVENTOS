@@ -41,9 +41,33 @@ Aplicación **full-stack** para la gestión y reserva de eventos de Cinema Produ
 
 ---
 
+## 📸 Vista previa
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/dashboard.png" alt="Panel principal con métricas del mes" width="100%" /><br/>
+      <sub><b>Panel</b> — métricas del mes y próximas reservas</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/calendario.png" alt="Vista de calendario mensual" width="100%" /><br/>
+      <sub><b>Calendario</b> — reservas mes/lista con búsqueda</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/socios.png" alt="Socios con rotación automática de pagos" width="100%" /><br/>
+      <sub><b>Socios</b> — rotación automática de pagos y deudas</sub>
+    </td>
+  </tr>
+</table>
+
+> Diseño *Glass Aurora* con acentos violetas, tipografía moderna y una tour guiada de 7 pasos al primer uso.
+
+---
+
 ## 📚 Tabla de contenido
 
 - [Planes y precios](#-planes-y-precios)
+- [Vista previa](#-vista-previa)
 - [Descarga rápida (Windows)](#-descarga-rápida-windows)
 - [Características](#-características)
 - [Arquitectura](#-arquitectura)
