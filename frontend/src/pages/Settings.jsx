@@ -567,7 +567,8 @@ export default function Settings() {
   ];
 
   return (
-    <div className="px-6 py-8 max-w-2xl mx-auto">
+    <div className="px-6 py-8 max-w-7xl mx-auto">
+     <div className="max-w-2xl mx-auto">
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
         <div className="flex items-center gap-3">
           <motion.div
@@ -1086,6 +1087,7 @@ export default function Settings() {
 
       </motion.div>
       </SectionSearchContext.Provider>
+     </div>
     </div>
   );
 }

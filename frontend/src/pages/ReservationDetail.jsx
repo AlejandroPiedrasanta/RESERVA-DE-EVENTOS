@@ -116,7 +116,7 @@ export default function ReservationDetail() {
   }, [reservation?.client_name]);
 
   if (loading) return (
-    <div className="px-6 py-8 max-w-6xl mx-auto space-y-4">
+    <div className="px-6 py-8 max-w-7xl mx-auto space-y-4">
       <div className="h-10 w-64 glass rounded-2xl animate-pulse" />
       <div className="h-56 glass rounded-3xl animate-pulse" />
     </div>
@@ -138,7 +138,7 @@ export default function ReservationDetail() {
     `Hace ${Math.abs(daysToEvent)} días`;
 
   return (
-    <div className="px-6 py-8 max-w-6xl mx-auto">
+    <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* ============= HERO ============= */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
