@@ -5331,6 +5331,10 @@ async def reset_ai_context():
 
 app.include_router(api_router)
 
+# ── Subscription + Emergent Google Auth + PayPal ──────────────────
+from subscription import router as subscription_router  # noqa: E402
+app.include_router(subscription_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

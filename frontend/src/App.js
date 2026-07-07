@@ -2,6 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import Reservations from "@/pages/Reservations";
@@ -15,6 +16,11 @@ import AppearancePage from "@/pages/AppearancePage";
 import UpdatesPage from "@/pages/UpdatesPage";
 import { Toaster } from "@/components/ui/toaster";
 import LockScreen from "@/components/LockScreen";
+import LoginScreen from "@/components/LoginScreen";
+import AuthCallback from "@/components/AuthCallback";
+import SubscriptionScreen from "@/components/SubscriptionScreen";
+import TrialBanner from "@/components/TrialBanner";
+import { hasSupportAccess } from "@/components/SupportAccessButton";
 import { useEffect } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
 
@@ -36,7 +42,6 @@ function AnimatedRoutes() {
     if (pageTransition === "none") return {
       initial: {}, animate: {}, exit: {},
     };
-    // default: fade
     return {
       initial: { opacity: 0, y: 16, filter: "blur(4px)" },
       animate: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
@@ -59,14 +64,14 @@ function AnimatedRoutes() {
           <Route path="/base-de-datos" element={<DatabasePage />} />
           <Route path="/apariencia" element={<AppearancePage />} />
           <Route path="/actualizaciones" element={<UpdatesPage />} />
+          <Route path="/suscripcion" element={<SubscriptionScreen reason="manual" />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
   );
 }
 
-// Inner component — has access to SettingsContext
-function AppInner() {
+function ProtectedApp() {
   const { animations, appLocked } = useSettings();
   const { start } = useNotifications();
 
@@ -74,7 +79,6 @@ function AppInner() {
     if ("Notification" in window && Notification.permission === "granted") {
       const saved = localStorage.getItem("cp_notif_enabled");
       if (saved !== "false") {
-        // Sync saved settings from backend to localStorage keys the hook reads
         const reminderTime = localStorage.getItem("cp_reminder_time") || "09:00";
         const reminderDays = localStorage.getItem("cp_reminder_days") || "3";
         localStorage.setItem("cp_reminder_time", reminderTime);
@@ -103,9 +107,11 @@ function AppInner() {
           <div className="blob blob-4" />
         </div>
         <BrowserRouter>
-          <Layout>
-            <AnimatedRoutes />
-          </Layout>
+          <AppWithBanner>
+            <Layout>
+              <AnimatedRoutes />
+            </Layout>
+          </AppWithBanner>
         </BrowserRouter>
         <Toaster />
       </div>
@@ -113,11 +119,68 @@ function AppInner() {
   );
 }
 
-function App() {
+function AppWithBanner({ children }) {
+  const { subscription } = useAuth();
+  return (
+    <>
+      <TrialBanner subscription={subscription} />
+      {children}
+    </>
+  );
+}
+
+// AuthGate decides what to render based on auth + subscription state
+function AuthGate() {
+  const { status, subscription } = useAuth();
+
+  // Handle OAuth callback synchronously during render (prevents race condition)
+  if (typeof window !== "undefined" && window.location.hash?.includes("session_id=")) {
+    return <AuthCallback />;
+  }
+
+  // Support bypass: permanent access on this device once the support password was entered
+  if (hasSupportAccess()) {
+    return (
+      <SettingsProvider>
+        <ProtectedApp />
+      </SettingsProvider>
+    );
+  }
+
+  if (status === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50" data-testid="auth-loading">
+        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return <LoginScreen />;
+  }
+
+  // Authenticated
+  if (!subscription?.is_active) {
+    return (
+      <MotionConfig reducedMotion="never">
+        <SubscriptionScreen reason="trial_expired" />
+        <Toaster />
+      </MotionConfig>
+    );
+  }
+
   return (
     <SettingsProvider>
-      <AppInner />
+      <ProtectedApp />
     </SettingsProvider>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }
 
