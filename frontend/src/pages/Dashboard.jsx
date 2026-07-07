@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getStats, getReservations, getSocios } from "@/lib/api";
-import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle, LayoutDashboard, MapPin, Sparkles, Flame, Zap } from "lucide-react";
-import { motion } from "framer-motion";
+import { CalendarDays, Clock, CreditCard, TrendingUp, Plus, ArrowRight, BarChart2, DollarSign, Camera, User, CheckCircle, AlertCircle, LayoutDashboard, MapPin, Sparkles, Flame, Zap, Bell } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
 import { getEventConfig } from "@/lib/eventConfig";
@@ -231,6 +231,19 @@ export default function Dashboard() {
 
   const visibleWidgets = (dashboardWidgets || []).filter(w => w.enabled && WIDGET_DATA[w.id]);
 
+  // Compute next upcoming event (any date >= today, not cancelled/completed)
+  const _today = new Date(); _today.setHours(0,0,0,0);
+  const nextEvent = [...all]
+    .filter(r => r.event_date && r.status !== "Cancelado" && r.status !== "Completado" && new Date(r.event_date + "T00:00:00") >= _today)
+    .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))[0] || null;
+  const daysToNext = nextEvent
+    ? Math.round((new Date(nextEvent.event_date + "T00:00:00") - _today) / 86400000)
+    : null;
+  const nextCfg = nextEvent ? getEventConfig(nextEvent.event_type) : null;
+  const NextIcon = nextCfg?.icon;
+  const isEventToday = daysToNext === 0;
+  const isEventSoon = daysToNext !== null && daysToNext <= 3;
+
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* Header */}
@@ -257,6 +270,75 @@ export default function Dashboard() {
         </div>
         <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>
       </motion.div>
+
+      {/* Notificación URGENTE: evento hoy, mañana o dentro de 3 días */}
+      <AnimatePresence>
+        {!loading && nextEvent && isEventSoon && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ type: "spring", stiffness: 260, damping: 22 }}
+            className="mb-6 rounded-2xl overflow-hidden shadow-lg cursor-pointer relative"
+            onClick={() => navigate(`/reservaciones/${nextEvent.id}`)}
+            data-testid="dashboard-urgent-event-notification"
+            style={{
+              background: isEventToday
+                ? "linear-gradient(90deg,#ef4444,#f97316)"
+                : daysToNext === 1
+                  ? "linear-gradient(90deg,#f97316,#f59e0b)"
+                  : "linear-gradient(90deg,#f59e0b,#eab308)",
+            }}
+          >
+            <motion.div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: "rgba(255,255,255,0.18)" }}
+              animate={{ opacity: [0, 0.55, 0] }}
+              transition={{ duration: 1.9, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <div className="relative flex items-center gap-3 px-5 py-3.5 text-white">
+              <motion.div
+                animate={{ rotate: [0, -14, 14, 0], scale: [1, 1.15, 1] }}
+                transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                className="w-11 h-11 rounded-xl bg-white/25 flex items-center justify-center flex-shrink-0 backdrop-blur-sm"
+              >
+                <Bell size={19} strokeWidth={2.5} />
+              </motion.div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/90 leading-none mb-1.5">
+                  {isEventToday
+                    ? (language === "es" ? "¡Atención! Evento HOY" : "Heads up! Event TODAY")
+                    : daysToNext === 1
+                      ? (language === "es" ? "¡Prepárate! Evento MAÑANA" : "Get ready! Event TOMORROW")
+                      : (language === "es" ? `Recordatorio · Evento en ${daysToNext} días` : `Reminder · Event in ${daysToNext} days`)}
+                </p>
+                <p className="text-sm sm:text-base font-black truncate leading-tight">
+                  {language === "es" ? "Oye, tienes un evento" : "Hey, you have an event"} · {nextEvent.event_type} · {nextEvent.client_name}
+                  {nextEvent.event_time ? ` · ${nextEvent.event_time}` : ""}
+                </p>
+              </div>
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/25 backdrop-blur-sm text-[11px] font-black flex-shrink-0">
+                {NextIcon ? <NextIcon size={12} strokeWidth={2.4} /> : <CalendarDays size={12} />}
+                {nextEvent.venue || formatDate(nextEvent.event_date)}
+              </div>
+              <div className="flex flex-col items-center px-3 py-1.5 rounded-xl bg-white/25 backdrop-blur-sm text-white flex-shrink-0 min-w-[62px]">
+                <span className="text-[9px] font-black uppercase tracking-widest opacity-90 leading-none">
+                  {language === "es" ? "Faltan" : "In"}
+                </span>
+                <span className="text-lg font-black leading-none mt-0.5" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                  {isEventToday ? (language === "es" ? "¡Hoy!" : "Now!") : daysToNext}
+                </span>
+                {!isEventToday && (
+                  <span className="text-[9px] font-black leading-none mt-0.5">
+                    {daysToNext === 1 ? (language === "es" ? "día" : "day") : (language === "es" ? "días" : "days")}
+                  </span>
+                )}
+              </div>
+              <ArrowRight size={17} className="flex-shrink-0 opacity-90" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Animated banner: month events + future pending events (replaces stat cards) */}
       {loading ? (
