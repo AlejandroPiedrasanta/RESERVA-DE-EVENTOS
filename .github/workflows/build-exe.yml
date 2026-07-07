@@ -85,25 +85,33 @@ jobs:
       - name: Build .exe with PyInstaller
         shell: pwsh
         run: |
-          pyinstaller `
-            --onefile `
-            --name CinemaProductions `
-            --icon frontend/public/favicon.ico `
-            --add-data "backend/_bundle/build;build" `
-            --add-data "backend/_bundle/ai_context_default.py;." `
-            --add-data "backend/_bundle/version.txt;." `
-            --add-data "backend/_bundle/themes;themes" `
-            --hidden-import motor.motor_asyncio `
-            --hidden-import pymongo `
-            --hidden-import bson `
-            --hidden-import apscheduler.schedulers.asyncio `
-            --hidden-import apscheduler.triggers.cron `
-            --hidden-import apscheduler.triggers.interval `
-            --hidden-import pywebpush `
-            --hidden-import PIL `
-            --collect-submodules uvicorn `
-            --collect-submodules fastapi `
-            backend/standalone_app.py
+          $iconArg = @()
+          if (Test-Path frontend/public/favicon.ico) {
+            $iconArg = @("--icon", "frontend/public/favicon.ico")
+            Write-Host "✓ Usando favicon.ico"
+          } else {
+            Write-Host "⚠ favicon.ico no existe — construyendo sin icono personalizado"
+          }
+          $pyiArgs = @(
+            "--onefile",
+            "--name", "CinemaProductions",
+            "--add-data", "backend/_bundle/build;build",
+            "--add-data", "backend/_bundle/ai_context_default.py;.",
+            "--add-data", "backend/_bundle/version.txt;.",
+            "--add-data", "backend/_bundle/themes;themes",
+            "--hidden-import", "motor.motor_asyncio",
+            "--hidden-import", "pymongo",
+            "--hidden-import", "bson",
+            "--hidden-import", "apscheduler.schedulers.asyncio",
+            "--hidden-import", "apscheduler.triggers.cron",
+            "--hidden-import", "apscheduler.triggers.interval",
+            "--hidden-import", "pywebpush",
+            "--hidden-import", "PIL",
+            "--collect-submodules", "uvicorn",
+            "--collect-submodules", "fastapi"
+          ) + $iconArg + @("backend/standalone_app.py")
+          pyinstaller @pyiArgs
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló con exit $LASTEXITCODE" }
 
       - name: Verify .exe & compute SHA256
         id: hash
