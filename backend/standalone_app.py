@@ -2442,17 +2442,25 @@ async def apply_update_and_restart(payload: dict = Body(default={})):
         except Exception:
             pass
 
+        # En Windows, spawn el hijo sin ventana de consola visible.
+        popen_kwargs = {"cwd": str(install_dir)}
+        if sys.platform == "win32":
+            # DETACHED_PROCESS (0x00000008) + CREATE_NO_WINDOW (0x08000000)
+            # → nuevo proceso sin heredar la consola, sin ventana negra.
+            popen_kwargs["creationflags"] = 0x00000008 | 0x08000000
+            popen_kwargs["close_fds"] = True
+
         try:
             if getattr(sys, 'frozen', False):
                 # Ejecutable compilado: relanzar
-                subprocess.Popen([str(sys.executable)], cwd=str(install_dir))
+                subprocess.Popen([str(sys.executable)], **popen_kwargs)
             else:
                 # Modo desarrollo: relanzar el python actual
                 launcher = install_dir / "launcher.pyw"
                 if launcher.exists():
-                    subprocess.Popen([sys.executable, str(launcher)], cwd=str(install_dir))
+                    subprocess.Popen([sys.executable, str(launcher)], **popen_kwargs)
                 else:
-                    subprocess.Popen([sys.executable, str(install_dir / "app.py")], cwd=str(install_dir))
+                    subprocess.Popen([sys.executable, str(install_dir / "app.py")], **popen_kwargs)
             # Terminar este proceso
             os._exit(0)
         except Exception as e:
@@ -3957,6 +3965,22 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
+
+    # En modo --windowed (frozen sin consola) sys.stdout puede ser None.
+    # Redirigimos los prints a un log file para no crashear con AttributeError.
+    if getattr(sys, "frozen", False) and (sys.stdout is None or not hasattr(sys.stdout, "write")):
+        _log_dir = ROOT_DIR / "logs" if not getattr(sys, "_MEIPASS", None) else Path.home() / "CinemaProductions" / "logs"
+        try:
+            _log_dir.mkdir(parents=True, exist_ok=True)
+            _log_path = _log_dir / "cinema.log"
+            _log_fh = open(_log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = _log_fh
+            sys.stderr = _log_fh
+        except Exception:
+            # Último recurso: descartar stdout/stderr.
+            import io as _io
+            sys.stdout = _io.StringIO()
+            sys.stderr = _io.StringIO()
 
     db_label = "Embebida (cinema_data.json)" if _using_embedded else MONGO_URL[:40]
 

@@ -125,6 +125,7 @@ jobs:
           }
           $pyiArgs = @(
             "--onefile",
+            "--windowed",
             "--name", "CinemaProductions",
             "--add-data", "backend/_bundle/build;build",
             "--add-data", "backend/_bundle/ai_context_default.py;.",
@@ -144,23 +145,39 @@ jobs:
           pyinstaller @pyiArgs
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló con exit $LASTEXITCODE" }
 
-      - name: Smoke test .exe (verify build/index.html is bundled)
+      - name: Smoke test .exe (verify build/index.html is bundled + HTTP works)
         shell: pwsh
         run: |
-          # Ejecutamos el .exe con PYINSTALLER_STRICT_UNPACK y stopamos tras 6s.
-          # Verificamos que en el _MEI temp exista build/index.html.
+          # Ejecutamos el .exe (con --windowed no muestra consola), esperamos que
+          # arranque, y validamos: (a) _MEI*/build/index.html existe, (b) el
+          # servidor responde en http://127.0.0.1:8001/api/ con 200.
           $exe = "dist/CinemaProductions.exe"
           if (-not (Test-Path $exe)) { throw "No hay .exe para smoke test" }
           $env:CP_NO_BROWSER = "1"
           $p = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
-          Start-Sleep -Seconds 6
+          Start-Sleep -Seconds 10  # más tiempo: uvicorn + init DB embebida
+
+          # (a) MEI check
           $meiDirs = Get-ChildItem "$env:TEMP" -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue |
                      Where-Object { Test-Path (Join-Path $_.FullName "build/index.html") }
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
           if (-not $meiDirs) {
-            throw "❌ Smoke test falló: ningún _MEI* contiene build/index.html. Revisa --add-data."
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            throw "❌ Smoke test (a): ningún _MEI* contiene build/index.html."
           }
-          Write-Host "✓ Smoke test OK — build/index.html empaquetado en $($meiDirs[0].FullName)"
+          Write-Host "✓ (a) build/index.html empaquetado en $($meiDirs[0].FullName)"
+
+          # (b) HTTP check con reintentos
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8001/api/" -TimeoutSec 2 -UseBasicParsing
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          if (-not $ok) { throw "❌ Smoke test (b): el .exe no respondió en http://127.0.0.1:8001/api/" }
+          Write-Host "✓ (b) HTTP /api/ respondió 200 — arranque OK sin consola"
 
       - name: Verify .exe & compute SHA256
         id: hash
@@ -227,7 +244,16 @@ jobs:
             python -c "from PIL import Image; im=Image.open('frontend/public/logo.png').convert('RGBA'); w,h=im.size; s=max(w,h); c=Image.new('RGBA',(s,s),(0,0,0,0)); c.paste(im,((s-w)//2,(s-h)//2)); c.save('frontend/public/favicon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
           }
           Copy-Item frontend/public/favicon.ico dist/favicon.ico -Force
-          Write-Host "✓ installer.iss + favicon.ico copiados a dist/"
+
+          # Imágenes del wizard (BMPs). Están comiteadas en installer_assets/.
+          # Fallback: regenerar desde logo.png si faltara alguna.
+          if (-not (Test-Path installer_assets/wizard_big.bmp) -or -not (Test-Path installer_assets/wizard_small.bmp)) {
+            Write-Host "⚠ Faltan BMPs en installer_assets/. Regenerando desde logo.png..."
+            python scripts/gen_wizard_bmps.py frontend/public/logo.png installer_assets
+          }
+          Copy-Item installer_assets/wizard_big.bmp   dist/wizard_big.bmp   -Force
+          Copy-Item installer_assets/wizard_small.bmp dist/wizard_small.bmp -Force
+          Write-Host "✓ installer.iss + favicon.ico + wizard BMPs listos en dist/"
 
       - name: Build installer with Inno Setup
         shell: pwsh
