@@ -8,7 +8,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
 import { getUpdatesHistory, uploadAppUpdate, deleteUpdate, setLatestUpdate, getUpdateDownloadUrl, checkForUpdates,
-  getGithubConfig, checkGithubUpdates, applyGithubUpdate } from "@/lib/api";
+  getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady } from "@/lib/api";
 import { celebrateUpdate } from "@/lib/celebrations";
 
 function formatBytes(bytes) {
@@ -103,19 +103,30 @@ export default function UpdatesPage() {
 
   const handleApplyGithub = async () => {
     if (!window.confirm("¿Aplicar la actualización desde GitHub?\n\nSe descargará el código nuevo, se aplicará automáticamente y la app se reiniciará. Tus datos (reservas, socios, .env) se conservan.")) return;
+    if (ghApplying) return;
     setGhApplying(true);
+    let restarting = false;
     try {
       const res = await applyGithubUpdate(true);
       setGhResult(null);
       if (res.restarted) {
         // App de escritorio: aplicado automáticamente y reiniciando
+        restarting = true;
         setCheckResult({ status: "installed", message: res.message });
         celebrateUpdate();
         toast({
-          title: `✓ Actualización aplicada (${res.files_updated} archivos)`,
-          description: "La app se reiniciará en 2 segundos con la nueva versión.",
+          title: `Actualización aplicada (${res.files_updated} archivos)`,
+          description: "Esperando a que la app vuelva a arrancar…",
         });
-        setTimeout(() => window.location.reload(), 5000);
+        const ok = await waitBackendReady(120000);
+        if (ok) window.location.reload();
+        else {
+          toast({
+            title: "La app tardó demasiado en reiniciarse",
+            description: "Cierra y vuelve a abrir Cinema Productions.",
+            variant: "destructive",
+          });
+        }
       } else if (res.is_desktop) {
         // Fallback (versión antigua): solo indica descargar el paquete
         setCheckResult({ status: "desktop_update", message: res.message });
@@ -124,15 +135,31 @@ export default function UpdatesPage() {
           description: res.message || "Descarga el paquete de nuevo para actualizar.",
         });
       } else {
+        restarting = true;
         setCheckResult({ status: "installed", version: res.new_sha_short });
         celebrateUpdate();
-        toast({ title: "🎉 Versión nueva instalada", description: "La app se está actualizando y reiniciando…" });
-        setTimeout(() => window.location.reload(), 4500);
+        toast({ title: "Versión nueva instalada", description: "Esperando a que la app vuelva a arrancar…" });
+        const ok = await waitBackendReady(60000);
+        if (ok) window.location.reload();
       }
     } catch (err) {
-      toast({ title: "Error al aplicar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+      // Si es error de red (server ya salió), esperar el reinicio como en el caso OK
+      const netErr = err?.code === "ERR_NETWORK" || err?.code === "ECONNABORTED" || !err?.response;
+      if (netErr) {
+        restarting = true;
+        toast({ title: "Actualización en curso", description: "La app se está reiniciando…" });
+        const ok = await waitBackendReady(120000);
+        if (ok) window.location.reload();
+        else toast({
+          title: "La app tardó demasiado en reiniciarse",
+          description: "Cierra y vuelve a abrir Cinema Productions.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Error al aplicar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+      }
     } finally {
-      setGhApplying(false);
+      if (!restarting) setGhApplying(false);
     }
   };
 

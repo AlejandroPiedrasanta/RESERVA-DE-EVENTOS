@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSettings } from "@/context/SettingsContext";
-import { checkGithubUpdates, applyGithubUpdate } from "@/lib/api";
+import { checkGithubUpdates, applyGithubUpdate, waitBackendReady } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -121,18 +121,33 @@ export default function GithubUpdateNotifier() {
   };
 
   const handleApply = async () => {
+    if (applying) return;
     setApplying(true);
+    let restarting = false;
     try {
       const res = await applyGithubUpdate(true);
       setApplied(true);
       // App de escritorio: mensaje específico según si se reinició o no
       if (res?.is_desktop) {
         if (res.restarted) {
+          restarting = true;
           toast({
             title: "Actualización aplicada",
-            description: `${res.files_updated || 0} archivos actualizados. La app se reiniciará en 2 segundos.`,
+            description: `${res.files_updated || 0} archivos actualizados. Esperando a que la app vuelva a arrancar…`,
           });
-          setTimeout(() => window.location.reload(), 2500);
+          // Poll al backend hasta que vuelva. Solo entonces recargar.
+          const ok = await waitBackendReady(120000);
+          if (ok) {
+            window.location.reload();
+          } else {
+            toast({
+              title: "La app tardó demasiado en reiniciarse",
+              description: "Cierra la ventana y vuelve a abrir Cinema Productions desde el acceso directo.",
+              variant: "destructive",
+            });
+            setApplied(false);
+            setApplying(false);
+          }
         } else if (res.dry_run) {
           toast({
             title: "Simulación completada (DRY RUN)",
@@ -150,19 +165,53 @@ export default function GithubUpdateNotifier() {
           setApplying(false);
         }
       } else {
+        restarting = true;
         toast({
           title: "Actualización aplicada",
           description: "El servidor se reiniciará y cargará los cambios más recientes.",
         });
-        setTimeout(() => window.location.reload(), 2200);
+        const ok = await waitBackendReady(60000);
+        if (ok) window.location.reload();
+        else {
+          toast({
+            title: "El servidor tardó demasiado en volver",
+            description: "Recarga manualmente cuando la app vuelva a estar disponible.",
+            variant: "destructive",
+          });
+          setApplied(false);
+          setApplying(false);
+        }
       }
     } catch (err) {
-      toast({
-        title: "No se pudo aplicar la actualización",
-        description: err?.response?.data?.detail || err?.message || "Error inesperado",
-        variant: "destructive",
-      });
-      setApplying(false);
+      // Si el server se cerró (error de red tras aplicar), NO es un fallo real:
+      // el swap está en curso y hay que esperar al reinicio como en el caso OK.
+      const netErr = err?.code === "ERR_NETWORK" || err?.code === "ECONNABORTED" || !err?.response;
+      if (netErr && applied === false) {
+        restarting = true;
+        toast({
+          title: "Actualización en curso",
+          description: "La app se está reiniciando. Espera unos segundos…",
+        });
+        const ok = await waitBackendReady(120000);
+        if (ok) window.location.reload();
+        else {
+          toast({
+            title: "La app tardó demasiado en reiniciarse",
+            description: "Cierra y vuelve a abrir Cinema Productions.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "No se pudo aplicar la actualización",
+          description: err?.response?.data?.detail || err?.message || "Error inesperado",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      // Si NO estamos reiniciando, siempre liberar el estado. Si estamos
+      // reiniciando, la app se recargará y el estado se resetea al montar.
+      if (!restarting) setApplying(false);
     }
   };
 

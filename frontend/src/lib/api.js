@@ -127,12 +127,39 @@ export const githubPushAll = (message, version, versionName) =>
   api.post("/github/push-all", { message, version, version_name: versionName }).then(r => r.data);
 export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
 export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
-export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart").then(r => r.data);
+export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart", {}, { timeout: 600000 }).then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
 export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);
 export const fixAllDiagnosticIssues = () => api.post("/diagnostic/fix-all").then(r => r.data);
 export const checkGithubUpdates = () => api.get("/github/check-updates").then(r => r.data);
-export const applyGithubUpdate = (force = true) => api.post("/github/apply-update", { force }).then(r => r.data);
+export const applyGithubUpdate = (force = true) => api.post("/github/apply-update", { force }, { timeout: 600000 }).then(r => r.data);
+
+// Ping ligero para detectar cuando el backend vuelve tras una auto-actualización.
+// Usa un cliente sin baseURL para evitar redirects y con timeout corto.
+export const pingBackend = () => axios.get(`${BASE}/`, { timeout: 2500 }).then(r => r.data);
+
+// Espera hasta que el backend vuelva a responder tras un reinicio por
+// actualización. Devuelve true si respondió antes de `timeoutMs`, false si
+// se agotó el tiempo. Poll cada 500ms.
+export const waitBackendReady = async (timeoutMs = 90000) => {
+  const start = Date.now();
+  // pequeña espera inicial: el proceso todavía está vivo cuando la respuesta
+  // llega al frontend (shutdown se agenda a 3s), no queremos que el primer
+  // ping pegue al backend viejo justo antes de morir.
+  await new Promise(r => setTimeout(r, 1500));
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await pingBackend();
+      // Espera un poco más para dar tiempo a que uvicorn cargue todos los
+      // handlers antes de recargar el frontend.
+      await new Promise(r => setTimeout(r, 400));
+      return true;
+    } catch {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  return false;
+};
 
 // AI Context (Contexto para la próxima IA)
 export const getAiContext = () => api.get("/ai-context").then(r => r.data);
