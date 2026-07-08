@@ -4531,6 +4531,234 @@ async def github_disconnect():
     return {"success": True}
 
 
+def _human_bytes(n: int) -> str:
+    """Formatea bytes a KB/MB/GB legible."""
+    try:
+        n = float(n or 0)
+    except Exception:
+        n = 0.0
+    if n < 1024:
+        return f"{int(n)} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _gh_api_headers(token: str) -> dict:
+    h = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cinema-productions-app",
+    }
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+
+@api_router.get("/github/storage")
+async def github_storage():
+    """Devuelve el uso de espacio del repositorio, el plan de GitHub de la
+    cuenta conectada y la lista de builds .exe publicados en Releases.
+    Sirve para el panel 'Almacenamiento del repositorio' en Soporte avanzado."""
+    token, repo_url, branch = await _resolve_github_creds()
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        # Fallback al repo de fábrica de los .exe
+        parts = _github_exe_repo().split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0], parts[1]
+    if not owner or not repo:
+        raise HTTPException(status_code=400, detail="No hay repositorio configurado.")
+
+    headers = _gh_api_headers(token)
+    result = {
+        "connected": bool(token),
+        "repo_full_name": f"{owner}/{repo}",
+        "repo": None,
+        "plan": None,
+        "builds": [],
+        "builds_count": 0,
+        "builds_total_bytes": 0,
+        "builds_total_human": "0 B",
+        "errors": [],
+    }
+
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        # 1) Info del repositorio (tamaño en KB)
+        try:
+            r = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+            if r.status_code == 200:
+                d = r.json()
+                size_bytes = int(d.get("size") or 0) * 1024  # size viene en KB
+                result["repo"] = {
+                    "full_name": d.get("full_name") or f"{owner}/{repo}",
+                    "private": bool(d.get("private")),
+                    "size_kb": int(d.get("size") or 0),
+                    "size_bytes": size_bytes,
+                    "size_human": _human_bytes(size_bytes),
+                    "default_branch": d.get("default_branch") or branch,
+                    "html_url": d.get("html_url") or f"https://github.com/{owner}/{repo}",
+                }
+            else:
+                result["errors"].append(f"repo:{r.status_code}")
+        except Exception as e:
+            result["errors"].append(f"repo_exc:{str(e)[:80]}")
+
+        # 2) Plan de la cuenta (requiere token)
+        if token:
+            try:
+                r = await client.get("https://api.github.com/user", headers=headers)
+                if r.status_code == 200:
+                    u = r.json()
+                    plan = u.get("plan") or {}
+                    space_kb = int(plan.get("space") or 0)
+                    result["plan"] = {
+                        "login": u.get("login") or "",
+                        "name": (plan.get("name") or "free").capitalize(),
+                        "space_kb": space_kb,
+                        "space_human": _human_bytes(space_kb * 1024) if space_kb else "—",
+                        "private_repos": plan.get("private_repos"),
+                        "collaborators": plan.get("collaborators"),
+                        "owned_private_repos": u.get("owned_private_repos"),
+                        "public_repos": u.get("public_repos"),
+                        "total_private_repos": u.get("total_private_repos"),
+                    }
+                else:
+                    result["errors"].append(f"user:{r.status_code}")
+            except Exception as e:
+                result["errors"].append(f"user_exc:{str(e)[:80]}")
+
+        # 3) Releases → builds .exe
+        try:
+            r = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=100",
+                headers=headers,
+            )
+            if r.status_code == 200:
+                builds = []
+                total = 0
+                for rel in r.json() or []:
+                    for a in rel.get("assets") or []:
+                        name = (a.get("name") or "")
+                        low = name.lower()
+                        # Contamos ejecutables y sus checksums asociados
+                        if low.endswith(".exe") or low.endswith(".exe.sha256"):
+                            size = int(a.get("size") or 0)
+                            total += size
+                            is_setup = "setup" in low or "installer" in low
+                            builds.append({
+                                "asset_id": a.get("id"),
+                                "name": name,
+                                "size": size,
+                                "size_human": _human_bytes(size),
+                                "kind": ".sha256" if low.endswith(".sha256") else ("installer" if is_setup else "portable"),
+                                "release_id": rel.get("id"),
+                                "release_name": rel.get("name") or rel.get("tag_name") or "",
+                                "tag": rel.get("tag_name") or "",
+                                "published_at": a.get("updated_at") or rel.get("published_at") or "",
+                                "download_url": a.get("browser_download_url") or "",
+                            })
+                # Ordenar: más recientes primero, .exe antes que .sha256
+                builds.sort(key=lambda b: (b.get("published_at") or ""), reverse=True)
+                result["builds"] = builds
+                result["builds_count"] = len([b for b in builds if b["kind"] != ".sha256"])
+                result["builds_total_bytes"] = total
+                result["builds_total_human"] = _human_bytes(total)
+            else:
+                result["errors"].append(f"releases:{r.status_code}")
+        except Exception as e:
+            result["errors"].append(f"releases_exc:{str(e)[:80]}")
+
+    return result
+
+
+@api_router.delete("/github/builds")
+async def github_delete_builds(payload: dict = Body(default={})):
+    """Borra builds .exe (y sus .sha256) de los Releases de GitHub para liberar
+    espacio. Body opcional:
+      - asset_ids: [int]   → borra solo esos assets.
+      - release_id: int    → borra TODOS los .exe/.sha256 de ese release.
+      - (vacío)            → borra TODOS los builds .exe/.sha256 del repo.
+    Requiere cuenta de GitHub conectada (token con scope 'repo')."""
+    token, repo_url, branch = await _resolve_github_creds()
+    if not token:
+        raise HTTPException(status_code=400, detail="Conecta tu cuenta de GitHub primero para poder borrar builds.")
+
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        parts = _github_exe_repo().split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0], parts[1]
+    if not owner or not repo:
+        raise HTTPException(status_code=400, detail="No hay repositorio configurado.")
+
+    payload = payload or {}
+    target_asset_ids = set(payload.get("asset_ids") or [])
+    target_release_id = payload.get("release_id")
+
+    headers = _gh_api_headers(token)
+    deleted = []
+    freed_bytes = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        # Reunir todos los assets .exe/.sha256 candidatos
+        try:
+            r = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=100",
+                headers=headers,
+            )
+            if r.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"No se pudo leer Releases (GitHub {r.status_code}).")
+            candidates = []
+            for rel in r.json() or []:
+                for a in rel.get("assets") or []:
+                    low = (a.get("name") or "").lower()
+                    if not (low.endswith(".exe") or low.endswith(".exe.sha256")):
+                        continue
+                    if target_asset_ids and a.get("id") not in target_asset_ids:
+                        continue
+                    if target_release_id is not None and rel.get("id") != target_release_id:
+                        continue
+                    candidates.append(a)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Error al listar builds: {str(e)[:120]}")
+
+        if not candidates:
+            return {"success": True, "deleted_count": 0, "freed_bytes": 0,
+                    "freed_human": "0 B", "message": "No había builds .exe para borrar.", "errors": []}
+
+        for a in candidates:
+            aid = a.get("id")
+            try:
+                dr = await client.delete(
+                    f"https://api.github.com/repos/{owner}/{repo}/releases/assets/{aid}",
+                    headers=headers,
+                )
+                if dr.status_code in (204, 200):
+                    freed_bytes += int(a.get("size") or 0)
+                    deleted.append({"asset_id": aid, "name": a.get("name"), "size": int(a.get("size") or 0)})
+                else:
+                    errors.append(f"{a.get('name')}:{dr.status_code}")
+            except Exception as e:
+                errors.append(f"{a.get('name')}:{str(e)[:60]}")
+
+    return {
+        "success": True,
+        "deleted_count": len(deleted),
+        "deleted": deleted,
+        "freed_bytes": freed_bytes,
+        "freed_human": _human_bytes(freed_bytes),
+        "message": f"Se borraron {len(deleted)} archivo(s) · {_human_bytes(freed_bytes)} liberados.",
+        "errors": errors,
+    }
+
+
+
 @api_router.get("/github/push-preview")
 async def github_push_preview():
     """Devuelve la lista de categorías/archivos que serían subidos al repositorio.

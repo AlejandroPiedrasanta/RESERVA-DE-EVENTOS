@@ -109,6 +109,40 @@ user_problem_statement: |
   - Cuando hay un evento en una fecha, la celda debe brillar/destacar (glow).
   - Hacerlo más útil, más intuitivo, más animado. Rediseño total.
 
+backend:
+  - task: "Almacenamiento del repositorio: GET /api/github/storage (espacio repo + plan GitHub + builds .exe)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Nuevo endpoint GET /api/github/storage. Usa _resolve_github_creds() para token/repo y consulta la API de GitHub:
+          - GET /repos/{owner}/{repo} → tamaño del repo (size KB → bytes + human).
+          - GET /user → plan de la cuenta (name, space, private_repos, public_repos) cuando hay token.
+          - GET /repos/{owner}/{repo}/releases?per_page=100 → lista todos los assets .exe y .exe.sha256 con size, kind (portable/installer/.sha256), tag, release_id, asset_id.
+          Devuelve builds[], builds_count, builds_total_bytes/human, plan, repo, connected. Nunca lanza 500 por fallos de red (los acumula en errors[]).
+          Probar: respuesta 200, estructura correcta, builds_total coherente con la suma de sizes.
+  - task: "Borrar builds .exe: DELETE /api/github/builds (libera espacio en Releases)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Nuevo endpoint DELETE /api/github/builds. Requiere token (400 si no hay). Body opcional: asset_ids[], release_id, o vacío (borra TODOS los .exe/.sha256).
+          Lista releases, filtra assets .exe/.sha256 según filtros, y hace DELETE /releases/assets/{id} para cada uno. Devuelve deleted_count, freed_bytes/human, errors[].
+          IMPORTANTE PARA TESTING: NO ejecutar el borrado real de builds del repo del usuario (es destructivo e irreversible). Solo validar: (a) que sin token devuelve 400, y/o (b) validación de estructura de respuesta con un body que no matchee nada (p.ej. asset_ids:[999999999] inexistente → deleted_count:0, sin error). No borrar assets reales.
+
+
 frontend:
   - task: "Rediseño calendario mensual (hover, glow celdas con eventos, animaciones)"
     implemented: true

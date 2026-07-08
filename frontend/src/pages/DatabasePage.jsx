@@ -30,6 +30,7 @@ import {
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
   githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview,
+  getGithubStorage, deleteGithubBuilds,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -234,6 +235,54 @@ export default function DatabasePage() {
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
 
+  // ── Almacenamiento del repositorio (espacio + plan + builds .exe) ──────────
+  const [storage, setStorage] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [buildsDeleting, setBuildsDeleting] = useState(false);
+  const [showDeleteBuilds, setShowDeleteBuilds] = useState(false);
+  const [deletingAssetId, setDeletingAssetId] = useState(null);
+
+  const loadStorage = async () => {
+    setStorageLoading(true);
+    try {
+      const data = await getGithubStorage();
+      setStorage(data);
+    } catch (err) {
+      setStorage(null);
+      toast({ title: "No se pudo cargar el almacenamiento", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setStorageLoading(false);
+    }
+  };
+
+  const handleDeleteAllBuilds = async () => {
+    setBuildsDeleting(true);
+    try {
+      const res = await deleteGithubBuilds({});
+      toast({ title: `✓ Builds borrados`, description: res.message });
+      setShowDeleteBuilds(false);
+      if (res.deleted_count > 0) fireEpic("success");
+      await loadStorage();
+    } catch (err) {
+      toast({ title: "Error al borrar builds", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setBuildsDeleting(false);
+    }
+  };
+
+  const handleDeleteOneBuild = async (asset) => {
+    setDeletingAssetId(asset.asset_id);
+    try {
+      const res = await deleteGithubBuilds({ asset_ids: [asset.asset_id] });
+      toast({ title: "Archivo borrado", description: res.message });
+      await loadStorage();
+    } catch (err) {
+      toast({ title: "Error al borrar", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setDeletingAssetId(null);
+    }
+  };
+
   // ── Connection mode ────────────────────────────────────────────────────────
   const [connMode, setConnMode] = useState("url"); // "url" | "fields" | "nas"
   const [connFields, setConnFields] = useState({ host: "", port: "27017", user: "", pass: "", db: "cinema_events" });
@@ -354,6 +403,14 @@ export default function DatabasePage() {
   }, []);
 
   useEffect(() => { loadAll(); }, []);
+
+  // Cargar almacenamiento del repo al abrir Soporte avanzado (una vez)
+  useEffect(() => {
+    if (soporteUnlocked && openBlocks.github && !storage && !storageLoading) {
+      loadStorage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soporteUnlocked, openBlocks.github]);
 
   const loadAll = () => { loadDbStats(); loadBackupHistory(); loadCleanupPreview(); loadDbUpdates(); loadGithubConfig(); };
 
@@ -2116,6 +2173,183 @@ export default function DatabasePage() {
                 >
                   <DesktopAppSection />
                 </motion.div>
+
+                {/* ── Almacenamiento del repositorio ── */}
+                <div data-testid="repo-storage-card" className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
+                    <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
+                      <HardDrive size={16} className="text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                        Almacenamiento del repositorio
+                      </p>
+                      <p className="text-[11px] text-slate-400">Espacio usado · Plan de GitHub · Builds .exe publicados</p>
+                    </div>
+                    <button
+                      onClick={loadStorage}
+                      disabled={storageLoading}
+                      data-testid="repo-storage-refresh-btn"
+                      className="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all"
+                      title="Actualizar">
+                      <RefreshCw size={13} className={storageLoading ? "animate-spin" : ""} />
+                    </button>
+                  </div>
+
+                  <div className="p-4 space-y-4">
+                    {storageLoading && !storage ? (
+                      <div className="flex items-center justify-center py-6 gap-3 text-slate-400">
+                        <Loader2 size={18} className="animate-spin" />
+                        <span className="text-sm">Consultando GitHub…</span>
+                      </div>
+                    ) : !storage ? (
+                      <div className="flex items-center justify-between py-3">
+                        <p className="text-sm text-slate-400">Sin datos de almacenamiento.</p>
+                        <button onClick={loadStorage} className="text-xs text-indigo-500 font-bold hover:underline">Cargar</button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Métricas: repo / plan / builds */}
+                        <div className="grid grid-cols-3 gap-2.5" data-testid="repo-storage-metrics">
+                          <div className="rounded-2xl p-3.5 bg-indigo-50">
+                            <div className="flex items-center gap-1.5 text-indigo-600 mb-1">
+                              <Database size={12} />
+                              <span className="text-[9px] font-black uppercase tracking-widest">Repositorio</span>
+                            </div>
+                            <div className="text-lg font-black text-indigo-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                              {storage.repo?.size_human || "—"}
+                            </div>
+                            <div className="text-[10px] font-semibold text-indigo-500/70 truncate">{storage.repo_full_name}</div>
+                          </div>
+                          <div className="rounded-2xl p-3.5 bg-violet-50">
+                            <div className="flex items-center gap-1.5 text-violet-600 mb-1">
+                              <Github size={12} />
+                              <span className="text-[9px] font-black uppercase tracking-widest">Plan</span>
+                            </div>
+                            <div className="text-lg font-black text-violet-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                              {storage.plan?.name || (storage.connected ? "—" : "Sin token")}
+                            </div>
+                            <div className="text-[10px] font-semibold text-violet-500/70">
+                              {storage.plan?.login ? `@${storage.plan.login}` : "Conecta tu cuenta"}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl p-3.5 bg-amber-50">
+                            <div className="flex items-center gap-1.5 text-amber-600 mb-1">
+                              <Package size={12} />
+                              <span className="text-[9px] font-black uppercase tracking-widest">Builds .exe</span>
+                            </div>
+                            <div className="text-lg font-black text-amber-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                              {storage.builds_total_human || "0 B"}
+                            </div>
+                            <div className="text-[10px] font-semibold text-amber-500/70">
+                              {storage.builds_count || 0} ejecutable(s)
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Detalle del plan */}
+                        {storage.plan && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 bg-slate-50/70 rounded-2xl px-4 py-2.5">
+                            {storage.plan.space_human && storage.plan.space_human !== "—" && (
+                              <span>Espacio del plan: <b className="text-slate-700">{storage.plan.space_human}</b></span>
+                            )}
+                            {typeof storage.plan.private_repos === "number" && (
+                              <span>Repos privados: <b className="text-slate-700">{storage.plan.private_repos}</b></span>
+                            )}
+                            {typeof storage.plan.public_repos === "number" && (
+                              <span>Repos públicos: <b className="text-slate-700">{storage.plan.public_repos}</b></span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Lista de builds */}
+                        {storage.builds && storage.builds.length > 0 ? (
+                          <div className="space-y-1.5" data-testid="repo-builds-list">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Archivos publicados</p>
+                            <div className="max-h-64 overflow-auto space-y-1.5 pr-1">
+                              {storage.builds.map((b) => (
+                                <div key={b.asset_id} data-testid={`repo-build-${b.asset_id}`}
+                                  className="flex items-center gap-3 bg-white rounded-xl border border-slate-100 px-3 py-2">
+                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${b.kind === ".sha256" ? "bg-slate-100 text-slate-400" : b.kind === "installer" ? "bg-blue-50 text-blue-500" : "bg-emerald-50 text-emerald-500"}`}>
+                                    {b.kind === ".sha256" ? <FileCheck2 size={14} /> : <Package size={14} />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-slate-700 truncate">{b.name}</p>
+                                    <p className="text-[10px] text-slate-400">
+                                      {b.tag ? `${b.tag} · ` : ""}{b.size_human}{b.kind !== ".sha256" ? ` · ${b.kind === "installer" ? "Instalador" : "Portable"}` : ""}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteOneBuild(b)}
+                                    disabled={deletingAssetId === b.asset_id || buildsDeleting}
+                                    data-testid={`repo-build-delete-${b.asset_id}`}
+                                    className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-300 hover:text-red-500 transition-all disabled:opacity-40"
+                                    title="Borrar este archivo">
+                                    {deletingAssetId === b.asset_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Borrar todos */}
+                            {!showDeleteBuilds ? (
+                              <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                                onClick={() => setShowDeleteBuilds(true)}
+                                disabled={!storage.connected}
+                                data-testid="repo-delete-all-builds-btn"
+                                title={!storage.connected ? "Conecta tu cuenta de GitHub primero" : "Borra todos los builds .exe para liberar espacio"}
+                                className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-2xl text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                                <Trash2 size={13} /> Borrar todos los builds .exe ({storage.builds_total_human})
+                              </motion.button>
+                            ) : (
+                              <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                                className="mt-2 space-y-2 bg-red-50/70 border border-red-200/70 rounded-2xl p-3">
+                                <div className="flex items-start gap-2.5">
+                                  <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
+                                  <p className="text-xs font-semibold text-red-700">
+                                    Se eliminarán <b>{storage.builds.length}</b> archivo(s) de los Releases y se liberarán <b>{storage.builds_total_human}</b>. Esta acción no se puede deshacer, pero puedes regenerar los builds con "Guardar todo al repositorio".
+                                  </p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                    onClick={handleDeleteAllBuilds} disabled={buildsDeleting}
+                                    data-testid="repo-delete-all-confirm-btn"
+                                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 transition-all disabled:opacity-60">
+                                    {buildsDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                    Sí, borrar todo
+                                  </motion.button>
+                                  <button
+                                    onClick={() => setShowDeleteBuilds(false)} disabled={buildsDeleting}
+                                    data-testid="repo-delete-all-cancel-btn"
+                                    className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 transition-all disabled:opacity-60">
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2.5 bg-slate-50/70 rounded-2xl px-4 py-3">
+                            <Info size={14} className="text-slate-400 shrink-0" />
+                            <p className="text-[11px] font-semibold text-slate-500">
+                              No hay builds .exe publicados en Releases. El repositorio no tiene ejecutables ocupando espacio.
+                            </p>
+                          </div>
+                        )}
+
+                        {!storage.connected && (
+                          <div className="flex items-center gap-2.5 bg-amber-50/70 border border-amber-200/60 rounded-2xl px-4 py-2.5">
+                            <Lock size={13} className="text-amber-500 shrink-0" />
+                            <p className="text-[11px] font-semibold text-amber-700">
+                              Conecta tu cuenta de GitHub arriba para ver tu plan y poder borrar builds.
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
 
               </div>
             </CollapseBody>

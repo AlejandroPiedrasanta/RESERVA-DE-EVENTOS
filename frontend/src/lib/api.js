@@ -128,6 +128,9 @@ export const githubPushAll = (message, version, versionName, include) =>
 export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
 export const getGithubPushPreview = () => api.get("/github/push-preview").then(r => r.data);
 export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
+export const getGithubStorage = () => api.get("/github/storage").then(r => r.data);
+export const deleteGithubBuilds = (opts = {}) =>
+  api.delete("/github/builds", { data: opts, timeout: 120000 }).then(r => r.data);
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart", {}, { timeout: 600000 }).then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
 export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);
