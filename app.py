@@ -2156,9 +2156,20 @@ def _current_asset_name() -> str:
     return "CinemaProductions-linux-x86_64"
 
 
+def _semver_key(tag: str):
+    """Convierte 'v1.0.25' o '1.0.25' en tupla (1,0,25) para comparación.
+    Retorna (-1,) para tags no-semver (ej. 'latest-exe') → ordenan al final."""
+    import re as _re
+    m = _re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-.]|$)", (tag or "").strip())
+    if not m:
+        return (-1,)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
 async def _find_release_asset(asset_name: str) -> dict:
-    """Devuelve {tag, version, url, size} del release MÁS RECIENTE (incluye
-    prereleases como 'latest-exe') que contenga el asset indicado."""
+    """Devuelve {tag, version, url, size} del release con MAYOR versión semver
+    que contenga el asset indicado. Filtra drafts. Prioriza tags 'vX.Y.Z' sobre
+    'latest-exe' u otros tags no-semver para evitar downgrades accidentales."""
     import urllib.request, json as _json
     cfg = await _get_github_cfg()
     repo_url = cfg.get("repo_url") or DEFAULT_GITHUB_REPO
@@ -2185,26 +2196,51 @@ async def _find_release_asset(asset_name: str) -> dict:
         return {}
     if not isinstance(releases, list):
         return {}
+
+    # Recolectar TODOS los candidatos que tengan el asset, luego ordenar por
+    # versión semver desc. Así el update siempre apunta al último release
+    # oficial, no al primero devuelto por la API (que puede ser un prerelease
+    # antiguo 'latest-exe' mezclado con la lista).
+    candidates = []
     for rel in releases:
+        if rel.get("draft"):
+            continue
+        tag = rel.get("tag_name") or ""
         for asset in (rel.get("assets") or []):
             if asset.get("name") == asset_name and asset.get("browser_download_url"):
-                tag = rel.get("tag_name") or ""
-                return {"tag": tag,
-                        "version": tag.lstrip("v"),
-                        "url": asset["browser_download_url"],
-                        "size": asset.get("size", 0)}
-    return {}
+                candidates.append({
+                    "tag": tag,
+                    "version": tag.lstrip("v"),
+                    "url": asset["browser_download_url"],
+                    "size": asset.get("size", 0),
+                    "_sort": _semver_key(tag),
+                    "_prerelease": bool(rel.get("prerelease")),
+                })
+                break  # 1 asset por release basta
+    if not candidates:
+        return {}
+    # Prioridad: (a) semver descendente, (b) no-prerelease sobre prerelease.
+    candidates.sort(key=lambda c: (c["_sort"], not c["_prerelease"]), reverse=True)
+    chosen = candidates[0]
+    return {k: v for k, v in chosen.items() if not k.startswith("_")}
 
 
 def _spawn_swap_helper(exe_path: Path, new_path: Path):
     """Lanza un proceso externo independiente que espera a que ESTE proceso
     libere el binario, lo reemplaza por el nuevo y relanza la app. En Windows
     no se puede sobrescribir un .exe en ejecución: el helper hace polling hasta
-    que el archivo se libera (al salir el proceso)."""
+    que el archivo se libera (al salir el proceso).
+
+    Robusto ante:
+      - Antivirus que bloquea el .new temporalmente (retries en move).
+      - Batch previa colgada (limpia _cp_update.bak/.new residuales al iniciar).
+      - Fallo del move (rollback desde .bak).
+      - Log de cada paso en _cp_update.log para diagnóstico."""
     import subprocess, os as _os, stat as _stat, platform
     install_dir = exe_path.parent
     if platform.system() == "Windows":
         bat = install_dir / "_cp_update.bat"
+        log = install_dir / "_cp_update.log"
         exe_name = exe_path.name
         old = str(exe_path)
         new = str(new_path)
@@ -2212,6 +2248,12 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
         script = (
             "@echo off\r\n"
             "setlocal enabledelayedexpansion\r\n"
+            f'set "LOG={log}"\r\n'
+            'echo [%DATE% %TIME%] === Cinema Productions auto-update start === > "!LOG!"\r\n'
+            f'echo old={old} >> "!LOG!"\r\n'
+            f'echo new={new} >> "!LOG!"\r\n'
+            f'echo bak={bak} >> "!LOG!"\r\n'
+            # Esperar a que el proceso libere el .exe (hasta 60s de espera suave)
             "set TRIES=0\r\n"
             ":waitloop\r\n"
             "set /a TRIES+=1\r\n"
@@ -2219,13 +2261,39 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             f'del "{bak}" >nul 2>&1\r\n'
             f'move /y "{old}" "{bak}" >nul 2>&1\r\n'
             f'if exist "{old}" (\r\n'
-            f'  if !TRIES! GEQ 60 taskkill /F /IM "{exe_name}" >nul 2>&1\r\n'
+            "  if !TRIES! GEQ 30 (\r\n"
+            f'    echo [!TIME!] taskkill tras !TRIES! intentos >> "!LOG!"\r\n'
+            f'    taskkill /F /IM "{exe_name}" >nul 2>&1\r\n'
+            "  )\r\n"
+            "  if !TRIES! GEQ 90 (\r\n"
+            f'    echo [!TIME!] ABORT: no se liberó el .exe tras 90 intentos >> "!LOG!"\r\n'
+            "    exit /b 1\r\n"
+            "  )\r\n"
             "  goto waitloop\r\n"
             ")\r\n"
+            f'echo [!TIME!] .exe liberado, aplicando swap (intento inicial) >> "!LOG!"\r\n'
+            # Swap con retries: hasta 10 intentos con 1s de espera (AV puede bloquear el .new)
+            "set MTRIES=0\r\n"
+            ":moveloop\r\n"
+            "set /a MTRIES+=1\r\n"
             f'move /y "{new}" "{old}" >nul 2>&1\r\n'
-            f'if not exist "{old}" move /y "{bak}" "{old}" >nul 2>&1\r\n'
+            f'if exist "{old}" goto :moveok\r\n'
+            "if !MTRIES! GEQ 10 (\r\n"
+            f'  echo [!TIME!] MOVE FAIL tras !MTRIES! intentos, rollback desde .bak >> "!LOG!"\r\n'
+            f'  move /y "{bak}" "{old}" >nul 2>&1\r\n'
+            f'  echo [!TIME!] rollback aplicado. Update ABORTADO. >> "!LOG!"\r\n'
+            f'  start "" "{old}"\r\n'
+            "  exit /b 2\r\n"
+            ")\r\n"
+            "ping -n 2 127.0.0.1 >nul\r\n"
+            "goto moveloop\r\n"
+            ":moveok\r\n"
+            f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) >> "!LOG!"\r\n'
             f'del "{bak}" >nul 2>&1\r\n'
+            f'echo [!TIME!] Relanzando app >> "!LOG!"\r\n'
             f'start "" "{old}"\r\n'
+            f'echo [!TIME!] === update completo === >> "!LOG!"\r\n'
+            # Auto-borrar el .bat (deja el .log para debug)
             '(goto) 2>nul & del "%~f0"\r\n'
         )
         bat.write_text(script, encoding="ascii")
@@ -2236,17 +2304,36 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
                          close_fds=True)
     else:
         sh = install_dir / "_cp_update.sh"
+        log = install_dir / "_cp_update.log"
         old = str(exe_path)
         new = str(new_path)
         pid = _os.getpid()
         script = (
             "#!/usr/bin/env bash\n"
-            f"PID={pid}\n"
-            'while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done\n'
-            "sleep 0.5\n"
-            f'mv -f "{new}" "{old}"\n'
-            f'chmod +x "{old}"\n'
-            f'nohup "{old}" >/dev/null 2>&1 &\n'
+            f'LOG="{log}"\n'
+            'echo "[$(date)] === auto-update start ===" > "$LOG"\n'
+            f'PID={pid}\n'
+            f'echo "waiting PID $PID to exit..." >> "$LOG"\n'
+            'TRIES=0\n'
+            'while kill -0 "$PID" 2>/dev/null; do\n'
+            '  sleep 0.5\n'
+            '  TRIES=$((TRIES+1))\n'
+            '  if [ "$TRIES" -ge 120 ]; then\n'
+            '    echo "[$(date)] timeout waiting, forcing kill" >> "$LOG"\n'
+            '    kill -9 "$PID" 2>/dev/null || true\n'
+            '    break\n'
+            '  fi\n'
+            'done\n'
+            'sleep 0.5\n'
+            f'echo "[$(date)] applying swap: {new} -> {old}" >> "$LOG"\n'
+            f'if mv -f "{new}" "{old}"; then\n'
+            f'  chmod +x "{old}"\n'
+            f'  echo "[$(date)] swap OK, relaunching" >> "$LOG"\n'
+            f'  nohup "{old}" >/dev/null 2>&1 &\n'
+            'else\n'
+            f'  echo "[$(date)] swap FAILED" >> "$LOG"\n'
+            'fi\n'
+            f'echo "[$(date)] === update done ===" >> "$LOG"\n'
             'rm -- "$0"\n'
         )
         sh.write_text(script)
@@ -2265,6 +2352,19 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     install_dir = exe_path.parent
     asset_name = _current_asset_name()
 
+    # Limpieza defensiva de residuos de intentos previos (evita "file in use" o
+    # confusión si un update anterior falló a mitad).
+    for stale in (
+        install_dir / (exe_path.name + ".new"),
+        install_dir / (exe_path.name + ".bak"),
+        install_dir / "_cp_update.bat",
+    ):
+        try:
+            if stale.exists():
+                stale.unlink()
+        except Exception as _cerr:
+            logger.warning(f"No se pudo limpiar residuo {stale}: {_cerr}")
+
     rel = await _find_release_asset(asset_name)
     if not rel or not rel.get("url"):
         raise HTTPException(status_code=404,
@@ -2272,19 +2372,22 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
                    f"Verifica que el workflow 'Build Windows .exe' haya publicado el asset.")
 
     # La versión objetivo es la del release donde SÍ está publicado el asset
-    # de esta plataforma. NUNCA usar version.txt como fuente primaria aquí:
-    # version.txt puede adelantarse al asset (los 4 jobs de release corren en
-    # paralelo y publican al mismo tag en momentos distintos). Usar el tag del
-    # release evita reportar una new_version que en realidad se descarga desde
-    # un tag anterior — que era la raíz de la desincronización entre plataformas.
+    # de esta plataforma. _find_release_asset ya prioriza el semver más alto,
+    # así que rel.get('version') es autoritativo.
     new_version = rel.get("version", "")
     if not new_version:
+        # Fallback: intentar version.txt remoto (release sin tag semver, ej.
+        # 'latest-exe'). Nunca usarlo como fuente primaria.
         gh = await _fetch_github_version()
         new_version = gh.get("version", "")
+    if not new_version:
+        raise HTTPException(status_code=500,
+            detail="El release existe pero no expone una versión (tag_name vacío). "
+                   "Regenera el release desde GitHub Actions.")
+
     # Regla dura: si la versión remota es IGUAL a la local, nunca reinstalar,
-    # ni siquiera con force=True. Esto evita que un click accidental en
-    # "Actualizar" cuando ya se está en la última versión gaste ancho de banda
-    # y provoque un swap innecesario del binario.
+    # ni siquiera con force=True. Evita gastar ancho de banda y un swap
+    # innecesario en clics accidentales al botón "Actualizar".
     if new_version and new_version == _local_version:
         return {"success": True, "restarted": False,
                 "old_version": _local_version, "new_version": new_version,
@@ -2312,6 +2415,12 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
             new_path.unlink()
         await asyncio.to_thread(_download)
     except Exception as e:
+        # Limpiar el .new parcial si quedó a medias
+        try:
+            if new_path.exists():
+                new_path.unlink()
+        except Exception:
+            pass
         raise HTTPException(status_code=502, detail=f"Descarga del binario falló: {e}")
 
     # Validación: tamaño + "magic bytes" del binario. Evita que una respuesta
@@ -2356,7 +2465,9 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     _spawn_swap_helper(exe_path, new_path)
 
     def _shutdown():
-        _time.sleep(1.5)
+        # 3s: suficiente para que el cliente HTTP reciba la respuesta y para
+        # que el swap helper haya sido spawn-eado como proceso independiente.
+        _time.sleep(3.0)
         _os._exit(0)
     threading.Thread(target=_shutdown, daemon=True).start()
 
