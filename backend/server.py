@@ -6001,6 +6001,17 @@ async def check_github_updates():
     except Exception:
         remote_version = ""
 
+    # ── FUENTE DE VERDAD: la VERSIÓN (semver X.Y.Z), no el SHA ──────────────
+    # El SHA local puede divergir del remoto (rama distinta, historial reescrito,
+    # o local_sha fuera de los últimos 20 commits) y provocar un falso positivo
+    # "Nueva versión disponible: vX" cuando en realidad es la MISMA versión.
+    # Si conocemos ambas versiones y son idénticas (normalizadas), NO hay update.
+    ln = _normalize_semver(local_version)
+    rn = _normalize_semver(remote_version)
+    if ln and rn and ln == rn:
+        has_updates = False
+        new_commits = []
+
     return {
         "has_updates": has_updates,
         "local_sha": local_sha,

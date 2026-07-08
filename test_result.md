@@ -110,6 +110,215 @@ user_problem_statement: |
   - Hacerlo más útil, más intuitivo, más animado. Rediseño total.
 
 backend:
+  - task: "EXE version mismatch: _local_version se leía de ROOT_DIR en vez de BUNDLE_DIR (sys._MEIPASS) en el binario congelado"
+    implemented: true
+    working: true
+    file: "/app/backend/standalone_app.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          BUG reportado por usuario: el EXE (portable/instalador) "supuestamente se actualiza" pero la
+          versión que muestra Windows / la app NO concuerda con la instalada, y a veces ofrece update
+          infinitamente aunque ya esté al día.
+          CAUSA RAÍZ: en standalone_app.py, _local_version se leía de `ROOT_DIR / 'version.txt'`. En el EXE
+          --onefile, el version.txt horneado se empaqueta con `--add-data "version.txt;."`, por lo que
+          PyInstaller lo extrae en `sys._MEIPASS` (= BUNDLE_DIR), NO junto al .exe (ROOT_DIR). El instalador
+          Inno Setup tampoco copia version.txt al directorio de instalación. Resultado en modo congelado:
+          no se encontraba el archivo → _local_version="0.0.0" → check-updates (_is_newer(remote,"0.0.0"))
+          SIEMPRE True → falso "hay update" y versión reportada que no concuerda.
+          FIX: nueva función _read_baked_version() que lee version.txt priorizando BUNDLE_DIR (versión
+          horneada del binario en ejecución), luego ROOT_DIR y ROOT_DIR.parent como fallback. _local_version
+          ahora usa esta función.
+          VERIFICADO por main con simulación controlada:
+            - dev (BUNDLE_DIR==ROOT_DIR==/app/backend, sin version.txt local): _local_version lee de
+              ROOT_DIR.parent (/app/version.txt) → "1.20.1".
+            - frozen sim (sys.frozen=True, sys._MEIPASS=/tmp/fakemei con version.txt="1.20.1"):
+              _local_version="1.20.1" leído de BUNDLE_DIR. Antes del fix habría sido "0.0.0".
+          PROBAR (testing agent): ejecutar /app/backend/standalone_app.py como módulo importado en:
+            (1) modo dev → _local_version debe ser "1.20.1" (leído de /app/version.txt).
+            (2) modo frozen simulado (setear sys.frozen=True y sys._MEIPASS=<tmp con version.txt>) →
+                _local_version debe igualar el contenido baked, NO "0.0.0".
+          Además verificar que GET /api/github/check-updates (server.py, cloud) sigue devolviendo
+          has_updates=false cuando local_version==remote_version (regresión del fix anterior).
+          NOTA IMPORTANTE (no es bug de código, es limitación de diseño a comunicar): la auto-actualización
+          del EXE congelado descarga y hace swap SOLO de CinemaProductions.exe (portable). Para usuarios que
+          instalaron con el instalador Inno Setup, "Apps y características" de Windows lee la versión del
+          REGISTRO (escrita por el instalador), que un swap de binario NO actualiza. Esto puede causar que
+          Windows muestre la versión vieja aunque el binario ya sea nuevo.
+          LIMITACIÓN DE ENTORNO: no es posible construir/ejecutar un .exe de Windows ni inspeccionar "Apps y
+          características" desde este contenedor Linux; la verificación de código se hace por simulación.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: EXE version mismatch fix in /app/backend/standalone_app.py (lines 90-120)
+          
+          TEST RESULTS - ALL TESTS PASSED ✅ (3/3)
+          
+          BUG CONTEXT:
+          User reported: Windows EXE "supposedly updates" but the version shown doesn't match the installed
+          version, and sometimes offers updates infinitely even when already up to date.
+          
+          ROOT CAUSE:
+          In standalone_app.py, _local_version was reading from `ROOT_DIR / 'version.txt'`. In the --onefile
+          EXE, the baked version.txt is packaged with `--add-data "version.txt;."`, so PyInstaller extracts
+          it to `sys._MEIPASS` (= BUNDLE_DIR), NOT next to the .exe (ROOT_DIR). The Inno Setup installer
+          also doesn't copy version.txt to the installation directory. Result in frozen mode: file not found
+          → _local_version="0.0.0" → check-updates (_is_newer(remote,"0.0.0")) ALWAYS True → false positive
+          "update available" and version mismatch.
+          
+          FIX APPLIED (lines 90-116):
+          New function _read_baked_version() reads version.txt prioritizing:
+          1. BUNDLE_DIR/version.txt (baked version in running binary)
+          2. ROOT_DIR/version.txt (dev mode or version.txt written next to module)
+          3. ROOT_DIR.parent/version.txt (fallback for dev mode)
+          Line 120: _local_version = _read_baked_version()
+          
+          TEST 1: DEV MODE (normal import) ✅
+          - Imported standalone_app module in subprocess with MONGO_URL=embedded, DB_NAME=cinema_test
+          - VERIFIED: _local_version == "1.20.1" (read from /app/version.txt via ROOT_DIR.parent)
+          - VERIFIED: _read_baked_version() == "1.20.1"
+          - VERIFIED: BUNDLE_DIR == ROOT_DIR == /app/backend (dev mode)
+          
+          TEST 2: FROZEN MODE SIMULATION ✅
+          - Created temp directory /tmp/tmpk5ng_d1e with version.txt = "1.20.1"
+          - Set sys.frozen=True and sys._MEIPASS=/tmp/tmpk5ng_d1e BEFORE importing
+          - Imported standalone_app in NEW subprocess (clean module cache)
+          - VERIFIED: BUNDLE_DIR == /tmp/tmpk5ng_d1e (sys._MEIPASS)
+          - VERIFIED: _local_version == "1.20.1" (read from BUNDLE_DIR, not ROOT_DIR)
+          - Before fix, this would have been "0.0.0" (file not found in ROOT_DIR)
+          
+          TEST 2b: NEGATIVE TEST (frozen mode with different version) ✅
+          - Created temp directory with version.txt = "9.9.9"
+          - Set sys.frozen=True and sys._MEIPASS pointing to temp dir
+          - VERIFIED: _local_version == "9.9.9"
+          - This proves it reads from BUNDLE_DIR and not from elsewhere
+          
+          TEST 3: CLOUD REGRESSION (server.py via preview URL) ✅
+          - GET https://bc8074c7-73a5-4318-a07c-b768000b58b3.preview.emergentagent.com/api/github/check-updates
+          - HTTP 200 OK
+          - VERIFIED: has_updates == false (correct)
+          - VERIFIED: commits_ahead == 0 (correct)
+          - VERIFIED: commits == [] (correct)
+          - VERIFIED: local_version == "1.20.1" (correct)
+          - VERIFIED: remote_version == "1.20.1" (correct)
+          - VERIFIED: local_version == remote_version (both "1.20.1")
+          - No regression from previous fix (version equality prevents false positive)
+          
+          CONCLUSION:
+          ✅ The version mismatch fix is WORKING correctly
+          ✅ DEV mode: reads version from ROOT_DIR.parent (/app/version.txt)
+          ✅ FROZEN mode: reads version from BUNDLE_DIR (sys._MEIPASS)
+          ✅ CLOUD: /api/github/check-updates returns correct values
+          ✅ The fix correctly prioritizes BUNDLE_DIR (baked version in EXE) over ROOT_DIR
+          ✅ This prevents the "0.0.0" version bug in frozen mode
+          ✅ User will no longer see infinite update prompts when already up to date
+          ✅ Version shown will match the installed version
+          
+          IMPORTANT NOTES:
+          - Cannot test actual Windows .exe in this Linux environment (verified by simulation)
+          - The auto-update for frozen EXE downloads and swaps ONLY CinemaProductions.exe (portable)
+          - For users who installed with Inno Setup installer, "Apps & Features" in Windows reads
+            the version from REGISTRY (written by installer), which a binary swap does NOT update
+          - This may cause Windows to show old version even though binary is new (design limitation)
+          
+          Test file: /app/test_version_fix.py
+  - task: "Falso positivo de actualización: GET /api/github/check-updates marca has_updates cuando la versión es idéntica"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          BUG reportado por usuario: teniendo v1.20.1 activa, la app (cloud y EXE) muestra
+          "Nueva versión disponible: v1.20.1" con "20 cambio(s) nuevo(s) en la rama main. Tienes v1.20.1".
+          Es la MISMA versión, por lo que es un falso positivo.
+          CAUSA RAÍZ: check_github_updates() decidía has_updates comparando SHAs de commit. Cuando el
+          local_sha diverge o no está en los últimos 20 commits del remoto, marcaba has_updates=True
+          aunque la versión (semver) fuese idéntica.
+          FIX: tras leer local_version (version.txt local) y remote_version (raw version.txt del repo),
+          se normalizan con _normalize_semver y, si ambas existen y son iguales, se fuerza
+          has_updates=False y new_commits=[]. La VERSIÓN es la fuente de verdad, no el SHA.
+          PROBAR: GET /api/github/check-updates debe devolver has_updates=false y commits=[] /
+          commits_ahead=0 cuando local_version == remote_version (ambos "1.20.1"). Verificar también
+          que local_version y remote_version se devuelven correctamente y que el endpoint responde 200.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: GET /api/github/check-updates endpoint (lines 5893-6027 in server.py)
+          
+          TEST RESULTS - ALL CHECKS PASSED ✅
+          
+          BUG CONTEXT:
+          User reported false positive: with v1.20.1 active, app showed "Nueva versión disponible: v1.20.1"
+          with "20 cambio(s) nuevo(s)". This is the SAME version, so it's a false positive.
+          
+          ROOT CAUSE:
+          The endpoint was comparing commit SHAs to determine has_updates. When local_sha diverged or
+          wasn't in the last 20 commits from remote, it marked has_updates=True even when the semver
+          version was identical.
+          
+          FIX APPLIED (lines 6004-6013):
+          After reading local_version (from local version.txt) and remote_version (from GitHub raw
+          version.txt), both are normalized with _normalize_semver(). If both exist and are equal,
+          has_updates is forced to False and new_commits=[]. VERSION is the source of truth, not SHA.
+          
+          TEST PERFORMED:
+          Created comprehensive test in /app/backend_test.py (Test 10: test_github_check_updates)
+          
+          1. HTTP Response:
+          ✅ Returns HTTP 200 OK
+          
+          2. Required Fields Validation:
+          ✅ All required fields present: has_updates, commits_ahead, commits, local_version, remote_version
+          ✅ Additional fields present: local_sha, remote_sha, branch, repo_url
+          
+          3. ACTUAL VALUES RETURNED:
+          ✅ local_version = "1.20.1"
+          ✅ remote_version = "1.20.1"
+          ✅ has_updates = false (CORRECT - fix working!)
+          ✅ commits_ahead = 0 (CORRECT)
+          ✅ commits = [] (CORRECT - empty list)
+          
+          4. Version Normalization:
+          ✅ Both versions normalize to "1.20.1" (identical)
+          ✅ When local_version == remote_version, the fix correctly forces:
+             - has_updates = false
+             - commits_ahead = 0
+             - commits = []
+          
+          5. Data Types Validation:
+          ✅ has_updates is bool (type correct)
+          ✅ commits_ahead is int (type correct)
+          ✅ commits is list (type correct)
+          
+          6. SHA Divergence Handling:
+          ✅ local_sha = bbcde83d9fed3bd3d69530503e199b4a1096d9c6
+          ✅ remote_sha = 4669d35c716de8cff2136849847fe0bd5ef5b711
+          ✅ SHAs are DIFFERENT (diverged), but fix correctly prioritizes VERSION over SHA
+          ✅ This proves the fix works: despite SHA divergence, version equality prevents false positive
+          
+          7. GitHub Configuration:
+          ✅ repo_url = https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS
+          ✅ branch = main
+          ✅ GitHub API connection working correctly
+          
+          CONCLUSION:
+          ✅ The false positive bug is FIXED
+          ✅ When local_version == remote_version (both "1.20.1"), the endpoint correctly returns
+             has_updates=false, commits_ahead=0, and commits=[]
+          ✅ The fix correctly prioritizes semantic version over commit SHA
+          ✅ User will no longer see "Nueva versión disponible: v1.20.1" when already on v1.20.1
+          ✅ The version is now the source of truth, not the commit SHA
+          
+          Test file: /app/backend_test.py (Test 10)
   - task: "Almacenamiento del repositorio: GET /api/github/storage (espacio repo + plan GitHub + builds .exe)"
     implemented: true
     working: true
@@ -276,15 +485,32 @@ metadata:
   run_ui: true
 
 test_plan:
-  current_focus:
-    - "File-selection feature for GitHub push-all (opt-in modal)"
-    - "Rediseño calendario mensual (hover, glow celdas con eventos, animaciones)"
-    - "Version-check bug fix (GitHub version detection)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: |
+      NUEVO FIX A PROBAR (prioridad alta) — EXE version mismatch en /app/backend/standalone_app.py.
+      El EXE leía _local_version de ROOT_DIR/version.txt, pero en --onefile el version.txt horneado vive en
+      sys._MEIPASS (BUNDLE_DIR). Fix: _read_baked_version() prioriza BUNDLE_DIR, luego ROOT_DIR y ROOT_DIR.parent.
+      QUÉ PROBAR (puedes ejecutar python en subproceso; para el cloud usa la URL de preview):
+      1) DEV: importar standalone_app (sys.path.insert '/app/backend'; MONGO_URL=embedded, DB_NAME=cinema_test)
+         y verificar module._local_version == "1.20.1" (leído de /app/version.txt via ROOT_DIR.parent).
+      2) FROZEN SIM: ANTES de importar y en un proceso NUEVO, setear sys.frozen=True y
+         sys._MEIPASS=<tmp dir con version.txt="1.20.1">. Verificar module._local_version == "1.20.1"
+         leído de BUNDLE_DIR (antes del fix habría sido "0.0.0").
+      3) REGRESIÓN cloud: GET {REACT_APP_BACKEND_URL}/api/github/check-updates → has_updates=false,
+         commits_ahead=0, local_version==remote_version=="1.20.1".
+      NOTA: no es posible ejecutar un .exe real de Windows en este entorno Linux; verificación por simulación.
+  - agent: "main"
+    message: |
+      FIX previo (ya verificado): GET /api/github/check-updates.
+      Bug: con v1.20.1 activa, la app mostraba "Nueva versión disponible: v1.20.1" (falso positivo).
+      Fix aplicado: si local_version == remote_version (normalizadas con _normalize_semver), se fuerza
+      has_updates=False y commits=[]. version.txt local = "1.20.1"; el remoto en GitHub main también es "1.20.1".
   - agent: "main"
     message: |
       Ir a /calendario (o clic en "Reservaciones" en sidebar → vista "Mes" activa por defecto).
@@ -377,6 +603,46 @@ agent_communication:
       GitHub — v1.13"
       
       Test file created: /app/backend_test.py (can be reused for regression testing)
+
+  - agent: "testing"
+    message: |
+      CHECK-UPDATES FALSE POSITIVE BUG FIX TESTING COMPLETE - ✅ ALL TESTS PASSED
+      
+      Tested the fix for GET /api/github/check-updates endpoint that was showing false positive
+      "Nueva versión disponible: v1.20.1" when user already had v1.20.1.
+      
+      BUG CONTEXT:
+      User reported: with v1.20.1 active, app showed "Nueva versión disponible: v1.20.1" with
+      "20 cambio(s) nuevo(s)". This is the SAME version, so it's a false positive.
+      
+      ROOT CAUSE:
+      Endpoint was comparing commit SHAs to determine has_updates. When local_sha diverged or
+      wasn't in last 20 commits, it marked has_updates=True even when semver was identical.
+      
+      FIX APPLIED (lines 6004-6013 in server.py):
+      After reading local_version and remote_version, both are normalized with _normalize_semver().
+      If both exist and are equal, has_updates is forced to False and new_commits=[].
+      VERSION is the source of truth, not SHA.
+      
+      TEST RESULTS:
+      ✅ GET /api/github/check-updates
+         - HTTP 200 OK
+         - local_version = "1.20.1"
+         - remote_version = "1.20.1"
+         - has_updates = false (CORRECT - fix working!)
+         - commits_ahead = 0 (CORRECT)
+         - commits = [] (CORRECT - empty list)
+         - local_sha = bbcde83d9fed3bd3d69530503e199b4a1096d9c6
+         - remote_sha = 4669d35c716de8cff2136849847fe0bd5ef5b711
+         - SHAs are DIFFERENT (diverged), but fix correctly prioritizes VERSION over SHA
+      
+      CONCLUSION:
+      ✅ The false positive bug is FIXED
+      ✅ When local_version == remote_version, endpoint correctly returns has_updates=false
+      ✅ Fix correctly prioritizes semantic version over commit SHA
+      ✅ User will no longer see "Nueva versión disponible: v1.20.1" when already on v1.20.1
+      
+      Test file: /app/backend_test.py (Test 10)
 
   - agent: "testing"
     message: |
@@ -780,3 +1046,63 @@ agent_communication:
       GitHub — v1.13"
       
       Test file created: /app/backend_test.py (can be reused for regression testing)
+
+  - agent: "testing"
+    message: |
+      EXE VERSION MISMATCH FIX TESTING COMPLETE - ✅ ALL TESTS PASSED (3/3)
+      
+      Tested the fix for EXE version mismatch where _local_version was reading from ROOT_DIR
+      instead of BUNDLE_DIR (sys._MEIPASS) in frozen binary.
+      
+      BUG CONTEXT:
+      User reported: Windows EXE "supposedly updates" but version shown doesn't match installed
+      version, and sometimes offers updates infinitely even when already up to date.
+      
+      ROOT CAUSE:
+      _local_version read from ROOT_DIR/version.txt. In --onefile EXE, version.txt is baked
+      with --add-data and extracted to sys._MEIPASS (BUNDLE_DIR), NOT next to .exe (ROOT_DIR).
+      Result: file not found → _local_version="0.0.0" → infinite update prompts.
+      
+      FIX APPLIED:
+      New _read_baked_version() function (lines 90-116) prioritizes:
+      1. BUNDLE_DIR/version.txt (baked version in binary)
+      2. ROOT_DIR/version.txt (dev mode)
+      3. ROOT_DIR.parent/version.txt (fallback)
+      
+      TEST RESULTS:
+      ✅ TEST 1: DEV MODE
+         - _local_version == "1.20.1" (read from /app/version.txt via ROOT_DIR.parent)
+         - _read_baked_version() == "1.20.1"
+         - BUNDLE_DIR == ROOT_DIR == /app/backend
+      
+      ✅ TEST 2: FROZEN MODE SIMULATION
+         - Created temp dir with version.txt = "1.20.1"
+         - Set sys.frozen=True, sys._MEIPASS=temp_dir
+         - _local_version == "1.20.1" (read from BUNDLE_DIR)
+         - BUNDLE_DIR correctly points to sys._MEIPASS
+         - Before fix: would have been "0.0.0"
+      
+      ✅ TEST 2b: NEGATIVE TEST
+         - version.txt = "9.9.9" in temp dir
+         - _local_version == "9.9.9"
+         - Proves it reads from BUNDLE_DIR, not elsewhere
+      
+      ✅ TEST 3: CLOUD REGRESSION
+         - GET /api/github/check-updates → HTTP 200
+         - has_updates == false ✅
+         - commits_ahead == 0 ✅
+         - commits == [] ✅
+         - local_version == "1.20.1" ✅
+         - remote_version == "1.20.1" ✅
+         - No regression from previous fix
+      
+      CONCLUSION:
+      ✅ Version mismatch fix is WORKING correctly
+      ✅ DEV mode reads from ROOT_DIR.parent
+      ✅ FROZEN mode reads from BUNDLE_DIR (sys._MEIPASS)
+      ✅ Prevents "0.0.0" version bug in frozen mode
+      ✅ User will no longer see infinite update prompts
+      ✅ Version shown will match installed version
+      
+      Test file: /app/test_version_fix.py
+

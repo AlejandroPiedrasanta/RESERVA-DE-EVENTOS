@@ -13,10 +13,10 @@ import json
 from typing import Dict, Any
 
 # Backend URL from frontend/.env
-BACKEND_URL = "https://45e29e02-56fa-46f6-a2f3-035f112db7a4.preview.emergentagent.com/api"
+BACKEND_URL = "https://bc8074c7-73a5-4318-a07c-b768000b58b3.preview.emergentagent.com/api"
 
 # Expected values
-EXPECTED_VERSION = "1.13"
+EXPECTED_VERSION = "1.20.1"
 EXPECTED_REPO = "AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
 
 # Expected categories for push-preview
@@ -870,6 +870,179 @@ def test_github_delete_builds_safe():
         return False
 
 
+def test_github_check_updates():
+    """
+    Test 10: GET /api/github/check-updates
+    
+    Tests the fix for false positive update detection when local_version == remote_version.
+    
+    Expected behavior when local_version == remote_version (both "1.20.1"):
+    - has_updates should be false
+    - commits_ahead should be 0
+    - commits should be [] (empty list)
+    - local_version and remote_version should be present and equal
+    """
+    print_test_header("Test 10: GET /api/github/check-updates (version equality fix)")
+    
+    try:
+        url = f"{BACKEND_URL}/github/check-updates"
+        print_info(f"Testing: GET {url}")
+        
+        response = requests.get(url, timeout=20)
+        
+        # Test 1: HTTP 200 response
+        print_info(f"Response status: {response.status_code}")
+        if response.status_code != 200:
+            print_fail(f"Expected HTTP 200, got {response.status_code}")
+            print_info(f"Response body: {response.text[:500]}")
+            return False
+        print_pass("HTTP 200 OK")
+        
+        data = response.json()
+        print_info(f"Response JSON keys: {list(data.keys())}")
+        
+        all_passed = True
+        
+        # Test 2: Required fields present
+        required_fields = ["has_updates", "commits_ahead", "commits", "local_version", "remote_version"]
+        for field in required_fields:
+            if field not in data:
+                print_fail(f"Missing required field: {field}")
+                all_passed = False
+            else:
+                print_pass(f"Field '{field}' present")
+        
+        # Test 3: Extract and report actual values
+        local_version = data.get("local_version", "")
+        remote_version = data.get("remote_version", "")
+        has_updates = data.get("has_updates")
+        commits_ahead = data.get("commits_ahead")
+        commits = data.get("commits", [])
+        
+        print_info(f"\n📊 ACTUAL VALUES RETURNED BY ENDPOINT:")
+        print_info(f"  local_version:   '{local_version}'")
+        print_info(f"  remote_version:  '{remote_version}'")
+        print_info(f"  has_updates:     {has_updates}")
+        print_info(f"  commits_ahead:   {commits_ahead}")
+        print_info(f"  commits:         {commits} (length: {len(commits)})")
+        
+        # Test 4: Verify local_version and remote_version are present
+        if not local_version:
+            print_fail("local_version is empty or missing")
+            all_passed = False
+        else:
+            print_pass(f"local_version present: '{local_version}'")
+        
+        if not remote_version:
+            print_fail("remote_version is empty or missing")
+            all_passed = False
+        else:
+            print_pass(f"remote_version present: '{remote_version}'")
+        
+        # Test 5: Check if versions are equal (normalized)
+        def normalize_version(v):
+            """Normalize version to X.Y.Z format for comparison."""
+            v = (v or "").strip().lstrip("v")
+            if not v:
+                return ""
+            parts = v.split(".")
+            nums = []
+            for p in parts:
+                try:
+                    nums.append(str(int(p)))
+                except ValueError:
+                    nums.append("0")
+            while len(nums) < 3:
+                nums.append("0")
+            return ".".join(nums[:3])
+        
+        local_normalized = normalize_version(local_version)
+        remote_normalized = normalize_version(remote_version)
+        
+        print_info(f"\n🔍 NORMALIZED VERSIONS:")
+        print_info(f"  local_normalized:  '{local_normalized}'")
+        print_info(f"  remote_normalized: '{remote_normalized}'")
+        
+        versions_equal = local_normalized and remote_normalized and local_normalized == remote_normalized
+        
+        if versions_equal:
+            print_pass(f"Versions are EQUAL (both normalize to '{local_normalized}')")
+            
+            # Test 6: When versions are equal, verify fix behavior
+            print_info(f"\n✅ TESTING FIX: When local_version == remote_version, should have:")
+            print_info(f"   - has_updates = false")
+            print_info(f"   - commits_ahead = 0")
+            print_info(f"   - commits = []")
+            
+            # Check has_updates
+            if has_updates is False:
+                print_pass("has_updates = false ✓ (CORRECT - fix working)")
+            else:
+                print_fail(f"has_updates = {has_updates} ✗ (EXPECTED false - FIX NOT WORKING)")
+                all_passed = False
+            
+            # Check commits_ahead
+            if commits_ahead == 0:
+                print_pass("commits_ahead = 0 ✓ (CORRECT)")
+            else:
+                print_fail(f"commits_ahead = {commits_ahead} ✗ (EXPECTED 0)")
+                all_passed = False
+            
+            # Check commits is empty list
+            if isinstance(commits, list) and len(commits) == 0:
+                print_pass("commits = [] ✓ (CORRECT - empty list)")
+            else:
+                print_fail(f"commits = {commits} ✗ (EXPECTED empty list [])")
+                all_passed = False
+        else:
+            print_info(f"Versions are DIFFERENT:")
+            print_info(f"  local:  '{local_normalized}'")
+            print_info(f"  remote: '{remote_normalized}'")
+            print_info(f"This is not the scenario being tested (we expect both to be 1.20.1)")
+            print_info(f"Reporting actual values for main agent to review.")
+        
+        # Test 7: Verify data types
+        if not isinstance(has_updates, bool):
+            print_fail(f"has_updates should be bool, got {type(has_updates)}")
+            all_passed = False
+        else:
+            print_pass(f"has_updates is bool")
+        
+        if not isinstance(commits_ahead, int):
+            print_fail(f"commits_ahead should be int, got {type(commits_ahead)}")
+            all_passed = False
+        else:
+            print_pass(f"commits_ahead is int")
+        
+        if not isinstance(commits, list):
+            print_fail(f"commits should be list, got {type(commits)}")
+            all_passed = False
+        else:
+            print_pass(f"commits is list")
+        
+        # Additional fields to report
+        print_info(f"\n📋 ADDITIONAL FIELDS:")
+        for key in ["local_sha", "remote_sha", "branch", "repo_url"]:
+            if key in data:
+                print_info(f"  {key}: {data[key]}")
+        
+        if all_passed:
+            print_pass("\n✅ ALL CHECKS PASSED")
+        else:
+            print_fail("\n❌ SOME CHECKS FAILED")
+        
+        return all_passed
+        
+    except requests.exceptions.Timeout:
+        print_fail("Request timed out after 20 seconds")
+        return False
+    except Exception as e:
+        print_fail(f"Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Run all tests."""
     print(f"\n{BLUE}{'='*80}{RESET}")
@@ -888,6 +1061,7 @@ def main():
         "Test 7: /api/github/push-status": test_github_push_status(),
         "Test 8: /api/github/storage": test_github_storage(),
         "Test 9: /api/github/builds (SAFE delete test)": test_github_delete_builds_safe(),
+        "Test 10: /api/github/check-updates (version equality fix)": test_github_check_updates(),
     }
     
     # Print summary

@@ -84,9 +84,40 @@ _DEFAULT_AI_CONTEXT = (
 
 # ── Auto-update config ────────────────────────────────────────────────────────
 _UPDATE_SERVER_FILE = ROOT_DIR / 'update_server_url.txt'
-_VERSION_FILE = ROOT_DIR / 'version.txt'
 _update_server_url = _UPDATE_SERVER_FILE.read_text().strip() if _UPDATE_SERVER_FILE.exists() else ""
-_local_version = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
+
+
+def _read_baked_version() -> str:
+    """Lee la versión REALMENTE en ejecución.
+
+    CRÍTICO para el EXE (--onefile): el version.txt horneado en el build se
+    empaqueta con `--add-data "version.txt;."`, por lo que PyInstaller lo extrae
+    en `sys._MEIPASS` (BUNDLE_DIR), NO junto al .exe (ROOT_DIR). El instalador
+    tampoco copia version.txt al directorio de instalación. Leer de ROOT_DIR
+    provocaba que en modo congelado no se encontrara el archivo y la versión
+    cayera a "0.0.0": el EXE mostraba una versión que NO concuerda con la
+    instalada y creía SIEMPRE que había una actualización disponible.
+
+    Prioridad:
+      1. BUNDLE_DIR/version.txt  → versión horneada del binario en ejecución
+         (siempre correcta tras un swap de binario en la auto-actualización).
+      2. ROOT_DIR/version.txt    → modo desarrollo (BUNDLE_DIR == ROOT_DIR) o
+         version.txt escrito junto al módulo.
+    """
+    for cand in (BUNDLE_DIR / 'version.txt', ROOT_DIR / 'version.txt', ROOT_DIR.parent / 'version.txt'):
+        try:
+            if cand.exists():
+                v = (cand.read_text(encoding='utf-8') or '').strip()
+                if v:
+                    return v
+        except Exception:
+            pass
+    return "0.0.0"
+
+
+# Ruta preferida (para compatibilidad con código que la referencie).
+_VERSION_FILE = BUNDLE_DIR / 'version.txt'
+_local_version = _read_baked_version()
 _update_status: dict = {"checked": False, "has_update": False}
 
 # ── Determine effective MongoDB URL (override file takes priority) ────────────
