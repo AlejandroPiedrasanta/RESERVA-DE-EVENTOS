@@ -3452,15 +3452,21 @@ async def _read_local_version() -> str:
 #   4. Nunca retrocede. Nunca crea 2-part (siempre X.Y.Z).
 # ─────────────────────────────────────────────────────────────────────
 _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_SEMVER_RE_2 = re.compile(r"^v?(\d+)\.(\d+)$")
 
 
 def _parse_semver(s: str):
     if not s:
         return None
-    m = _SEMVER_RE.match(s.strip())
-    if not m:
-        return None
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    s = s.strip()
+    m = _SEMVER_RE.match(s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    # Aceptar también 2-partes (X.Y → X.Y.0) para tags como v1.20
+    m2 = _SEMVER_RE_2.match(s)
+    if m2:
+        return (int(m2.group(1)), int(m2.group(2)), 0)
+    return None
 
 
 def _fmt_semver(t) -> str:
@@ -3498,7 +3504,9 @@ async def _list_remote_semver_tags() -> list:
         if isinstance(tags, list):
             for t in tags:
                 sv = _parse_semver(t.get("name") or "")
-                if sv:
+                # Solo aceptar la serie oficial major=1 (los tags v2001.X,
+                # v1.999, etc. son basura de pruebas y rompen la numeración).
+                if sv and sv[0] == 1:
                     tags_semver.append(sv)
     except Exception as e:
         logger.warning(f"_list_remote_semver_tags: {e}")
@@ -3737,6 +3745,23 @@ async def dismiss_update_cloud():
     return {"message": "OK"}
 
 
+def _normalize_semver(v: str) -> str:
+    """Normaliza cualquier versión al formato X.Y.Z. Ej: '1.20' → '1.20.0'."""
+    v = (v or "").strip().lstrip("v")
+    if not v:
+        return ""
+    parts = v.split(".")
+    nums = []
+    for p in parts:
+        try:
+            nums.append(str(int(p)))
+        except ValueError:
+            nums.append("0")
+    while len(nums) < 3:
+        nums.append("0")
+    return ".".join(nums[:3])
+
+
 # ── PRÓXIMA VERSIÓN AUTOMÁTICA (para el modal "Publicar en GitHub") ──────────
 @api_router.get("/github/next-version")
 async def get_next_auto_version():
@@ -3767,11 +3792,17 @@ async def get_next_auto_version():
 
     next_version = await _compute_next_unified_version()
 
+    # Normalizar TODAS las versiones al mismo formato X.Y.Z para evitar
+    # confusión visual como "v1.20" vs "v1.0.31" (el usuario ve formatos
+    # inconsistentes cuando algunos tags son 2-partes y otros 3-partes).
     return {
-        "current_local": current_local,
-        "current_remote": current_remote,
-        "current_desktop": current_desktop,
-        "next_auto_version": next_version,
+        "current_local":     _normalize_semver(current_local),
+        "current_remote":    _normalize_semver(current_remote),
+        "current_desktop":   _normalize_semver(current_desktop),
+        "next_auto_version": _normalize_semver(next_version),
+        # Raw sin normalizar (por si algún cliente antiguo lo espera)
+        "current_local_raw":  current_local,
+        "current_remote_raw": current_remote,
     }
 
 

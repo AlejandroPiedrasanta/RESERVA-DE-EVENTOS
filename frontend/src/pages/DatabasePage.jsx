@@ -568,6 +568,13 @@ export default function DatabasePage() {
     setGhPreview(null);
     setGhPreviewLoading(true);
     setGhSelectModalOpen(true);
+    // Cargar info de versión en paralelo para mostrar en el modal
+    setGhPushVersionInfo(null);
+    setGhPushVersionLoading(true);
+    getGithubNextVersion()
+      .then(info => setGhPushVersionInfo(info))
+      .catch(() => {})
+      .finally(() => setGhPushVersionLoading(false));
     try {
       const prev = await getGithubPushPreview();
       setGhPreview(prev);
@@ -2860,7 +2867,7 @@ export default function DatabasePage() {
       document.body
       )}
 
-      {/* ═══════════ MODAL: SELECCIÓN de archivos a subir ═══════════ */}
+      {/* ═══════════ MODAL: SELECCIÓN de archivos a subir (mejorado) ═══════════ */}
       {createPortal(
       <AnimatePresence>
         {ghSelectModalOpen && (
@@ -2874,81 +2881,292 @@ export default function DatabasePage() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: "spring", stiffness: 200, damping: 22 }}
               data-testid="github-select-modal"
-              className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
             >
-              <div className="px-6 pt-6 pb-5 text-white"
+              {/* Header con gradiente + versiones */}
+              <div className="px-6 pt-6 pb-5 text-white relative overflow-hidden"
                 style={{ background: "linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%)" }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
-                    <ListChecks size={20} />
+                {/* Decoración animada */}
+                <motion.div
+                  className="absolute -right-12 -top-12 w-40 h-40 rounded-full bg-white/10 blur-2xl"
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 4, repeat: Infinity }}
+                />
+                <div className="relative">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                      <ListChecks size={20} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-base font-black">Elegir qué subir al repositorio</p>
+                      <p className="text-xs text-white/80 mt-0.5">Se comparará con la versión actual en GitHub</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-base font-black">Elegir qué subir a GitHub</p>
-                    <p className="text-xs text-white/80 mt-0.5">Marca las categorías que quieres publicar</p>
-                  </div>
+
+                  {/* Comparación de versiones dinámica */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                    className="mt-4 grid grid-cols-3 gap-2"
+                    data-testid="github-select-version-compare"
+                  >
+                    <div className="bg-white/10 rounded-xl p-2.5 text-center backdrop-blur-sm">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-white/70 mb-0.5">Local</p>
+                      <p className="text-sm font-black font-mono">
+                        {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.current_local || "?"}`}
+                      </p>
+                    </div>
+                    <div className="bg-white/10 rounded-xl p-2.5 text-center backdrop-blur-sm relative">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-white/70 mb-0.5">GitHub</p>
+                      <p className="text-sm font-black font-mono">
+                        {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.current_remote || "?"}`}
+                      </p>
+                      <ArrowRight size={12} className="absolute -left-2 top-1/2 -translate-y-1/2 text-white/60" />
+                      <ArrowRight size={12} className="absolute -right-2 top-1/2 -translate-y-1/2 text-white/60" />
+                    </div>
+                    <div className="bg-emerald-400/30 border border-emerald-300/40 rounded-xl p-2.5 text-center backdrop-blur-sm">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-white mb-0.5">Próxima</p>
+                      <p className="text-sm font-black font-mono text-white">
+                        {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.next_auto_version || "?"}`}
+                      </p>
+                    </div>
+                  </motion.div>
+
+                  {/* Alerta si local está desactualizada respecto a remote */}
+                  {!ghPushVersionLoading && ghPushVersionInfo?.current_local && ghPushVersionInfo?.current_remote
+                    && ghPushVersionInfo.current_local !== ghPushVersionInfo.current_remote && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                        className="mt-2.5 flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-lg px-2.5 py-1.5"
+                        data-testid="github-select-version-mismatch"
+                      >
+                        <AlertCircle size={11} className="text-amber-200 shrink-0" />
+                        <p className="text-[10px] text-amber-100 font-semibold leading-tight">
+                          Tu versión local es distinta a la del repo. Al publicar se subirá a <b className="font-mono">v{ghPushVersionInfo.next_auto_version}</b>.
+                        </p>
+                      </motion.div>
+                  )}
                 </div>
               </div>
 
-              <div className="p-6 space-y-3 overflow-y-auto">
+              {/* Toolbar: contadores + acciones rápidas */}
+              {!ghPreviewLoading && ghPreview?.categories && (() => {
+                const selectedCats = ghPreview.categories.filter(c => ghInclude[c.id]);
+                const totalFiles = selectedCats.reduce((a, c) => a + (c.files || 0), 0);
+                const totalBytes = selectedCats.reduce((a, c) => a + (c.size_bytes || 0), 0);
+                const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+                const hasSlow = selectedCats.some(c => c.slow);
+                return (
+                  <motion.div
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                    className="px-6 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap"
+                    data-testid="github-select-toolbar"
+                  >
+                    <div className="flex items-center gap-4 text-[11px]">
+                      <motion.div
+                        key={selectedCats.length}
+                        initial={{ scale: 0.85, opacity: 0.5 }} animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 300 }}
+                        className="flex items-center gap-1.5 text-slate-700 font-bold"
+                      >
+                        <CheckCircle size={12} className="text-indigo-500" />
+                        <span data-testid="gh-select-count-cats">{selectedCats.length}</span>
+                        <span className="text-slate-400 font-normal">/ {ghPreview.categories.length} categorías</span>
+                      </motion.div>
+                      <motion.div
+                        key={totalFiles}
+                        initial={{ scale: 0.85, opacity: 0.5 }} animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 300 }}
+                        className="flex items-center gap-1.5 text-slate-700 font-bold"
+                      >
+                        <FileText size={12} className="text-indigo-500" />
+                        <span data-testid="gh-select-count-files">{totalFiles.toLocaleString()}</span>
+                        <span className="text-slate-400 font-normal">archivos</span>
+                      </motion.div>
+                      <motion.div
+                        key={totalMB}
+                        initial={{ scale: 0.85, opacity: 0.5 }} animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 300 }}
+                        className="flex items-center gap-1.5 text-slate-700 font-bold"
+                      >
+                        <HardDrive size={12} className="text-indigo-500" />
+                        <span data-testid="gh-select-count-size">{totalMB}</span>
+                        <span className="text-slate-400 font-normal">MB</span>
+                      </motion.div>
+                      {hasSlow && (
+                        <motion.div
+                          initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }}
+                          className="flex items-center gap-1 text-amber-700 font-bold"
+                        >
+                          <Timer size={11} />
+                          <span>+1–2 min</span>
+                        </motion.div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          const all = {};
+                          ghPreview.categories.forEach(c => { all[c.id] = true; });
+                          setGhInclude(all);
+                        }}
+                        data-testid="gh-select-all-btn"
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 transition-colors"
+                      >
+                        Todo
+                      </button>
+                      <button
+                        onClick={() => {
+                          const def = {};
+                          ghPreview.categories.forEach(c => { def[c.id] = !!c.default; });
+                          setGhInclude(def);
+                        }}
+                        data-testid="gh-select-essential-btn"
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 transition-colors"
+                      >
+                        Esencial
+                      </button>
+                      <button
+                        onClick={() => {
+                          const none = {};
+                          ghPreview.categories.forEach(c => { none[c.id] = false; });
+                          setGhInclude(none);
+                        }}
+                        data-testid="gh-select-none-btn"
+                        className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 transition-colors"
+                      >
+                        Ninguno
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })()}
+
+              {/* Lista de categorías con animaciones */}
+              <div className="p-5 space-y-2 overflow-y-auto flex-1">
                 {ghPreviewLoading && (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="animate-spin text-slate-400" size={22} />
-                    <span className="ml-2 text-sm text-slate-500">Analizando archivos…</span>
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <Loader2 className="animate-spin text-indigo-400" size={26} />
+                    <span className="text-sm text-slate-500 font-semibold">Analizando cambios locales…</span>
+                    <span className="text-[10px] text-slate-400">Comparando con el repositorio remoto</span>
                   </div>
                 )}
 
-                {!ghPreviewLoading && ghPreview?.categories?.map((c) => {
-                  const checked = !!ghInclude[c.id];
-                  const kb = c.size_bytes ? (c.size_bytes / 1024).toFixed(0) : 0;
-                  const mb = c.size_bytes ? (c.size_bytes / (1024 * 1024)).toFixed(1) : 0;
-                  const sizeLabel = c.size_bytes >= 1024 * 1024 ? `${mb} MB` : c.size_bytes ? `${kb} KB` : "";
-                  return (
-                    <label
-                      key={c.id}
-                      data-testid={`github-select-cat-${c.id}`}
-                      className={`flex items-start gap-3 p-3 rounded-2xl border-2 cursor-pointer transition-colors ${
-                        checked
-                          ? (c.slow ? "border-amber-300 bg-amber-50" : "border-indigo-300 bg-indigo-50")
-                          : "border-slate-200 bg-white hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => setGhInclude(prev => ({ ...prev, [c.id]: e.target.checked }))}
-                        className="mt-1 w-5 h-5 accent-indigo-600 cursor-pointer flex-shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-bold text-slate-900">{c.label}</p>
-                          {c.slow && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
-                              <Timer size={10} /> Lento (1–2 min)
-                            </span>
+                {!ghPreviewLoading && (
+                  <motion.div
+                    initial="hidden" animate="show"
+                    variants={{ show: { transition: { staggerChildren: 0.05 } } }}
+                    className="space-y-2"
+                  >
+                    {ghPreview?.categories?.map((c) => {
+                      const checked = !!ghInclude[c.id];
+                      const kb = c.size_bytes ? (c.size_bytes / 1024).toFixed(0) : 0;
+                      const mb = c.size_bytes ? (c.size_bytes / (1024 * 1024)).toFixed(1) : 0;
+                      const sizeLabel = c.size_bytes >= 1024 * 1024 ? `${mb} MB` : c.size_bytes ? `${kb} KB` : "";
+                      const iconMap = {
+                        backend:        { icon: <Server size={16} />,        color: "text-sky-600",     bg: "bg-sky-100" },
+                        frontend_src:   { icon: <MonitorSpeaker size={16} />,color: "text-violet-600",  bg: "bg-violet-100" },
+                        root_files:     { icon: <FolderOpen size={16} />,    color: "text-amber-600",   bg: "bg-amber-100" },
+                        standalone_app: { icon: <Package size={16} />,       color: "text-emerald-600", bg: "bg-emerald-100" },
+                        version_txt:    { icon: <FileText size={16} />,      color: "text-pink-600",    bg: "bg-pink-100" },
+                        build_frontend: { icon: <Zap size={16} />,           color: "text-orange-600",  bg: "bg-orange-100" },
+                      };
+                      const style = iconMap[c.id] || { icon: <Folder size={16} />, color: "text-slate-600", bg: "bg-slate-100" };
+                      return (
+                        <motion.label
+                          key={c.id}
+                          data-testid={`github-select-cat-${c.id}`}
+                          variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.995 }}
+                          className={`relative flex items-center gap-3 p-3 rounded-2xl border-2 cursor-pointer transition-colors overflow-hidden ${
+                            checked
+                              ? (c.slow ? "border-amber-300 bg-amber-50" : "border-indigo-300 bg-indigo-50")
+                              : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}
+                        >
+                          {/* Efecto de brillo al marcar */}
+                          <AnimatePresence>
+                            {checked && (
+                              <motion.div
+                                initial={{ opacity: 0, x: -100 }}
+                                animate={{ opacity: [0, 0.4, 0], x: 400 }}
+                                transition={{ duration: 0.7 }}
+                                className="absolute inset-y-0 w-24 bg-gradient-to-r from-transparent via-white to-transparent pointer-events-none"
+                              />
+                            )}
+                          </AnimatePresence>
+
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => setGhInclude(prev => ({ ...prev, [c.id]: e.target.checked }))}
+                            className="w-5 h-5 accent-indigo-600 cursor-pointer flex-shrink-0"
+                          />
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${style.bg} ${style.color}`}>
+                            {style.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-black text-slate-900">{c.label}</p>
+                              {c.slow && (
+                                <motion.span
+                                  animate={{ scale: [1, 1.05, 1] }}
+                                  transition={{ duration: 2, repeat: Infinity }}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900"
+                                >
+                                  <Timer size={10} /> Lento (1–2 min)
+                                </motion.span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 mt-0.5 leading-snug">{c.description}</p>
+                            {(c.files > 0 || sizeLabel) && (
+                              <div className="flex items-center gap-3 mt-1.5 text-[10px] font-mono text-slate-500">
+                                {c.files > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <FileText size={9} />
+                                    {c.files.toLocaleString()} archivo{c.files === 1 ? "" : "s"}
+                                  </span>
+                                )}
+                                {sizeLabel && (
+                                  <span className="flex items-center gap-1">
+                                    <HardDrive size={9} />
+                                    {sizeLabel}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {checked && (
+                            <motion.div
+                              initial={{ scale: 0, rotate: -90 }}
+                              animate={{ scale: 1, rotate: 0 }}
+                              transition={{ type: "spring", stiffness: 300, damping: 15 }}
+                              className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${c.slow ? "bg-amber-500" : "bg-indigo-500"}`}
+                            >
+                              <CheckCircle size={14} className="text-white" />
+                            </motion.div>
                           )}
-                          {c.files > 0 && (
-                            <span className="text-[10px] font-mono text-slate-500">
-                              {c.files} archivo{c.files === 1 ? "" : "s"}{sizeLabel ? ` · ${sizeLabel}` : ""}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-600 mt-0.5 leading-snug">{c.description}</p>
-                      </div>
-                    </label>
-                  );
-                })}
+                        </motion.label>
+                      );
+                    })}
+                  </motion.div>
+                )}
 
                 {!ghPreviewLoading && (
-                  <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-blue-50 border border-blue-100">
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+                    className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-blue-50 border border-blue-100"
+                  >
                     <Info size={14} className="text-blue-600 mt-0.5 flex-shrink-0" />
                     <p className="text-[11px] text-blue-900 leading-snug">
                       <strong>Tip:</strong> GitHub Actions compila el <code className="px-1 py-0.5 rounded bg-blue-100">.exe</code> automáticamente
                       cuando se crea el tag. Por eso <em>Compilar frontend</em> viene desmarcado — el push es mucho más rápido.
                     </p>
-                  </div>
+                  </motion.div>
                 )}
               </div>
 
+              {/* Footer con botones */}
               <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
                 <button
                   onClick={() => setGhSelectModalOpen(false)}
@@ -2957,15 +3175,16 @@ export default function DatabasePage() {
                 >
                   Cancelar
                 </button>
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                   onClick={handleConfirmSelection}
                   disabled={ghPreviewLoading || !Object.values(ghInclude).some(Boolean)}
                   data-testid="github-select-continue-btn"
-                  className="px-5 py-2 rounded-xl text-sm font-black text-white flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-transform hover:scale-[1.02] active:scale-95"
+                  className="px-5 py-2.5 rounded-xl text-sm font-black text-white flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
                   style={{ background: "linear-gradient(135deg,#0ea5e9,#6366f1)" }}
                 >
                   Continuar <ArrowRight size={14} />
-                </button>
+                </motion.button>
               </div>
             </motion.div>
           </motion.div>
