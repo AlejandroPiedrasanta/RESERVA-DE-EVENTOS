@@ -191,8 +191,8 @@ jobs:
         shell: pwsh
         run: |
           # Copiar el .iss del repo a dist/ para que las rutas relativas apunten a dist/CinemaProductions.exe
-          if (-not (Test-Path installer/installer.iss)) { throw "No existe installer/installer.iss en el repo" }
-          Copy-Item installer/installer.iss dist/installer.iss -Force
+          if (-not (Test-Path installer.iss)) { throw "No existe installer.iss en la raiz del repo" }
+          Copy-Item installer.iss dist/installer.iss -Force
           # Copiar el MISMO ícono del .exe (favicon.ico generado desde logo.png)
           # para que el instalador use el mismo logo. Si faltara, generarlo aquí.
           if (-not (Test-Path frontend/public/favicon.ico)) {
