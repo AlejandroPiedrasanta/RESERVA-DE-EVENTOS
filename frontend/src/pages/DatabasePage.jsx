@@ -30,7 +30,7 @@ import {
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
   githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview,
-  getGithubStorage, deleteGithubBuilds,
+  getGithubStorage, deleteGithubBuilds, triggerGithubBuildExe,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -241,6 +241,20 @@ export default function DatabasePage() {
   const [buildsDeleting, setBuildsDeleting] = useState(false);
   const [showDeleteBuilds, setShowDeleteBuilds] = useState(false);
   const [deletingAssetId, setDeletingAssetId] = useState(null);
+  const [buildTriggering, setBuildTriggering] = useState(false);
+
+  const handleTriggerBuild = async () => {
+    setBuildTriggering(true);
+    try {
+      const res = await triggerGithubBuildExe();
+      toast({ title: "Compilación iniciada ✓", description: res.message || "El .exe se está construyendo en GitHub Actions." });
+      fireEpic("success");
+    } catch (err) {
+      toast({ title: "No se pudo iniciar la compilación", description: err?.response?.data?.detail || String(err), variant: "destructive" });
+    } finally {
+      setBuildTriggering(false);
+    }
+  };
 
   const loadStorage = async () => {
     setStorageLoading(true);
@@ -2261,6 +2275,24 @@ export default function DatabasePage() {
                             )}
                           </div>
                         )}
+
+                        {/* Reintentar compilación del .exe */}
+                        {storage.connected && (
+                          <div className="flex items-center gap-3 bg-slate-50/70 rounded-2xl px-4 py-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-slate-700">¿El .exe no se construyó?</p>
+                              <p className="text-[10px] text-slate-400">Inicia manualmente la compilación en GitHub Actions.</p>
+                            </div>
+                            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                              onClick={handleTriggerBuild} disabled={buildTriggering}
+                              data-testid="repo-trigger-build-btn"
+                              className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 shrink-0 disabled:opacity-60">
+                              {buildTriggering ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                              Compilar .exe
+                            </motion.button>
+                          </div>
+                        )}
+
 
                         {/* Lista de builds */}
                         {storage.builds && storage.builds.length > 0 ? (

@@ -4557,6 +4557,80 @@ def _gh_api_headers(token: str) -> dict:
     return h
 
 
+async def _trigger_exe_build_workflow(owner_repo=None, token: str = "", repo_url: str = "",
+                                      branch: str = "main", version: str = "") -> dict:
+    """Dispara el workflow 'build-exe.yml' vía workflow_dispatch API.
+    Se usa porque el commit del push lleva '[skip ci]', lo que impide que el
+    push del tag dispare el build automáticamente. workflow_dispatch NO se ve
+    afectado por '[skip ci]', así que garantiza que el .exe SIEMPRE se compile.
+    Devuelve {ok: bool, status?, error?}."""
+    if not token:
+        return {"ok": False, "error": "no_token"}
+    owner, repo = (None, None)
+    if owner_repo and "/" in owner_repo:
+        owner, repo = owner_repo.split("/", 1)
+    if not owner or not repo:
+        owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        parts = _github_exe_repo().split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0], parts[1]
+    if not owner or not repo:
+        return {"ok": False, "error": "no_repo"}
+
+    ver = (version or "").strip().lstrip("vV").strip()
+    release_tag = f"v{ver}" if ver else "latest-exe"
+    inputs = {"release_tag": release_tag, "prerelease": "false"}
+    if ver:
+        inputs["app_version"] = ver
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/build-exe.yml/dispatches"
+    headers = _gh_api_headers(token)
+    body = {"ref": branch or "main", "inputs": inputs}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(url, headers=headers, json=body)
+            if r.status_code in (204, 201, 200):
+                return {"ok": True, "status": r.status_code, "release_tag": release_tag}
+            # Fallback: si el ref de la rama fallara, reintenta con el tag como ref
+            if r.status_code == 422 and ver:
+                body_retry = {"ref": release_tag, "inputs": inputs}
+                r2 = await client.post(url, headers=headers, json=body_retry)
+                if r2.status_code in (204, 201, 200):
+                    return {"ok": True, "status": r2.status_code, "release_tag": release_tag}
+                return {"ok": False, "status": r2.status_code, "error": (r2.text or "")[:300]}
+            return {"ok": False, "status": r.status_code, "error": (r.text or "")[:300]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+@api_router.post("/github/build-exe")
+async def github_build_exe(payload: dict = Body(default={})):
+    """Dispara manualmente la compilación del .exe en GitHub Actions.
+    Útil como botón 'Reintentar compilación' si un build no arrancó.
+    Body opcional: { version: 'X.Y.Z' }."""
+    token, repo_url, branch = await _resolve_github_creds()
+    if not token:
+        raise HTTPException(status_code=400, detail="Conecta tu cuenta de GitHub primero.")
+    version = (payload or {}).get("version") or ""
+    if not version:
+        try:
+            version = await _compute_next_unified_version()
+        except Exception:
+            version = ""
+    res = await _trigger_exe_build_workflow(token=token, repo_url=repo_url, branch=branch, version=version)
+    if not res.get("ok"):
+        raise HTTPException(status_code=502, detail=f"No se pudo iniciar la compilación: {res.get('error') or res.get('status')}")
+    owner, repo = _parse_github_url(repo_url)
+    return {
+        "success": True,
+        "release_tag": res.get("release_tag"),
+        "actions_url": f"https://github.com/{owner}/{repo}/actions/workflows/build-exe.yml" if owner else "",
+        "message": "Compilación del .exe iniciada en GitHub Actions.",
+    }
+
+
+
 @api_router.get("/github/storage")
 async def github_storage():
     """Devuelve el uso de espacio del repositorio, el plan de GitHub de la
@@ -4677,10 +4751,13 @@ async def github_storage():
 @api_router.delete("/github/builds")
 async def github_delete_builds(payload: dict = Body(default={})):
     """Borra builds .exe (y sus .sha256) de los Releases de GitHub para liberar
-    espacio. Body opcional:
-      - asset_ids: [int]   → borra solo esos assets.
-      - release_id: int    → borra TODOS los .exe/.sha256 de ese release.
-      - (vacío)            → borra TODOS los builds .exe/.sha256 del repo.
+    espacio Y DEJAR EL REPO LIMPIO. Body opcional:
+      - asset_ids: [int]      → borra solo esos assets.
+      - release_id: int       → borra TODOS los .exe/.sha256 de ese release.
+      - (vacío)               → borra TODOS los builds .exe/.sha256 del repo.
+      - delete_releases: bool → (default True) si un release se queda SIN assets,
+                                borra también el release y su tag git, para que
+                                la sección de Releases del repo quede limpia.
     Requiere cuenta de GitHub conectada (token con scope 'repo')."""
     token, repo_url, branch = await _resolve_github_creds()
     if not token:
@@ -4697,14 +4774,17 @@ async def github_delete_builds(payload: dict = Body(default={})):
     payload = payload or {}
     target_asset_ids = set(payload.get("asset_ids") or [])
     target_release_id = payload.get("release_id")
+    delete_releases = payload.get("delete_releases", True)
 
     headers = _gh_api_headers(token)
     deleted = []
     freed_bytes = 0
     errors = []
+    deleted_releases = []
+    deleted_tags = []
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        # Reunir todos los assets .exe/.sha256 candidatos
+    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+        # Reunir releases + assets .exe/.sha256 candidatos
         try:
             r = await client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=100",
@@ -4712,8 +4792,16 @@ async def github_delete_builds(payload: dict = Body(default={})):
             )
             if r.status_code != 200:
                 raise HTTPException(status_code=502, detail=f"No se pudo leer Releases (GitHub {r.status_code}).")
+            releases = r.json() or []
             candidates = []
-            for rel in r.json() or []:
+            # Mapa release_id → info para la limpieza posterior
+            rel_map = {}
+            for rel in releases:
+                rel_map[rel.get("id")] = {
+                    "tag": rel.get("tag_name") or "",
+                    "all_assets": [a.get("id") for a in (rel.get("assets") or [])],
+                    "name": rel.get("name") or rel.get("tag_name") or "",
+                }
                 for a in rel.get("assets") or []:
                     low = (a.get("name") or "").lower()
                     if not (low.endswith(".exe") or low.endswith(".exe.sha256")):
@@ -4722,6 +4810,7 @@ async def github_delete_builds(payload: dict = Body(default={})):
                         continue
                     if target_release_id is not None and rel.get("id") != target_release_id:
                         continue
+                    a["_release_id"] = rel.get("id")
                     candidates.append(a)
         except HTTPException:
             raise
@@ -4730,8 +4819,11 @@ async def github_delete_builds(payload: dict = Body(default={})):
 
         if not candidates:
             return {"success": True, "deleted_count": 0, "freed_bytes": 0,
-                    "freed_human": "0 B", "message": "No había builds .exe para borrar.", "errors": []}
+                    "freed_human": "0 B", "deleted_releases": [], "deleted_tags": [],
+                    "message": "No había builds .exe para borrar.", "errors": []}
 
+        deleted_asset_ids = set()
+        touched_release_ids = set()
         for a in candidates:
             aid = a.get("id")
             try:
@@ -4742,18 +4834,63 @@ async def github_delete_builds(payload: dict = Body(default={})):
                 if dr.status_code in (204, 200):
                     freed_bytes += int(a.get("size") or 0)
                     deleted.append({"asset_id": aid, "name": a.get("name"), "size": int(a.get("size") or 0)})
+                    deleted_asset_ids.add(aid)
+                    touched_release_ids.add(a.get("_release_id"))
                 else:
                     errors.append(f"{a.get('name')}:{dr.status_code}")
             except Exception as e:
                 errors.append(f"{a.get('name')}:{str(e)[:60]}")
 
+        # ── Limpieza: borrar releases que quedaron SIN assets + su tag git ──
+        if delete_releases:
+            for rid in touched_release_ids:
+                info = rel_map.get(rid) or {}
+                remaining = [aid for aid in info.get("all_assets", []) if aid not in deleted_asset_ids]
+                if remaining:
+                    continue  # aún tiene otros assets → no borrar el release
+                # 1) Borrar el release
+                try:
+                    rr = await client.delete(
+                        f"https://api.github.com/repos/{owner}/{repo}/releases/{rid}",
+                        headers=headers,
+                    )
+                    if rr.status_code in (204, 200):
+                        deleted_releases.append(info.get("name") or str(rid))
+                    else:
+                        errors.append(f"release_{rid}:{rr.status_code}")
+                        continue
+                except Exception as e:
+                    errors.append(f"release_{rid}:{str(e)[:60]}")
+                    continue
+                # 2) Borrar el tag git asociado (para limpiar la lista de tags)
+                tag = info.get("tag") or ""
+                if tag:
+                    try:
+                        tr = await client.delete(
+                            f"https://api.github.com/repos/{owner}/{repo}/git/refs/tags/{tag}",
+                            headers=headers,
+                        )
+                        if tr.status_code in (204, 200):
+                            deleted_tags.append(tag)
+                        elif tr.status_code != 422:  # 422 = el tag ya no existe
+                            errors.append(f"tag_{tag}:{tr.status_code}")
+                    except Exception as e:
+                        errors.append(f"tag_{tag}:{str(e)[:60]}")
+
+    parts_msg = [f"{len(deleted)} archivo(s)", f"{_human_bytes(freed_bytes)} liberados"]
+    if deleted_releases:
+        parts_msg.append(f"{len(deleted_releases)} release(s) borrados")
+    if deleted_tags:
+        parts_msg.append(f"{len(deleted_tags)} tag(s) borrados")
     return {
         "success": True,
         "deleted_count": len(deleted),
         "deleted": deleted,
         "freed_bytes": freed_bytes,
         "freed_human": _human_bytes(freed_bytes),
-        "message": f"Se borraron {len(deleted)} archivo(s) · {_human_bytes(freed_bytes)} liberados.",
+        "deleted_releases": deleted_releases,
+        "deleted_tags": deleted_tags,
+        "message": "Repositorio limpio · " + " · ".join(parts_msg) + ".",
         "errors": errors,
     }
 
@@ -5263,8 +5400,8 @@ async def _do_github_push_all(payload: dict):
             # Los tags v1.NN quedan como "releases" persistentes en GitHub que
             # las apps de escritorio pueden consultar directamente sin necesitar
             # una base de datos compartida.
+            tag_name = f"v{version_str}"
             try:
-                tag_name = f"v{version_str}"
                 # Crea tag anotado y lo pushea
                 rc_tag, out_tag = await _arun(
                     ["git", "tag", "-a", tag_name, "-m", message], cwd=work_dir
@@ -5280,6 +5417,26 @@ async def _do_github_push_all(payload: dict):
                     logger.warning(f"No se pudo crear tag {tag_name}: {out_tag[-200:]}")
             except Exception as tag_err:
                 logger.warning(f"Error creando tag: {tag_err}")
+
+            # ── 6c. Disparar la compilación del .exe EXPLÍCITAMENTE ──────────
+            # IMPORTANTE: el commit lleva "[skip ci]" para que auto-release.yml
+            # no haga un segundo bump. Pero GitHub evalúa "[skip ci]" sobre todo
+            # el push, así que el push del tag NO dispara build-exe.yml (el .exe
+            # nunca se construía). Por eso lo lanzamos vía workflow_dispatch API,
+            # que NO se ve afectado por "[skip ci]".
+            try:
+                _set_push_state(progress=98, message="Iniciando compilación del .exe en GitHub Actions…", step=8,
+                                detail="Disparando el workflow «Build Windows .exe»")
+                dispatch = await _trigger_exe_build_workflow(
+                    owner_repo=None, token=token, repo_url=repo_url,
+                    branch=branch, version=version_str,
+                )
+                if dispatch.get("ok"):
+                    logger.info(f"[push-all] build-exe.yml disparado para v{version_str}")
+                else:
+                    logger.warning(f"[push-all] no se pudo disparar build-exe.yml: {dispatch.get('error')}")
+            except Exception as disp_err:
+                logger.warning(f"[push-all] excepción al disparar build-exe.yml: {disp_err}")
         except Exception as reg_err:
             logger.warning(f"No se pudo registrar el push como update: {reg_err}")
             registered_version = None

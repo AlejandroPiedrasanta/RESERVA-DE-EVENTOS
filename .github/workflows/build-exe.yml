@@ -19,6 +19,14 @@ on:
         description: 'Tag para la release (default: latest-exe)'
         required: false
         default: 'latest-exe'
+      prerelease:
+        description: '¿Publicar como prerelease? (true/false)'
+        required: false
+        default: 'false'
+      app_version:
+        description: 'Versión a embeber en los binarios (override de version.txt SOLO en el runner)'
+        required: false
+        default: ''
   workflow_call:
     inputs:
       release_tag:

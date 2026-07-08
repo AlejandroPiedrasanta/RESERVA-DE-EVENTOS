@@ -129,6 +129,7 @@ export const getGithubPushStatus = () => api.get("/github/push-status").then(r =
 export const getGithubPushPreview = () => api.get("/github/push-preview").then(r => r.data);
 export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
 export const getGithubStorage = () => api.get("/github/storage").then(r => r.data);
+export const triggerGithubBuildExe = (version) => api.post("/github/build-exe", version ? { version } : {}).then(r => r.data);
 export const deleteGithubBuilds = (opts = {}) =>
   api.delete("/github/builds", { data: opts, timeout: 120000 }).then(r => r.data);
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart", {}, { timeout: 600000 }).then(r => r.data);
