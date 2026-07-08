@@ -29,7 +29,7 @@ import {
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
-  githubPushAll, getGithubPushStatus,
+  githubPushAll, getGithubPushStatus, getGithubNextVersion,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -223,6 +223,8 @@ export default function DatabasePage() {
   const [ghPushModalOpen, setGhPushModalOpen] = useState(false);
   const [ghPushVersion, setGhPushVersion] = useState("");
   const [ghPushCommitMsg, setGhPushCommitMsg] = useState("");
+  const [ghPushVersionInfo, setGhPushVersionInfo] = useState(null); // { current_local, current_remote, next_auto_version, ... }
+  const [ghPushVersionLoading, setGhPushVersionLoading] = useState(false);
   const [diagnostic, setDiagnostic] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
@@ -456,14 +458,25 @@ export default function DatabasePage() {
 
   // ── Guardar TODO el repositorio a GitHub (git add + commit + push) ──
   // Abre el modal para que el usuario ingrese versión + mensaje.
-  const handlePushAllToGithub = () => {
+  const handlePushAllToGithub = async () => {
     if (!ghConfig.username) {
       toast({ title: "Conecta tu cuenta de GitHub primero", variant: "destructive" });
       return;
     }
     setGhPushVersion("");
     setGhPushCommitMsg(`Actualización — ${new Date().toLocaleString("es-GT")}`);
+    setGhPushVersionInfo(null);
+    setGhPushVersionLoading(true);
     setGhPushModalOpen(true);
+    // Cargar versión actual + próxima automática (no bloqueante)
+    try {
+      const info = await getGithubNextVersion();
+      setGhPushVersionInfo(info);
+    } catch (_) {
+      // Silencioso: el modal sigue funcionando aunque falle el fetch.
+    } finally {
+      setGhPushVersionLoading(false);
+    }
   };
 
   // Ejecuta el push real con la versión/mensaje elegidos en el modal.
@@ -2312,6 +2325,58 @@ export default function DatabasePage() {
               </div>
 
               <div className="p-6 space-y-4">
+                {/* Tarjeta: Versión actual + próxima automática */}
+                <div
+                  data-testid="github-push-version-info"
+                  className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50/60 p-3.5"
+                >
+                  {ghPushVersionLoading ? (
+                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Consultando versión actual…</span>
+                    </div>
+                  ) : ghPushVersionInfo ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                          Versión actual
+                        </p>
+                        <p
+                          data-testid="github-push-current-version"
+                          className="text-lg font-black text-slate-800 mt-0.5"
+                        >
+                          v{ghPushVersionInfo.current_remote || ghPushVersionInfo.current_local || "—"}
+                        </p>
+                        {ghPushVersionInfo.current_local
+                          && ghPushVersionInfo.current_remote
+                          && ghPushVersionInfo.current_local !== ghPushVersionInfo.current_remote && (
+                          <p className="text-[9.5px] text-slate-400 mt-0.5">
+                            local v{ghPushVersionInfo.current_local}
+                          </p>
+                        )}
+                      </div>
+                      <div className="border-l border-emerald-200/70 pl-3">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                          Próxima automática
+                        </p>
+                        <p
+                          data-testid="github-push-next-version"
+                          className="text-lg font-black text-emerald-700 mt-0.5"
+                        >
+                          v{ghPushVersionInfo.next_auto_version || "—"}
+                        </p>
+                        <p className="text-[9.5px] text-slate-400 mt-0.5">
+                          si dejas el campo vacío
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">
+                      No se pudo consultar la versión (revisa la conexión con GitHub).
+                    </p>
+                  )}
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
                     <Package size={12} /> Número o nombre de versión
@@ -2321,11 +2386,28 @@ export default function DatabasePage() {
                     type="text"
                     value={ghPushVersion}
                     onChange={(e) => setGhPushVersion(e.target.value)}
-                    placeholder="ej. 1.1, 2.0 o Navidad — vacío = automático"
+                    placeholder={
+                      ghPushVersionInfo?.next_auto_version
+                        ? `ej. 2.0 o Navidad — vacío = v${ghPushVersionInfo.next_auto_version}`
+                        : "ej. 1.1, 2.0 o Navidad — vacío = automático"
+                    }
                     data-testid="github-push-version-input"
                     className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all"
                   />
-                  <p className="text-[10px] text-slate-400">Se mostrará como <b className="text-slate-500">v{ghPushVersion.trim().replace(/^v/i, "") || "1.N"}</b> en la app. Si lo dejas vacío, se numera automáticamente.</p>
+                  <p className="text-[10px] text-slate-400">
+                    Se publicará como{" "}
+                    <b
+                      data-testid="github-push-version-preview"
+                      className="text-emerald-600"
+                    >
+                      v{
+                        ghPushVersion.trim().replace(/^v/i, "")
+                        || ghPushVersionInfo?.next_auto_version
+                        || "1.N"
+                      }
+                    </b>
+                    . Si lo dejas vacío, se numera automáticamente.
+                  </p>
                 </div>
 
                 <div className="space-y-1.5">

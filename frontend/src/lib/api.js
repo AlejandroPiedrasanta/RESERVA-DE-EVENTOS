@@ -126,6 +126,7 @@ export const disconnectGithub = () => api.post("/github/disconnect").then(r => r
 export const githubPushAll = (message, version, versionName) =>
   api.post("/github/push-all", { message, version, version_name: versionName }).then(r => r.data);
 export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
+export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart").then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
 export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).then(r => r.data);

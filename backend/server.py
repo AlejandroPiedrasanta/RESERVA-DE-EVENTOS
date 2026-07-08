@@ -3570,6 +3570,78 @@ async def dismiss_update_cloud():
     return {"message": "OK"}
 
 
+# ── PRÓXIMA VERSIÓN AUTOMÁTICA (para el modal "Publicar en GitHub") ──────────
+@api_router.get("/github/next-version")
+async def get_next_auto_version():
+    """Devuelve la versión actual y cuál sería el próximo número si el usuario
+    deja el input de versión vacío en el modal 'Publicar en GitHub'. Esto
+    reproduce la lógica de `_do_github_push_all` sin necesidad de clonar el
+    repo (usa la GitHub API para listar tags v1.*).
+
+    Response:
+    {
+      "current_local": "1.16",   # version.txt local (backend/servidor)
+      "current_remote": "1.16",  # version.txt del repo GitHub
+      "current_desktop": 16,     # desktop_build en Mongo (patch actual)
+      "next_auto_version": "1.17"
+    }
+    """
+    # Versión local (del servidor)
+    current_local = await _read_local_version()
+
+    # Versión en version.txt del repo GitHub
+    gh = await _fetch_github_version_txt()
+    current_remote = gh.get("version", "")
+
+    # desktop_build en Mongo (fuente principal para el cálculo automático)
+    cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
+    try:
+        local_build = int(cdoc.get("desktop_build", 9))
+    except Exception:
+        local_build = 9
+
+    # Escanear tags v1.* del repo remoto usando la API pública (sin clonar)
+    max_remote_build = 0
+    try:
+        cfg = await _get_github_config()
+        repo_url = cfg.get("repo_url") or ""
+        token = (cfg.get("token") or "").strip()
+        if repo_url:
+            m = re.match(r"https?://github\.com/([^/]+)/([^/.]+)", repo_url)
+            if m:
+                owner, repo = m.group(1), m.group(2)
+                headers = {"User-Agent": "cinema-productions",
+                           "Accept": "application/vnd.github+json"}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                import urllib.request as _u, json as _j
+                def _get_tags():
+                    req = _u.Request(
+                        f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=100",
+                        headers=headers,
+                    )
+                    with _u.urlopen(req, timeout=8) as resp:
+                        return _j.loads(resp.read().decode("utf-8", errors="ignore"))
+                tags = await asyncio.to_thread(_get_tags)
+                if isinstance(tags, list):
+                    for t in tags:
+                        name = (t.get("name") or "")
+                        mt = re.match(r"^v1\.(\d+)$", name)
+                        if mt:
+                            max_remote_build = max(max_remote_build, int(mt.group(1)))
+    except Exception as e:
+        logger.warning(f"next-version: no se pudieron listar tags remotos: {e}")
+
+    new_build = max(local_build, max_remote_build) + 1
+    return {
+        "current_local": current_local,
+        "current_remote": current_remote,
+        "current_desktop": local_build,
+        "max_remote_build": max_remote_build,
+        "next_auto_version": f"1.{new_build}",
+    }
+
+
 # ── APPEARANCE CLOUD SYNC ────────────────────────────────────────────────────
 
 @api_router.get("/settings/appearance")

@@ -1,13 +1,18 @@
 name: Auto Release on Save
 
 # Cada vez que guardas el repositorio (push a main/master) esto:
-#   1. Sube automáticamente el número de versión en version.txt (patch +1).
-#   2. Hace commit del nuevo version.txt con [skip ci] (para no re-disparar).
-#   3. Llama al workflow de build (build-exe.yml) que compila y publica en la
-#      Release el .exe de Windows + instalador + binarios Linux/macOS.
+#   1. Calcula el próximo número de versión (patch +1) SIN commitear todavía.
+#   2. Llama al workflow de build (build-exe.yml) pasándole la versión candidata
+#      para que compile todos los binarios (Windows/Linux x86/Linux ARM/macOS)
+#      y los publique en la Release correspondiente.
+#   3. SOLO si TODOS los builds terminan bien, el job `finalize` commitea el
+#      nuevo version.txt con [skip ci]. Así los .exe instalados nunca ven una
+#      versión anunciada por version.txt sin binarios disponibles para su
+#      plataforma — se elimina la desincronización entre tags y assets.
 #
-# Resultado: no tienes que crear tags a mano; guardar el repo = nueva versión
-# publicada = los .exe instalados detectan y aplican la actualización.
+# Resultado: guardar el repo = nueva versión publicada con TODOS los binarios
+# listos ANTES de subir version.txt. Si algún build falla, version.txt no cambia
+# y los .exe siguen mostrando la versión anterior (correctamente).
 
 on:
   push:
@@ -24,31 +29,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
+  # ─────────────────────────────────────────────────────────────────────
+  # 1) Calcular la próxima versión candidata (sin commit).
+  # ─────────────────────────────────────────────────────────────────────
+  compute-version:
     # No re-ejecutar por el commit automático de versión ([skip ci]).
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     outputs:
-      new_version: ${{ steps.bump.outputs.new_version }}
-      new_sha: ${{ steps.bump.outputs.new_sha }}
+      new_version: ${{ steps.calc.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Bump version.txt, commit y push
-        id: bump
+      - name: Calcular próxima versión candidata
+        id: calc
         run: |
           set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           CUR=$(tr -d '[:space:]' < version.txt 2>/dev/null || echo "")
           if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             IFS='.' read -r MA MI PA <<< "$CUR"
             PA=$((PA+1)); NEW="$MA.$MI.$PA"
           else
-            # version.txt no es semántico (ej. "OK12") -> empezar en 1.0.0
             NEW="1.0.0"
           fi
 
@@ -59,23 +62,68 @@ jobs:
             PA=$((PA+1)); NEW="$MA.$MI.$PA"
           done
 
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "✓ Versión candidata: v$NEW (aún no commiteada)"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 2) Compilar y publicar TODOS los binarios en la release vX.Y.Z.
+  #    build-exe.yml sobreescribe version.txt en el runner (NO en main)
+  #    para que los binarios lleven la nueva versión embebida.
+  # ─────────────────────────────────────────────────────────────────────
+  build:
+    needs: compute-version
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-exe.yml
+    with:
+      release_tag: v${{ needs.compute-version.outputs.new_version }}
+      prerelease: 'false'
+      ref: ${{ github.sha }}
+      app_version: ${{ needs.compute-version.outputs.new_version }}
+    secrets: inherit
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 3) Sólo si TODOS los builds terminaron OK: commitear version.txt.
+  #    Este es el paso que "coordina" la publicación: hasta que este job
+  #    corre, los binarios instalados no ven la nueva versión (porque
+  #    version.txt en main sigue siendo la anterior y — más importante —
+  #    el backend consulta el release con asset, que ya está publicado).
+  # ─────────────────────────────────────────────────────────────────────
+  finalize:
+    needs: [compute-version, build]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Commitear version.txt bumpeado
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          NEW="${{ needs.compute-version.outputs.new_version }}"
+          CUR=$(tr -d '[:space:]' < version.txt 2>/dev/null || echo "")
+
+          # Si otro push ya adelantó version.txt más allá de NEW, no retroceder.
+          if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            LARGER=$(printf '%s\n%s\n' "$CUR" "$NEW" | sort -V | tail -n1)
+            if [ "$LARGER" != "$NEW" ]; then
+              echo "⚠ version.txt en main ($CUR) es más nuevo que la candidata ($NEW). No commiteo."
+              exit 0
+            fi
+          fi
+
+          if [ "$CUR" = "$NEW" ]; then
+            echo "✓ version.txt ya está en $NEW. Nada que commitear."
+            exit 0
+          fi
+
           echo "$NEW" > version.txt
           git add version.txt
           git commit -m "chore(release): v$NEW [skip ci]"
           git push origin "HEAD:${{ github.ref_name }}"
-
-          echo "new_version=$NEW"        >> "$GITHUB_OUTPUT"
-          echo "new_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "✓ Nueva versión: v$NEW"
-
-  build:
-    needs: version
-    permissions:
-      contents: write
-    # Compila y publica usando el commit recién creado con la versión nueva.
-    uses: ./.github/workflows/build-exe.yml
-    with:
-      release_tag: v${{ needs.version.outputs.new_version }}
-      prerelease: 'false'
-      ref: ${{ needs.version.outputs.new_sha }}
-    secrets: inherit
+          echo "✓ version.txt publicado en main: v$NEW (todos los binarios ya están en la release)"

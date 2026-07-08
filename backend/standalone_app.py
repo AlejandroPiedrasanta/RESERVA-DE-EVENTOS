@@ -1447,10 +1447,19 @@ async def _fetch_github_version() -> dict:
 
 async def _check_for_updates():
     """
-    Verifica si hay una versión nueva combinando dos fuentes:
-      1) GitHub (version.txt en el repo configurado — fuente principal).
-      2) MongoDB compartida (app_updates), como respaldo con paquete descargable.
-    Gana la versión más reciente entre ambas.
+    Verifica si hay una versión nueva. Combina TRES fuentes con reglas de
+    coordinación para evitar anunciar versiones sin binario descargable:
+
+      1) GitHub Release que CONTIENE el asset de esta plataforma (fuente de
+         verdad para binarios compilados — .exe / linux / macOS). Sólo se
+         reporta has_update=True cuando el asset ya está publicado.
+      2) version.txt en el repo (informativo — indica que hay un build en curso
+         pero puede no estar aún disponible para esta plataforma).
+      3) MongoDB compartida (app_updates), como respaldo con paquete descargable
+         para builds no-binarios.
+
+    Esta lógica arregla la carrera entre los 4 jobs de release (Windows / Linux
+    x86 / Linux ARM / macOS) que publican al mismo tag en momentos distintos.
     """
     global _update_status
     try:
@@ -1472,29 +1481,68 @@ async def _check_for_updates():
         except Exception as e:
             logger.warning(f"Mongo update check failed: {e}")
 
-        # 2) GitHub (fuente principal — version.txt del repo)
+        # 2) version.txt del repo (informativo)
         gh = await _fetch_github_version()
         gh_version = gh.get("version", "")
-        gh_has_update = _is_newer(gh_version, _local_version)
 
-        # Elegir el remote más reciente
+        # 3) GitHub Release con el asset de ESTA plataforma (fuente de verdad
+        #    para binarios). Sólo si estamos ejecutando como binario congelado.
+        release_status = {"has_update": False, "remote_version": "", "filename": "",
+                          "notes": "", "file_size": 0, "download_url": ""}
+        asset_pending = False  # version.txt anuncia una versión sin asset todavía
+        if _is_frozen():
+            try:
+                asset_name = _current_asset_name()
+                rel = await _find_release_asset(asset_name)
+                rel_version = rel.get("version", "") if rel else ""
+                if rel_version:
+                    release_status = {
+                        "has_update": _is_newer(rel_version, _local_version),
+                        "remote_version": rel_version,
+                        "filename": asset_name,
+                        "notes": rel.get("url", ""),
+                        "file_size": rel.get("size", 0),
+                        "download_url": rel.get("url", ""),
+                    }
+                # ¿version.txt adelanta al release del asset? → build en curso
+                if gh_version and rel_version and _is_newer(gh_version, rel_version):
+                    asset_pending = True
+                    logger.info(
+                        f"Build pending for {asset_name}: version.txt={gh_version} "
+                        f"pero release con asset está en v{rel_version}"
+                    )
+            except Exception as e:
+                logger.warning(f"Release asset lookup failed: {e}")
+
+        # Elegir la fuente ganadora
         candidates = []
-        if mongo_status["remote_version"]:
-            candidates.append(("mongo", mongo_status["remote_version"], mongo_status))
-        if gh_version:
-            candidates.append(("github", gh_version, {
-                "has_update": gh_has_update,
-                "remote_version": gh_version,
-                "filename": "",
-                "notes": gh.get("notes", ""),
-                "file_size": 0,
-                "download_url": gh.get("notes", "") if gh.get("source") == "github_tag" else "",
-            }))
+        # En binarios congelados: SOLO el release con asset marca has_update=True.
+        # version.txt se guarda como github_version informativo pero no genera banner.
+        if _is_frozen():
+            if release_status["remote_version"]:
+                candidates.append(("github_release", release_status["remote_version"], release_status))
+            # Mongo sigue siendo válido para paquetes no-binarios
+            if mongo_status["remote_version"]:
+                candidates.append(("mongo", mongo_status["remote_version"], mongo_status))
+        else:
+            # Modo fuente (dev): version.txt es la fuente principal, como antes
+            if gh_version:
+                candidates.append(("github", gh_version, {
+                    "has_update": _is_newer(gh_version, _local_version),
+                    "remote_version": gh_version,
+                    "filename": "",
+                    "notes": gh.get("notes", ""),
+                    "file_size": 0,
+                    "download_url": gh.get("notes", "") if gh.get("source") == "github_tag" else "",
+                }))
+            if mongo_status["remote_version"]:
+                candidates.append(("mongo", mongo_status["remote_version"], mongo_status))
 
         if not candidates:
             _update_status = {"checked": True, "has_update": False,
                               "local_version": _local_version,
-                              "github_version": "", "remote_version": ""}
+                              "github_version": gh_version, "remote_version": "",
+                              "asset_pending": asset_pending}
             return
 
         # Ordenar por versión desc
@@ -1513,16 +1561,23 @@ async def _check_for_updates():
             "notes": winner_payload.get("notes", ""),
             "file_size": winner_payload.get("file_size", 0),
             "download_url": winner_payload.get("download_url", ""),
+            "asset_pending": asset_pending,
         }
         if has_update:
             logger.warning(
                 f"Update available: {_local_version} → {winner_version} (source: {winner_source})"
             )
+        elif asset_pending:
+            logger.info(
+                f"Build en curso: version.txt={gh_version} pero asset para esta "
+                f"plataforma aún no publicado en release."
+            )
     except Exception as e:
         logger.warning(f"Update check failed: {e}")
         _update_status = {"checked": True, "has_update": False,
                           "local_version": _local_version,
-                          "github_version": "", "remote_version": ""}
+                          "github_version": "", "remote_version": "",
+                          "asset_pending": False}
 
 
 # ── APPEARANCE CLOUD SYNC ────────────────────────────────────────────────────
@@ -2082,6 +2137,11 @@ async def dismiss_update():
 # ("se arruina el exe"). Para binarios congelados SIEMPRE hay que reemplazar el
 # propio binario descargándolo desde GitHub Releases.
 
+def _is_frozen() -> bool:
+    """True si estamos ejecutando como binario compilado (PyInstaller onefile)."""
+    return getattr(sys, "frozen", False)
+
+
 def _current_asset_name() -> str:
     """Nombre del asset de release para este SO/arquitectura."""
     import platform
@@ -2211,9 +2271,16 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
             detail=f"No se encontró el binario '{asset_name}' en las releases de GitHub. "
                    f"Verifica que el workflow 'Build Windows .exe' haya publicado el asset.")
 
-    # La versión objetivo la marca version.txt del repo (fuente de verdad del build)
-    gh = await _fetch_github_version()
-    new_version = gh.get("version", "") or rel.get("version", "")
+    # La versión objetivo es la del release donde SÍ está publicado el asset
+    # de esta plataforma. NUNCA usar version.txt como fuente primaria aquí:
+    # version.txt puede adelantarse al asset (los 4 jobs de release corren en
+    # paralelo y publican al mismo tag en momentos distintos). Usar el tag del
+    # release evita reportar una new_version que en realidad se descarga desde
+    # un tag anterior — que era la raíz de la desincronización entre plataformas.
+    new_version = rel.get("version", "")
+    if not new_version:
+        gh = await _fetch_github_version()
+        new_version = gh.get("version", "")
     # Regla dura: si la versión remota es IGUAL a la local, nunca reinstalar,
     # ni siquiera con force=True. Esto evita que un click accidental en
     # "Actualizar" cuando ya se está en la última versión gaste ancho de banda
