@@ -2816,15 +2816,16 @@ async def check_github_updates():
     last_seen = cfg.get("last_commit_sha", "")
 
     # Decisión de "hay actualizaciones":
-    # 1) Si sube version.txt en remoto (remote_version > local_version) → HAY UPDATE.
-    # 2) Si version.txt no cambió PERO el SHA remoto difiere del último aplicado
-    #    (last_commit_sha) → también HAY UPDATE (patch / "update rápido").
-    #    Esto evita que la app diga "al día" cuando sí hay commits nuevos sin bump de versión.
-    # 3) Fallback (sin info de versión): comparar SHA con last_seen.
+    # Las releases se distribuyen por TAG (v1.0.x) y cada .exe embebe su version.txt.
+    # La fuente de verdad es version.txt del repo: solo hay update real cuando la
+    # versión remota es MAYOR que la local. El SHA de main NO se usa como criterio
+    # porque cambia con commits que no bumpean versión (auto-commits, docs, CI,
+    # cambios en workflows…) y provocaba el falso positivo "Nueva versión v1.0.14"
+    # cuando el usuario ya tenía v1.0.14 instalada.
+    # Solo cae al SHA como fallback cuando no hay información de versión.
     sha_differs = bool(remote_sha) and remote_sha != last_seen
     if remote_version and _local_version:
-        version_newer = _is_newer(remote_version, _local_version)
-        has_updates = version_newer or sha_differs
+        has_updates = _is_newer(remote_version, _local_version)
     else:
         has_updates = sha_differs
 

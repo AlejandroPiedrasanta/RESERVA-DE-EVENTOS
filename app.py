@@ -28,13 +28,23 @@ import webbrowser
 import threading
 import time
 import asyncio
+import sys
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 
+# ROOT_DIR: dónde vive el módulo (para .env, cinema_data.json, backups, etc.)
 ROOT_DIR = Path(__file__).parent
+
+# BUNDLE_DIR: dónde PyInstaller extrae los recursos --add-data (build/, themes/, ...).
+# En modo frozen (--onefile) es sys._MEIPASS (temp dir _MEI*). En dev = ROOT_DIR.
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    BUNDLE_DIR = ROOT_DIR
+
 load_dotenv(ROOT_DIR / '.env')
 
 DB_NAME = os.environ.get('DB_NAME', 'cinema_productions')
@@ -2432,17 +2442,25 @@ async def apply_update_and_restart(payload: dict = Body(default={})):
         except Exception:
             pass
 
+        # En Windows, spawn el hijo sin ventana de consola visible.
+        popen_kwargs = {"cwd": str(install_dir)}
+        if sys.platform == "win32":
+            # DETACHED_PROCESS (0x00000008) + CREATE_NO_WINDOW (0x08000000)
+            # → nuevo proceso sin heredar la consola, sin ventana negra.
+            popen_kwargs["creationflags"] = 0x00000008 | 0x08000000
+            popen_kwargs["close_fds"] = True
+
         try:
             if getattr(sys, 'frozen', False):
                 # Ejecutable compilado: relanzar
-                subprocess.Popen([str(sys.executable)], cwd=str(install_dir))
+                subprocess.Popen([str(sys.executable)], **popen_kwargs)
             else:
                 # Modo desarrollo: relanzar el python actual
                 launcher = install_dir / "launcher.pyw"
                 if launcher.exists():
-                    subprocess.Popen([sys.executable, str(launcher)], cwd=str(install_dir))
+                    subprocess.Popen([sys.executable, str(launcher)], **popen_kwargs)
                 else:
-                    subprocess.Popen([sys.executable, str(install_dir / "app.py")], cwd=str(install_dir))
+                    subprocess.Popen([sys.executable, str(install_dir / "app.py")], **popen_kwargs)
             # Terminar este proceso
             os._exit(0)
         except Exception as e:
@@ -2798,15 +2816,16 @@ async def check_github_updates():
     last_seen = cfg.get("last_commit_sha", "")
 
     # Decisión de "hay actualizaciones":
-    # 1) Si sube version.txt en remoto (remote_version > local_version) → HAY UPDATE.
-    # 2) Si version.txt no cambió PERO el SHA remoto difiere del último aplicado
-    #    (last_commit_sha) → también HAY UPDATE (patch / "update rápido").
-    #    Esto evita que la app diga "al día" cuando sí hay commits nuevos sin bump de versión.
-    # 3) Fallback (sin info de versión): comparar SHA con last_seen.
+    # Las releases se distribuyen por TAG (v1.0.x) y cada .exe embebe su version.txt.
+    # La fuente de verdad es version.txt del repo: solo hay update real cuando la
+    # versión remota es MAYOR que la local. El SHA de main NO se usa como criterio
+    # porque cambia con commits que no bumpean versión (auto-commits, docs, CI,
+    # cambios en workflows…) y provocaba el falso positivo "Nueva versión v1.0.14"
+    # cuando el usuario ya tenía v1.0.14 instalada.
+    # Solo cae al SHA como fallback cuando no hay información de versión.
     sha_differs = bool(remote_sha) and remote_sha != last_seen
     if remote_version and _local_version:
-        version_newer = _is_newer(remote_version, _local_version)
-        has_updates = version_newer or sha_differs
+        has_updates = _is_newer(remote_version, _local_version)
     else:
         has_updates = sha_differs
 
@@ -3850,9 +3869,46 @@ def _inject_local_url(html: str) -> str:
     return html.replace("</head>", _LOCAL_INJECT + "</head>", 1)
 
 
-BUILD_DIR = ROOT_DIR / "build"
-if BUILD_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(BUILD_DIR / "static")), name="static")
+def _resolve_build_dir() -> Optional[Path]:
+    """Localiza la carpeta build/ del frontend en runtime.
+
+    Prioridades:
+      1. BUNDLE_DIR/build      → PyInstaller onefile (sys._MEIPASS/build)
+      2. ROOT_DIR/build        → ejecución en dev / desde source
+      3. ROOT_DIR.parent/build → cuando standalone_app está en backend/ y
+                                 el build vive un nivel arriba (repo layout).
+    Devuelve el primer path que contenga index.html; None si ninguno.
+    """
+    candidates = [
+        BUNDLE_DIR / "build",
+        ROOT_DIR / "build",
+        ROOT_DIR.parent / "build",
+        ROOT_DIR.parent / "frontend" / "build",
+    ]
+    seen = set()
+    for c in candidates:
+        try:
+            c_res = c.resolve()
+        except Exception:
+            continue
+        if c_res in seen:
+            continue
+        seen.add(c_res)
+        if (c_res / "index.html").is_file():
+            logging.getLogger(__name__).info("Frontend build dir: %s", c_res)
+            return c_res
+    logging.getLogger(__name__).warning(
+        "No se encontró build/index.html en ninguna ubicación esperada: %s",
+        [str(c) for c in candidates],
+    )
+    return None
+
+
+BUILD_DIR = _resolve_build_dir()
+if BUILD_DIR is not None:
+    _static_dir = BUILD_DIR / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/favicon.ico")
     async def favicon():
@@ -3882,12 +3938,50 @@ if BUILD_DIR.exists():
         html_path = BUILD_DIR / "index.html"
         html = _inject_local_url(html_path.read_text(encoding="utf-8"))
         return Response(content=html, media_type="text/html; charset=utf-8")
+else:
+    # Sin frontend build: exponer una landing mínima para no romper el navegador.
+    _MISSING_BUILD_HTML = (
+        "<!doctype html><meta charset='utf-8'>"
+        "<title>Cinema Productions</title>"
+        "<style>body{font-family:system-ui;padding:40px;max-width:640px;margin:auto;"
+        "color:#222;background:#faf7ff}code{background:#eee;padding:2px 6px;border-radius:4px}</style>"
+        "<h1>Frontend no empaquetado</h1>"
+        "<p>El backend arrancó, pero <code>build/index.html</code> no está en el .exe. "
+        "Reconstruye el ejecutable asegurándote de que <code>frontend/build/</code> se "
+        "generó con <code>yarn build</code> antes de PyInstaller y que "
+        "<code>--add-data \"backend/_bundle/build;build\"</code> se pasó correctamente.</p>"
+        "<p>API disponible en <a href='/api/'>/api/</a>.</p>"
+    )
+
+    @app.get("/")
+    async def serve_index_missing():
+        return Response(content=_MISSING_BUILD_HTML, media_type="text/html; charset=utf-8")
+
+    @app.get("/favicon.ico")
+    async def favicon_missing():
+        return Response(status_code=204)
 
 
 # ─── Entry point ─────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
+
+    # En modo --windowed (frozen sin consola) sys.stdout puede ser None.
+    # Redirigimos los prints a un log file para no crashear con AttributeError.
+    if getattr(sys, "frozen", False) and (sys.stdout is None or not hasattr(sys.stdout, "write")):
+        _log_dir = ROOT_DIR / "logs" if not getattr(sys, "_MEIPASS", None) else Path.home() / "CinemaProductions" / "logs"
+        try:
+            _log_dir.mkdir(parents=True, exist_ok=True)
+            _log_path = _log_dir / "cinema.log"
+            _log_fh = open(_log_path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = _log_fh
+            sys.stderr = _log_fh
+        except Exception:
+            # Último recurso: descartar stdout/stderr.
+            import io as _io
+            sys.stdout = _io.StringIO()
+            sys.stderr = _io.StringIO()
 
     db_label = "Embebida (cinema_data.json)" if _using_embedded else MONGO_URL[:40]
 
@@ -3909,4 +4003,45 @@ if __name__ == "__main__":
     print("  Para cerrar: Ctrl+C  o  cierra esta ventana")
     print("=" * 54 + "\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="warning")
+    # ── Shutdown limpio para evitar "Failed to remove temporary directory _MEIxxx" ──
+    # PyInstaller onefile extrae recursos a %TEMP%/_MEIxxx y trata de borrarlo al
+    # salir. Si uvicorn/threads/loggers todavia tienen handles abiertos, Windows
+    # rechaza el rmdir y el bootloader muestra un popup Warning. Forzamos:
+    #   1) Cerrar file handlers de logging (liberan .log dentro de _MEI si hay)
+    #   2) uvicorn.Server con should_exit + config controlada
+    #   3) atexit + signal handlers que fuerzan flush y cierre de stdio
+    import atexit
+    import signal as _signal
+    import logging as _logging
+
+    def _graceful_shutdown(*_a, **_kw):
+        try:
+            _logging.shutdown()
+        except Exception:
+            pass
+        try:
+            if hasattr(sys.stdout, "flush"): sys.stdout.flush()
+            if hasattr(sys.stderr, "flush"): sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            _fh = globals().get("_log_fh")
+            if _fh and not _fh.closed:
+                _fh.close()
+        except Exception:
+            pass
+
+    atexit.register(_graceful_shutdown)
+    for _sig in (getattr(_signal, "SIGINT", None), getattr(_signal, "SIGTERM", None), getattr(_signal, "SIGBREAK", None)):
+        if _sig is not None:
+            try:
+                _signal.signal(_sig, lambda *_a: (_graceful_shutdown(), sys.exit(0)))
+            except Exception:
+                pass
+
+    config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning", access_log=False)
+    server = uvicorn.Server(config)
+    try:
+        server.run()
+    finally:
+        _graceful_shutdown()
