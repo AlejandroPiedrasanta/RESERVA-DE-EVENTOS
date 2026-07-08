@@ -208,11 +208,25 @@ jobs:
           "CP_PFX_PASS=$pass"      | Out-File -Encoding ascii -Append $env:GITHUB_ENV
           "CP_SIGNTOOL=$signtool"  | Out-File -Encoding ascii -Append $env:GITHUB_ENV
 
-          & $signtool sign /f $pfx /p $pass /fd sha256 /tr http://timestamp.digicert.com /td sha256 "dist/CinemaProductions.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Firma del .exe falló (exit $LASTEXITCODE)" }
+          # El smoke test arrancó el .exe; asegurar que ninguna instancia siga
+          # bloqueando el archivo antes de firmar (evita "file is being used").
+          Get-Process CinemaProductions -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 6
+
+          # Firmar con reintentos por si el bootloader onefile tarda en liberar el archivo.
+          $signed = $false
+          for ($i = 1; $i -le 5; $i++) {
+            & $signtool sign /f $pfx /p $pass /fd sha256 /tr http://timestamp.digicert.com /td sha256 "dist/CinemaProductions.exe"
+            if ($LASTEXITCODE -eq 0) { $signed = $true; break }
+            Write-Host "  intento $i falló (exit $LASTEXITCODE), reintentando en 5s..."
+            Get-Process CinemaProductions -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 5
+          }
+          if (-not $signed) { throw "Firma del .exe falló tras varios intentos" }
           # verify /pa no encadena a una raíz de confianza en un auto-firmado; solo informativo.
           & $signtool verify /pa "dist/CinemaProductions.exe"
           Write-Host "✓ .exe firmado (auto-firmado + timestamp). verify exit=$LASTEXITCODE (self-signed: no encadena, esperado)"
+          exit 0
 
       - name: Verify .exe & compute SHA256
         id: hash
@@ -306,6 +320,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Firma del instalador falló (exit $LASTEXITCODE)" }
           & $env:CP_SIGNTOOL verify /pa "dist/CinemaProductions-Setup.exe"
           Write-Host "✓ Instalador firmado (auto-firmado + timestamp). verify exit=$LASTEXITCODE (self-signed: esperado)"
+          exit 0
 
       - name: Verify installer & compute SHA256
         id: hashsetup
