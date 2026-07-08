@@ -168,6 +168,29 @@ export const waitBackendReady = async (timeoutMs = 90000) => {
   return false;
 };
 
+// Recarga "dura" tras aplicar una actualización: desregistra el service
+// worker y borra el caché HTTP + Cache API antes de forzar un reload con
+// cache-bust. Sin esto, el navegador puede quedarse con un index.html viejo
+// que referencia chunks JS que ya no existen → pantalla en blanco.
+export const hardReloadAfterUpdate = async () => {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+    }
+  } catch { /* ignore */ }
+  try {
+    if (typeof caches !== "undefined" && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
+    }
+  } catch { /* ignore */ }
+  // Cache-bust: fuerza al navegador a pedir index.html nuevo.
+  const url = new URL(window.location.href);
+  url.searchParams.set("_v", Date.now().toString());
+  window.location.replace(url.toString());
+};
+
 // AI Context (Contexto para la próxima IA)
 export const getAiContext = () => api.get("/ai-context").then(r => r.data);
 export const saveAiContext = (content) => api.post("/ai-context", { content }).then(r => r.data);

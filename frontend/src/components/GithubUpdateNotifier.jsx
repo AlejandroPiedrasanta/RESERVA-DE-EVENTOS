@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSettings } from "@/context/SettingsContext";
-import { checkGithubUpdates, applyGithubUpdate, waitBackendReady } from "@/lib/api";
+import { checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -138,7 +138,7 @@ export default function GithubUpdateNotifier() {
           // Poll al backend hasta que vuelva. Solo entonces recargar.
           const ok = await waitBackendReady(120000);
           if (ok) {
-            window.location.reload();
+            await hardReloadAfterUpdate();
           } else {
             toast({
               title: "La app tardó demasiado en reiniciarse",
@@ -171,7 +171,7 @@ export default function GithubUpdateNotifier() {
           description: "El servidor se reiniciará y cargará los cambios más recientes.",
         });
         const ok = await waitBackendReady(60000);
-        if (ok) window.location.reload();
+        if (ok) await hardReloadAfterUpdate();
         else {
           toast({
             title: "El servidor tardó demasiado en volver",
@@ -193,7 +193,7 @@ export default function GithubUpdateNotifier() {
           description: "La app se está reiniciando. Espera unos segundos…",
         });
         const ok = await waitBackendReady(120000);
-        if (ok) window.location.reload();
+        if (ok) await hardReloadAfterUpdate();
         else {
           toast({
             title: "La app tardó demasiado en reiniciarse",

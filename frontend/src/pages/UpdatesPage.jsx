@@ -8,7 +8,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
 import { getUpdatesHistory, uploadAppUpdate, deleteUpdate, setLatestUpdate, getUpdateDownloadUrl, checkForUpdates,
-  getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady } from "@/lib/api";
+  getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate } from "@/lib/api";
 import { celebrateUpdate } from "@/lib/celebrations";
 
 function formatBytes(bytes) {
@@ -119,7 +119,7 @@ export default function UpdatesPage() {
           description: "Esperando a que la app vuelva a arrancar…",
         });
         const ok = await waitBackendReady(120000);
-        if (ok) window.location.reload();
+        if (ok) await hardReloadAfterUpdate();
         else {
           toast({
             title: "La app tardó demasiado en reiniciarse",
@@ -140,7 +140,7 @@ export default function UpdatesPage() {
         celebrateUpdate();
         toast({ title: "Versión nueva instalada", description: "Esperando a que la app vuelva a arrancar…" });
         const ok = await waitBackendReady(60000);
-        if (ok) window.location.reload();
+        if (ok) await hardReloadAfterUpdate();
       }
     } catch (err) {
       // Si es error de red (server ya salió), esperar el reinicio como en el caso OK
@@ -149,7 +149,7 @@ export default function UpdatesPage() {
         restarting = true;
         toast({ title: "Actualización en curso", description: "La app se está reiniciando…" });
         const ok = await waitBackendReady(120000);
-        if (ok) window.location.reload();
+        if (ok) await hardReloadAfterUpdate();
         else toast({
           title: "La app tardó demasiado en reiniciarse",
           description: "Cierra y vuelve a abrir Cinema Productions.",

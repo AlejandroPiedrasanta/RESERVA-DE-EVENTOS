@@ -4137,11 +4137,21 @@ if BUILD_DIR is not None:
         f = BUILD_DIR / "manifest.json"
         return FileResponse(str(f)) if f.exists() else Response("{}", media_type="application/json")
 
+    # Cache-Control para HTML: nunca cachear. Si cacheamos index.html, tras un
+    # update los navegadores siguen apuntando a chunks JS antiguos (con hash
+    # viejo) que ya no existen → pantalla en blanco. Los assets estáticos con
+    # hash (StaticFiles /static/*) sí pueden cachearse porque su nombre cambia.
+    _NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/")
     async def serve_index():
         html_path = BUILD_DIR / "index.html"
         html = _inject_local_url(html_path.read_text(encoding="utf-8"))
-        return Response(content=html, media_type="text/html; charset=utf-8")
+        return Response(content=html, media_type="text/html; charset=utf-8", headers=_NO_CACHE_HEADERS)
 
     @app.get("/{path:path}")
     async def serve_spa(path: str):
@@ -4151,10 +4161,13 @@ if BUILD_DIR is not None:
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         f = BUILD_DIR / path
         if f.exists() and f.is_file():
+            # sw.js e index.html: no cachear para poder actualizar en caliente.
+            if path in ("sw.js", "index.html", "manifest.json"):
+                return FileResponse(str(f), headers=_NO_CACHE_HEADERS)
             return FileResponse(str(f))
         html_path = BUILD_DIR / "index.html"
         html = _inject_local_url(html_path.read_text(encoding="utf-8"))
-        return Response(content=html, media_type="text/html; charset=utf-8")
+        return Response(content=html, media_type="text/html; charset=utf-8", headers=_NO_CACHE_HEADERS)
 else:
     # Sin frontend build: exponer una landing mínima para no romper el navegador.
     _MISSING_BUILD_HTML = (
