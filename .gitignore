@@ -27,7 +27,6 @@ next-env.d.ts
 
 # Production builds
 /build/*
-!/build/installer.iss
 dist/
 dist
 
