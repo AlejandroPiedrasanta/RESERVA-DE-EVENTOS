@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cinema Productions — bootstrap.sh v3 (tarball-aware, ultrafast)
+# Cinema Productions — bootstrap.sh v4.1 (stream extract, ultrafast)
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,28 +24,57 @@ if [ -d frontend/node_modules ] && [ -f frontend/.pkg_hash ]; then
   [ "$CUR" = "$OLD" ] && NEED_INSTALL=0 && echo "♻ Reusing node_modules (hash match)"
 fi
 
-# ── 4) FAST-PATH attempt: prebuilt node_modules tarball ─────────
-# Priority: (a) tarball committed in repo (frontend/node_modules.tar.gz)
-#           (b) GitHub Releases tarball (deps-latest tag)
-# Either avoids yarn install (~180s) -> extract only (~10s).
-TARBALL_URL="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/deps-latest/node_modules.tar.gz"
+# ── 4) FAST-PATH: stream extract from GitHub Releases (zstd → gzip)
+# Priority: (a) committed tarball  (b) Releases zstd  (c) Releases gzip
+REPO="AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
+GH_ZST="https://github.com/${REPO}/releases/download/deps-latest/node_modules.tar.zst"
+GH_GZ="https://github.com/${REPO}/releases/download/deps-latest/node_modules.tar.gz"
+
+HAS_ZSTD=0; command -v zstd >/dev/null 2>&1 && HAS_ZSTD=1
+HAS_PIGZ=0; command -v pigz >/dev/null 2>&1 && HAS_PIGZ=1
+GZ_DECOMP="gzip -dc"; [ "$HAS_PIGZ" = "1" ] && GZ_DECOMP="pigz -dc"
+
+try_stream() {
+  local url="$1" decomp="$2" label="$3"
+  echo "⚡ Trying ${label}"
+  local code
+  code=$(curl -sI -o /dev/null -w "%{http_code}" --max-time 3 -L "$url" || echo 000)
+  if [ "$code" != "200" ]; then
+    echo "  ↳ HTTP $code, skip"
+    return 1
+  fi
+  if curl -fsSL --max-time 120 "$url" | eval "$decomp" | tar -xf - -C frontend/ 2>/dev/null; then
+    [ -d frontend/node_modules ] && { echo "  ↳ ✅ extracted from ${label}"; return 0; }
+  fi
+  return 1
+}
+
 if [ "$NEED_INSTALL" = "1" ]; then
-  echo "⚡ Trying fast-path (node_modules tarball)..."
   rm -rf frontend/node_modules
-  if [ -f frontend/node_modules.tar.gz ]; then
-    echo "⚡ Using committed tarball: frontend/node_modules.tar.gz"
-    tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null && \
-    [ -d frontend/node_modules ] && \
-    NEED_INSTALL=0 && \
-    echo "⚡ node_modules restored from committed tarball ($(du -sh frontend/node_modules | cut -f1))"
-  elif curl -fsSL --max-time 90 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null; then
-    tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null && \
-    [ -d frontend/node_modules ] && \
-    NEED_INSTALL=0 && \
-    echo "⚡ node_modules restored from Releases tarball ($(du -sh frontend/node_modules | cut -f1))"
-    rm -f /tmp/nm.tgz
+
+  # (a) committed tarball (offline path)
+  if [ -f frontend/node_modules.tar.zst ] && [ "$HAS_ZSTD" = "1" ]; then
+    echo "⚡ Using committed zstd tarball"
+    zstd -dc frontend/node_modules.tar.zst | tar -xf - -C frontend/ && NEED_INSTALL=0
+  elif [ -f frontend/node_modules.tar.gz ]; then
+    echo "⚡ Using committed gzip tarball"
+    $GZ_DECOMP < frontend/node_modules.tar.gz | tar -xf - -C frontend/ && NEED_INSTALL=0
+  fi
+
+  # (b) GitHub Releases zstd (only if zstd installed)
+  if [ "$NEED_INSTALL" = "1" ] && [ "$HAS_ZSTD" = "1" ]; then
+    try_stream "$GH_ZST" "zstd -dc" "Releases zstd" && NEED_INSTALL=0 || true
+  fi
+
+  # (c) GitHub Releases gzip (default path)
+  if [ "$NEED_INSTALL" = "1" ]; then
+    try_stream "$GH_GZ" "$GZ_DECOMP" "Releases gzip" && NEED_INSTALL=0 || true
+  fi
+
+  if [ "$NEED_INSTALL" = "1" ]; then
+    echo "ℹ All tarballs failed — falling back to yarn install"
   else
-    echo "ℹ Tarball not available — falling back to yarn install"
+    echo "⚡ node_modules ready ($(du -sh frontend/node_modules | cut -f1))"
   fi
 fi
 
@@ -56,7 +85,6 @@ mkdir -p "$YARN_CACHE_FOLDER"
 sudo supervisorctl reread >/dev/null 2>&1 || true
 sudo supervisorctl update >/dev/null 2>&1 || true
 
-# Backend: pip → then restart backend supervisor immediately (overlap with yarn)
 (
   pip install -q --disable-pip-version-check --no-input -r backend/requirements.txt
   sudo supervisorctl restart backend >/dev/null 2>&1 || true
