@@ -2214,6 +2214,14 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     # La versión objetivo la marca version.txt del repo (fuente de verdad del build)
     gh = await _fetch_github_version()
     new_version = gh.get("version", "") or rel.get("version", "")
+    # Regla dura: si la versión remota es IGUAL a la local, nunca reinstalar,
+    # ni siquiera con force=True. Esto evita que un click accidental en
+    # "Actualizar" cuando ya se está en la última versión gaste ancho de banda
+    # y provoque un swap innecesario del binario.
+    if new_version and new_version == _local_version:
+        return {"success": True, "restarted": False,
+                "old_version": _local_version, "new_version": new_version,
+                "message": "Ya tienes esta versión instalada"}
     if new_version and not _is_newer(new_version, _local_version) and not force:
         return {"success": True, "restarted": False,
                 "old_version": _local_version, "new_version": new_version,
