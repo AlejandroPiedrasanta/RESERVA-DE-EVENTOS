@@ -11,7 +11,7 @@ import {
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
-  Lock, LifeBuoy, Cloud, Laptop, CloudUpload,
+  Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -29,7 +29,7 @@ import {
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
-  githubPushAll, getGithubPushStatus, getGithubNextVersion,
+  githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -225,6 +225,11 @@ export default function DatabasePage() {
   const [ghPushCommitMsg, setGhPushCommitMsg] = useState("");
   const [ghPushVersionInfo, setGhPushVersionInfo] = useState(null); // { current_local, current_remote, next_auto_version, ... }
   const [ghPushVersionLoading, setGhPushVersionLoading] = useState(false);
+  // Modal de selección de archivos (paso previo al modal de versión)
+  const [ghSelectModalOpen, setGhSelectModalOpen] = useState(false);
+  const [ghPreview, setGhPreview] = useState(null); // { categories, totals_defaults }
+  const [ghPreviewLoading, setGhPreviewLoading] = useState(false);
+  const [ghInclude, setGhInclude] = useState({}); // { backend: true, ... }
   const [diagnostic, setDiagnostic] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
@@ -457,23 +462,50 @@ export default function DatabasePage() {
   };
 
   // ── Guardar TODO el repositorio a GitHub (git add + commit + push) ──
-  // Abre el modal para que el usuario ingrese versión + mensaje.
+  // 1º paso: abre el modal de SELECCIÓN de archivos. Al confirmar, se abre
+  //          automáticamente el modal de versión (paso 2).
   const handlePushAllToGithub = async () => {
     if (!ghConfig.username) {
       toast({ title: "Conecta tu cuenta de GitHub primero", variant: "destructive" });
       return;
     }
+    setGhPreview(null);
+    setGhPreviewLoading(true);
+    setGhSelectModalOpen(true);
+    try {
+      const prev = await getGithubPushPreview();
+      setGhPreview(prev);
+      // Inicializar `include` con los defaults del servidor
+      const initial = {};
+      (prev?.categories || []).forEach(c => { initial[c.id] = !!c.default; });
+      setGhInclude(initial);
+    } catch (e) {
+      toast({ title: "No se pudo cargar la lista de archivos", description: e?.response?.data?.detail || String(e), variant: "destructive" });
+      setGhSelectModalOpen(false);
+    } finally {
+      setGhPreviewLoading(false);
+    }
+  };
+
+  // Paso 2: el usuario confirmó la selección → abrir el modal de versión.
+  const handleConfirmSelection = async () => {
+    // Requiere al menos 1 categoría marcada
+    const anyChecked = Object.values(ghInclude).some(Boolean);
+    if (!anyChecked) {
+      toast({ title: "Selecciona al menos una categoría para subir", variant: "destructive" });
+      return;
+    }
+    setGhSelectModalOpen(false);
     setGhPushVersion("");
     setGhPushCommitMsg(`Actualización — ${new Date().toLocaleString("es-GT")}`);
     setGhPushVersionInfo(null);
     setGhPushVersionLoading(true);
     setGhPushModalOpen(true);
-    // Cargar versión actual + próxima automática (no bloqueante)
     try {
       const info = await getGithubNextVersion();
       setGhPushVersionInfo(info);
     } catch (_) {
-      // Silencioso: el modal sigue funcionando aunque falle el fetch.
+      // Silencioso
     } finally {
       setGhPushVersionLoading(false);
     }
@@ -562,7 +594,7 @@ export default function DatabasePage() {
 
     // Dispara el trabajo. Ahora el POST retorna inmediatamente ({status:"started"}).
     try {
-      await githubPushAll(message || undefined, version || undefined);
+      await githubPushAll(message || undefined, version || undefined, undefined, ghInclude);
     } catch (err) {
       finish("error", err?.response?.data?.detail || String(err));
     }
@@ -2287,6 +2319,120 @@ export default function DatabasePage() {
                   transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
                   initial={{ width: "40%" }}
                 />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>,
+      document.body
+      )}
+
+      {/* ═══════════ MODAL: SELECCIÓN de archivos a subir ═══════════ */}
+      {createPortal(
+      <AnimatePresence>
+        {ghSelectModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setGhSelectModalOpen(false)}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 200, damping: 22 }}
+              data-testid="github-select-modal"
+              className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="px-6 pt-6 pb-5 text-white"
+                style={{ background: "linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                    <ListChecks size={20} />
+                  </div>
+                  <div>
+                    <p className="text-base font-black">Elegir qué subir a GitHub</p>
+                    <p className="text-xs text-white/80 mt-0.5">Marca las categorías que quieres publicar</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-3 overflow-y-auto">
+                {ghPreviewLoading && (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="animate-spin text-slate-400" size={22} />
+                    <span className="ml-2 text-sm text-slate-500">Analizando archivos…</span>
+                  </div>
+                )}
+
+                {!ghPreviewLoading && ghPreview?.categories?.map((c) => {
+                  const checked = !!ghInclude[c.id];
+                  const kb = c.size_bytes ? (c.size_bytes / 1024).toFixed(0) : 0;
+                  const mb = c.size_bytes ? (c.size_bytes / (1024 * 1024)).toFixed(1) : 0;
+                  const sizeLabel = c.size_bytes >= 1024 * 1024 ? `${mb} MB` : c.size_bytes ? `${kb} KB` : "";
+                  return (
+                    <label
+                      key={c.id}
+                      data-testid={`github-select-cat-${c.id}`}
+                      className={`flex items-start gap-3 p-3 rounded-2xl border-2 cursor-pointer transition-colors ${
+                        checked
+                          ? (c.slow ? "border-amber-300 bg-amber-50" : "border-indigo-300 bg-indigo-50")
+                          : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => setGhInclude(prev => ({ ...prev, [c.id]: e.target.checked }))}
+                        className="mt-1 w-5 h-5 accent-indigo-600 cursor-pointer flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-slate-900">{c.label}</p>
+                          {c.slow && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                              <Timer size={10} /> Lento (1–2 min)
+                            </span>
+                          )}
+                          {c.files > 0 && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {c.files} archivo{c.files === 1 ? "" : "s"}{sizeLabel ? ` · ${sizeLabel}` : ""}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5 leading-snug">{c.description}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+
+                {!ghPreviewLoading && (
+                  <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-blue-50 border border-blue-100">
+                    <Info size={14} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                    <p className="text-[11px] text-blue-900 leading-snug">
+                      <strong>Tip:</strong> GitHub Actions compila el <code className="px-1 py-0.5 rounded bg-blue-100">.exe</code> automáticamente
+                      cuando se crea el tag. Por eso <em>Compilar frontend</em> viene desmarcado — el push es mucho más rápido.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setGhSelectModalOpen(false)}
+                  data-testid="github-select-cancel-btn"
+                  className="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmSelection}
+                  disabled={ghPreviewLoading || !Object.values(ghInclude).some(Boolean)}
+                  data-testid="github-select-continue-btn"
+                  className="px-5 py-2 rounded-xl text-sm font-black text-white flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed transition-transform hover:scale-[1.02] active:scale-95"
+                  style={{ background: "linear-gradient(135deg,#0ea5e9,#6366f1)" }}
+                >
+                  Continuar <ArrowRight size={14} />
+                </button>
               </div>
             </motion.div>
           </motion.div>

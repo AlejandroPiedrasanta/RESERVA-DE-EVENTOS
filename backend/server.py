@@ -4461,6 +4461,140 @@ async def github_disconnect():
     return {"success": True}
 
 
+@api_router.get("/github/push-preview")
+async def github_push_preview():
+    """Devuelve la lista de categorías/archivos que serían subidos al repositorio.
+
+    Sirve para el modal "Elegir qué subir": el frontend muestra un checkbox por
+    categoría y llama a POST /github/push-all con `include={...}` para filtrar.
+
+    Cada categoría incluye:
+      - id, label, description
+      - files: número aproximado de archivos
+      - size_bytes: peso aproximado en disco
+      - default: si viene marcado por defecto en el modal
+      - slow: True para las tareas lentas (yarn build) → aviso visual
+    """
+    root_dir = ROOT_DIR.parent
+
+    def _dir_stats(path: Path, ignore_names=None) -> tuple:
+        ignore_names = ignore_names or {
+            "__pycache__", "node_modules", ".cache", ".pytest_cache",
+            "build", ".git",
+        }
+        if not path.exists():
+            return 0, 0
+        files, size = 0, 0
+        try:
+            for p in path.rglob("*"):
+                # Excluir cualquier ruta que contenga un directorio ignorado
+                if any(part in ignore_names for part in p.parts):
+                    continue
+                if p.is_file():
+                    files += 1
+                    try:
+                        size += p.stat().st_size
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return files, size
+
+    def _root_files_stats() -> tuple:
+        excluded_dirs = {"backend", "frontend", ".git", "node_modules",
+                         "backups", "uploads", "memory", "test_reports",
+                         "tests", "repo", "__pycache__", ".cache",
+                         "desktop_wheels"}
+        included_dirs = {"scripts", "docs", ".github", "public"}
+        files, size = 0, 0
+        try:
+            for item in root_dir.iterdir():
+                if item.name.startswith(".env"):
+                    continue
+                if item.is_file():
+                    files += 1
+                    try:
+                        size += item.stat().st_size
+                    except Exception:
+                        pass
+                elif item.is_dir() and item.name in included_dirs and item.name not in excluded_dirs:
+                    f, s = _dir_stats(item)
+                    files += f
+                    size += s
+        except Exception:
+            pass
+        return files, size
+
+    backend_files, backend_size = _dir_stats(root_dir / "backend")
+    frontend_files, frontend_size = _dir_stats(root_dir / "frontend")
+    root_files, root_size = _root_files_stats()
+    standalone_exists = (ROOT_DIR / "standalone_app.py").exists()
+    version_exists = (ROOT_DIR.parent / "version.txt").exists() or (ROOT_DIR / "version.txt").exists()
+
+    categories = [
+        {
+            "id": "backend",
+            "label": "Backend (Python)",
+            "description": "Código del servidor FastAPI (backend/)",
+            "files": backend_files,
+            "size_bytes": backend_size,
+            "default": True,
+            "slow": False,
+        },
+        {
+            "id": "frontend_src",
+            "label": "Frontend (código fuente)",
+            "description": "React source, package.json, tailwind, public/ (frontend/)",
+            "files": frontend_files,
+            "size_bytes": frontend_size,
+            "default": True,
+            "slow": False,
+        },
+        {
+            "id": "root_files",
+            "label": "Archivos raíz",
+            "description": "README.md, bootstrap.sh, .github/workflows, scripts/, etc.",
+            "files": root_files,
+            "size_bytes": root_size,
+            "default": True,
+            "slow": False,
+        },
+        {
+            "id": "standalone_app",
+            "label": "App de escritorio (app.py)",
+            "description": "backend/standalone_app.py → app.py (raíz del repo)",
+            "files": 1 if standalone_exists else 0,
+            "size_bytes": 0,
+            "default": True,
+            "slow": False,
+        },
+        {
+            "id": "version_txt",
+            "label": "version.txt",
+            "description": "Etiqueta la versión (usada por la app de escritorio para saber si hay update)",
+            "files": 1,
+            "size_bytes": 0,
+            "default": True,
+            "slow": False,
+        },
+        {
+            "id": "build_frontend",
+            "label": "Compilar frontend (yarn build)",
+            "description": "Ejecuta yarn build y sube build/ a la raíz. Suele tardar 1–2 min. GitHub Actions ya lo hace al crear el .exe, así que puedes desmarcarlo para ir más rápido.",
+            "files": 0,
+            "size_bytes": 0,
+            "default": False,
+            "slow": True,
+        },
+    ]
+    total_files = sum(c["files"] for c in categories if c.get("default"))
+    total_size = sum(c["size_bytes"] for c in categories if c.get("default"))
+    return {
+        "categories": categories,
+        "totals_defaults": {"files": total_files, "size_bytes": total_size},
+    }
+
+
 @api_router.post("/github/push-all")
 async def github_push_all(payload: dict = Body(default={})):
     """Lanza el push-all en background para evitar timeouts de Cloudflare (>100s).
@@ -4526,6 +4660,31 @@ async def _do_github_push_all(payload: dict):
 
     message = (payload.get("message") or f"Auto-save from Cinema Productions — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}").strip()
 
+    # ── Filtro de inclusión (viene del modal "Elegir qué subir") ───────────
+    # Si no viene ningún filtro, mantener comportamiento antiguo (todo TRUE
+    # excepto compilar frontend, que ahora es opt-in porque GitHub Actions ya
+    # lo hace al crear el .exe y así el push es mucho más rápido).
+    include_raw = payload.get("include")
+    if isinstance(include_raw, dict):
+        include = {
+            "backend":        bool(include_raw.get("backend", True)),
+            "frontend_src":   bool(include_raw.get("frontend_src", True)),
+            "root_files":     bool(include_raw.get("root_files", True)),
+            "standalone_app": bool(include_raw.get("standalone_app", True)),
+            "version_txt":    bool(include_raw.get("version_txt", True)),
+            "build_frontend": bool(include_raw.get("build_frontend", False)),
+        }
+    else:
+        # Compatibilidad hacia atrás con el flag `build_frontend` que ya existía.
+        include = {
+            "backend": True,
+            "frontend_src": True,
+            "root_files": True,
+            "standalone_app": True,
+            "version_txt": True,
+            "build_frontend": bool(payload.get("build_frontend", False)),
+        }
+
     # URL con auth para el clone/push
     auth_url = repo_url.replace("https://", f"https://{username}:{token}@")
 
@@ -4578,8 +4737,12 @@ async def _do_github_push_all(payload: dict):
         await _arun(["git", "config", "user.name", username], cwd=work_dir)
 
         # ── 3. Copiar contenido actual sobre el clone (sin tocar .git) ──
-        # Directorios completos a espejar
-        mirror_dirs = ["backend", "frontend"]
+        # Directorios completos a espejar (según include)
+        mirror_dirs = []
+        if include.get("backend"):
+            mirror_dirs.append("backend")
+        if include.get("frontend_src"):
+            mirror_dirs.append("frontend")
 
         # Patrones a ignorar SIEMPRE (nunca subir a GitHub)
         # NOTA: NO subimos frontend/build (fuente compilado nested); en su lugar
@@ -4594,8 +4757,8 @@ async def _do_github_push_all(payload: dict):
             "*.log", ".DS_Store", "desktop_wheels",
         )
 
-        # ── 2b. Compilar el frontend (necesario para la versión PC) ──
-        if payload.get("build_frontend", True):
+        # ── 2b. Compilar el frontend (opt-in: solo si el usuario lo marcó) ──
+        if include.get("build_frontend"):
             frontend_src = ROOT_DIR.parent / "frontend"
             if frontend_src.exists():
                 import time as _time_b
@@ -4653,24 +4816,28 @@ async def _do_github_push_all(payload: dict):
                               "tests", "repo", "__pycache__", ".cache",
                               "desktop_wheels"}
         root_dir = ROOT_DIR.parent
-        for item in root_dir.iterdir():
-            if item.name in excluded_root_dirs:
-                continue
-            if item.name.startswith(".env"):
-                continue  # nunca subir .env
-            if item.is_file():
-                # Copiar cualquier archivo raíz (README.md, bootstrap.sh, yarn.lock, etc.)
-                try:
-                    shutil.copy2(str(item), str(work_dir / item.name))
-                except Exception as e:
-                    logger.warning(f"No se pudo copiar {item.name}: {e}")
-            elif item.is_dir():
-                # Copiar carpetas pequeñas de config si existen (scripts, docs, .github, etc.)
-                if item.name in {"scripts", "docs", ".github", "public"}:
-                    dst_sub = work_dir / item.name
-                    if dst_sub.exists():
-                        shutil.rmtree(str(dst_sub))
-                    shutil.copytree(str(item), str(dst_sub), ignore=ignore_patterns)
+        if include.get("root_files"):
+            for item in root_dir.iterdir():
+                if item.name in excluded_root_dirs:
+                    continue
+                if item.name.startswith(".env"):
+                    continue  # nunca subir .env
+                # version.txt se maneja aparte según su propio flag
+                if item.name == "version.txt":
+                    continue
+                if item.is_file():
+                    # Copiar cualquier archivo raíz (README.md, bootstrap.sh, yarn.lock, etc.)
+                    try:
+                        shutil.copy2(str(item), str(work_dir / item.name))
+                    except Exception as e:
+                        logger.warning(f"No se pudo copiar {item.name}: {e}")
+                elif item.is_dir():
+                    # Copiar carpetas pequeñas de config si existen (scripts, docs, .github, etc.)
+                    if item.name in {"scripts", "docs", ".github", "public"}:
+                        dst_sub = work_dir / item.name
+                        if dst_sub.exists():
+                            shutil.rmtree(str(dst_sub))
+                        shutil.copytree(str(item), str(dst_sub), ignore=ignore_patterns)
 
         # ── 3b. Publicar la "VERSIÓN PARA PC" (layout PLANO) en la RAÍZ del repo ──
         # La app de escritorio instalada tiene layout plano: install_dir/app.py y
@@ -4714,15 +4881,17 @@ async def _do_github_push_all(payload: dict):
             standalone_src = ROOT_DIR / "standalone_app.py"
             _set_push_state(progress=75, message=f"Preparando versión v{version_str} para PC…", step=5,
                             detail="Publicando app.py, build/ y version.txt para la app de escritorio")
-            if standalone_src.exists():
+            if include.get("standalone_app") and standalone_src.exists():
                 shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
-            fe_build = ROOT_DIR.parent / "frontend" / "build"
-            if fe_build.exists() and (fe_build / "index.html").exists():
-                root_build = work_dir / "build"
-                if root_build.exists():
-                    shutil.rmtree(str(root_build))
-                await asyncio.to_thread(shutil.copytree, str(fe_build), str(root_build))
-            (work_dir / "version.txt").write_text(version_str, encoding="utf-8")
+            if include.get("build_frontend"):
+                fe_build = ROOT_DIR.parent / "frontend" / "build"
+                if fe_build.exists() and (fe_build / "index.html").exists():
+                    root_build = work_dir / "build"
+                    if root_build.exists():
+                        shutil.rmtree(str(root_build))
+                    await asyncio.to_thread(shutil.copytree, str(fe_build), str(root_build))
+            if include.get("version_txt"):
+                (work_dir / "version.txt").write_text(version_str, encoding="utf-8")
         except Exception as e:
             logger.warning(f"No se pudo publicar la versión PC plana: {e}")
 
@@ -4731,7 +4900,14 @@ async def _do_github_push_all(payload: dict):
                         detail="Comparando archivos con el repositorio")
         await _arun(["git", "add", "-A"], cwd=work_dir)
         # Forzar el add de la versión PC (build/ está en .gitignore como /build)
-        for forced in ("build", "app.py", "version.txt"):
+        forced_items = []
+        if include.get("build_frontend"):
+            forced_items.append("build")
+        if include.get("standalone_app"):
+            forced_items.append("app.py")
+        if include.get("version_txt"):
+            forced_items.append("version.txt")
+        for forced in forced_items:
             if (work_dir / forced).exists():
                 await _arun(["git", "add", "-f", forced], cwd=work_dir)
 

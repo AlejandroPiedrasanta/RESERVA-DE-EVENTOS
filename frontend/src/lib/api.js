@@ -123,9 +123,10 @@ export const getGithubConfig = () => api.get("/github/config").then(r => r.data)
 export const saveGithubConfig = (data) => api.post("/github/config", data).then(r => r.data);
 export const connectGithub = (token, repo_url, branch) => api.post("/github/connect", { token, repo_url, branch }).then(r => r.data);
 export const disconnectGithub = () => api.post("/github/disconnect").then(r => r.data);
-export const githubPushAll = (message, version, versionName) =>
-  api.post("/github/push-all", { message, version, version_name: versionName }).then(r => r.data);
+export const githubPushAll = (message, version, versionName, include) =>
+  api.post("/github/push-all", { message, version, version_name: versionName, include }).then(r => r.data);
 export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
+export const getGithubPushPreview = () => api.get("/github/push-preview").then(r => r.data);
 export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
 export const applyUpdateAndRestart = () => api.post("/updates/apply-and-restart", {}, { timeout: 600000 }).then(r => r.data);
 export const runDiagnostic = () => api.get("/diagnostic").then(r => r.data);
