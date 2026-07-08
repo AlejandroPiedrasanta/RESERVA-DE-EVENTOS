@@ -2982,11 +2982,14 @@ async def download_package(request: Request):
     cloud_url = str(request.base_url).rstrip("/")
     standalone_py = (ROOT_DIR / 'standalone_app.py').read_text()
 
-    # Version corta incremental estilo v1.10 (v1.<build>). Se guarda un contador.
+    # Version UNIFICADA: mismo esquema semver X.Y.Z que version.txt/cloud/EXE/commits.
+    # Fuente única de verdad → _compute_next_unified_version().
+    auto_version = await _compute_next_unified_version()
+    # Sincronizar contador legacy (informativo, ya no autoritativo).
     _cdoc = await db.app_settings.find_one({}, {"desktop_build": 1, "security_config": 1}) or {}
-    _build = int(_cdoc.get("desktop_build", 9)) + 1
-    await db.app_settings.update_one({}, {"$set": {"desktop_build": _build}}, upsert=True)
-    auto_version = f"1.{_build}"
+    await db.app_settings.update_one(
+        {}, {"$set": {"desktop_build_semver": auto_version}}, upsert=True
+    )
 
     # ── ¿Cifrar ZIP con contraseña? ─────────────────────────────────
     sec_cfg = _cdoc.get("security_config") or {}
@@ -3437,6 +3440,107 @@ async def _read_local_version() -> str:
     return ""
 
 
+# ─────────────────────────────────────────────────────────────────────
+# UNIFIED VERSION COMPUTATION
+# Fuente única de verdad para TODOS los flujos: cloud release, ZIP,
+# EXE, commits, y tags. Formato semver X.Y.Z.
+#
+# Reglas:
+#   1. Base = max(version.txt local, version.txt remoto, max tag semver remoto)
+#   2. Next = base con patch + 1
+#   3. Si "vNext" ya existe como tag remoto, sigue subiendo patch hasta libre.
+#   4. Nunca retrocede. Nunca crea 2-part (siempre X.Y.Z).
+# ─────────────────────────────────────────────────────────────────────
+_SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def _parse_semver(s: str):
+    if not s:
+        return None
+    m = _SEMVER_RE.match(s.strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _fmt_semver(t) -> str:
+    return f"{t[0]}.{t[1]}.{t[2]}"
+
+
+async def _list_remote_semver_tags() -> list:
+    """Lista tags remotos vX.Y.Z usando la GitHub API (sin clonar)."""
+    tags_semver = []
+    try:
+        cfg = await _get_github_config()
+        repo_url = cfg.get("repo_url") or ""
+        token = (cfg.get("token") or "").strip()
+        if not repo_url:
+            return []
+        m = re.match(r"https?://github\.com/([^/]+)/([^/.]+)", repo_url)
+        if not m:
+            return []
+        owner, repo = m.group(1), m.group(2)
+        headers = {"User-Agent": "cinema-productions",
+                   "Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        import urllib.request as _u, json as _j
+
+        def _get_tags():
+            req = _u.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=100",
+                headers=headers,
+            )
+            with _u.urlopen(req, timeout=8) as resp:
+                return _j.loads(resp.read().decode("utf-8", errors="ignore"))
+
+        tags = await asyncio.to_thread(_get_tags)
+        if isinstance(tags, list):
+            for t in tags:
+                sv = _parse_semver(t.get("name") or "")
+                if sv:
+                    tags_semver.append(sv)
+    except Exception as e:
+        logger.warning(f"_list_remote_semver_tags: {e}")
+    return tags_semver
+
+
+async def _compute_next_unified_version() -> str:
+    """Calcula la ÚNICA próxima versión semver X.Y.Z canónica.
+
+    Se usa en: ZIP generator, push a GitHub, endpoint /next-version.
+    Garantiza que ZIP, EXE, cloud release, commit y tag tienen el MISMO número.
+    """
+    candidates = []
+
+    local = _parse_semver(await _read_local_version())
+    if local:
+        candidates.append(local)
+
+    try:
+        gh = await _fetch_github_version_txt()
+        remote_ver = _parse_semver(gh.get("version") or "")
+        if remote_ver:
+            candidates.append(remote_ver)
+    except Exception:
+        pass
+
+    remote_tags = await _list_remote_semver_tags()
+    candidates.extend(remote_tags)
+
+    if not candidates:
+        base = (1, 0, 0)
+    else:
+        base = max(candidates)
+
+    # Bump patch + 1, y saltar colisiones con tags existentes.
+    tag_set = {_fmt_semver(t) for t in remote_tags}
+    nxt = (base[0], base[1], base[2] + 1)
+    while _fmt_semver(nxt) in tag_set:
+        nxt = (nxt[0], nxt[1], nxt[2] + 1)
+    return _fmt_semver(nxt)
+
+
 def _version_tuple(v: str):
     v = (v or "").strip().lstrip("v")
     parts = []
@@ -3637,71 +3741,37 @@ async def dismiss_update_cloud():
 @api_router.get("/github/next-version")
 async def get_next_auto_version():
     """Devuelve la versión actual y cuál sería el próximo número si el usuario
-    deja el input de versión vacío en el modal 'Publicar en GitHub'. Esto
-    reproduce la lógica de `_do_github_push_all` sin necesidad de clonar el
-    repo (usa la GitHub API para listar tags v1.*).
+    deja el input de versión vacío en el modal 'Publicar en GitHub'.
+
+    UNIFICADA: usa el MISMO semver X.Y.Z que auto-release.yml, el EXE, el ZIP
+    y los commits. Fuente: _compute_next_unified_version().
 
     Response:
     {
-      "current_local": "1.16",   # version.txt local (backend/servidor)
-      "current_remote": "1.16",  # version.txt del repo GitHub
-      "current_desktop": 16,     # desktop_build en Mongo (patch actual)
-      "next_auto_version": "1.17"
+      "current_local": "1.0.23",     # version.txt local
+      "current_remote": "1.0.23",    # version.txt del repo GitHub
+      "current_desktop": "1.0.23",   # último semver publicado (Mongo)
+      "next_auto_version": "1.0.24"  # próximo canónico (mismo para ZIP/EXE/tag)
     }
     """
-    # Versión local (del servidor)
     current_local = await _read_local_version()
-
-    # Versión en version.txt del repo GitHub
     gh = await _fetch_github_version_txt()
     current_remote = gh.get("version", "")
 
-    # desktop_build en Mongo (fuente principal para el cálculo automático)
-    cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
-    try:
-        local_build = int(cdoc.get("desktop_build", 9))
-    except Exception:
-        local_build = 9
+    cdoc = await db.app_settings.find_one(
+        {}, {"desktop_build": 1, "desktop_build_semver": 1}
+    ) or {}
+    current_desktop = cdoc.get("desktop_build_semver") or (
+        f"1.{cdoc.get('desktop_build', 0)}" if cdoc.get("desktop_build") else ""
+    )
 
-    # Escanear tags v1.* del repo remoto usando la API pública (sin clonar)
-    max_remote_build = 0
-    try:
-        cfg = await _get_github_config()
-        repo_url = cfg.get("repo_url") or ""
-        token = (cfg.get("token") or "").strip()
-        if repo_url:
-            m = re.match(r"https?://github\.com/([^/]+)/([^/.]+)", repo_url)
-            if m:
-                owner, repo = m.group(1), m.group(2)
-                headers = {"User-Agent": "cinema-productions",
-                           "Accept": "application/vnd.github+json"}
-                if token:
-                    headers["Authorization"] = f"Bearer {token}"
-                import urllib.request as _u, json as _j
-                def _get_tags():
-                    req = _u.Request(
-                        f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=100",
-                        headers=headers,
-                    )
-                    with _u.urlopen(req, timeout=8) as resp:
-                        return _j.loads(resp.read().decode("utf-8", errors="ignore"))
-                tags = await asyncio.to_thread(_get_tags)
-                if isinstance(tags, list):
-                    for t in tags:
-                        name = (t.get("name") or "")
-                        mt = re.match(r"^v1\.(\d+)$", name)
-                        if mt:
-                            max_remote_build = max(max_remote_build, int(mt.group(1)))
-    except Exception as e:
-        logger.warning(f"next-version: no se pudieron listar tags remotos: {e}")
+    next_version = await _compute_next_unified_version()
 
-    new_build = max(local_build, max_remote_build) + 1
     return {
         "current_local": current_local,
         "current_remote": current_remote,
-        "current_desktop": local_build,
-        "max_remote_build": max_remote_build,
-        "next_auto_version": f"1.{new_build}",
+        "current_desktop": current_desktop,
+        "next_auto_version": next_version,
     }
 
 
@@ -4849,30 +4919,20 @@ async def _do_github_push_all(payload: dict):
         # Así CUALQUIER actualizador (el ya instalado o el nuevo) aplica los cambios
         # correctamente y de forma automática y remota, sin reinstalar.
         # ── Resolver la VERSIÓN de esta publicación ──
-        # El usuario puede escribir un número/nombre personalizado desde el modal
-        # ("2.0", "Navidad", etc.). Si no, se calcula automáticamente como 1.NN.
+        # Fuente única de verdad: _compute_next_unified_version() → semver X.Y.Z.
+        # Garantiza que ZIP, EXE, cloud release, commit y tag comparten el MISMO
+        # número. El usuario puede seguir sobrescribiendo con custom_version
+        # desde el modal ("2.0", "Navidad", etc.) — se respeta tal cual.
         custom_version = (payload.get("version") or "").strip().lstrip("vV").strip()
         version_name = (payload.get("version_name") or "").strip()
         try:
             if custom_version:
                 version_str = custom_version
             else:
-                cdoc = await db.app_settings.find_one({}, {"desktop_build": 1}) or {}
-                local_build = int(cdoc.get("desktop_build", 9))
-                max_remote_build = 0
-                try:
-                    rc_ls, ls_out = await _arun(
-                        ["git", "ls-remote", "--tags", "origin", "v1.*"],
-                        cwd=work_dir, timeout=30, sensitive=True,
-                    )
-                    if rc_ls == 0:
-                        for m in _re.finditer(r"refs/tags/v1\.(\d+)", ls_out):
-                            max_remote_build = max(max_remote_build, int(m.group(1)))
-                except Exception as ls_err:
-                    logger.warning(f"No se pudieron listar tags remotos: {ls_err}")
-                new_build = max(local_build, max_remote_build) + 1
-                await db.app_settings.update_one({}, {"$set": {"desktop_build": new_build}}, upsert=True)
-                version_str = f"1.{new_build}"
+                version_str = await _compute_next_unified_version()
+                await db.app_settings.update_one(
+                    {}, {"$set": {"desktop_build_semver": version_str}}, upsert=True
+                )
         except Exception as ver_err:
             logger.warning(f"No se pudo resolver versión: {ver_err}")
             version_str = custom_version or datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
@@ -4928,7 +4988,11 @@ async def _do_github_push_all(payload: dict):
 
         _set_push_state(progress=90, message="Creando commit…", step=7,
                         detail=f"{changed} archivo(s) con cambios · versión v{version_str}")
-        rc_c, out_c = await _arun(["git", "commit", "-m", message], cwd=work_dir)
+        # Añadimos [skip ci] para que auto-release.yml NO haga un segundo bump.
+        # El tag vX.Y.Z que creamos abajo dispara build-exe.yml directamente,
+        # que compila EXE/installer/linux/macos con EXACTAMENTE la MISMA versión.
+        commit_message = f"{message}\n\nv{version_str} [skip ci]"
+        rc_c, out_c = await _arun(["git", "commit", "-m", commit_message], cwd=work_dir)
         if rc_c != 0:
             _set_push_state(progress=0, message="Error al crear el commit", status="error")
             raise HTTPException(status_code=500, detail=f"git commit falló: {out_c[-400:]}")
