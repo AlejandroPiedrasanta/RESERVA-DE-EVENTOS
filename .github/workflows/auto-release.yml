@@ -47,23 +47,29 @@ jobs:
         id: calc
         run: |
           set -e
-          CUR=$(tr -d '[:space:]' < version.txt 2>/dev/null || echo "")
-          if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            IFS='.' read -r MA MI PA <<< "$CUR"
-            PA=$((PA+1)); NEW="$MA.$MI.$PA"
-          else
+          # La versión se deriva del ÚLTIMO tag semántico vX.Y.Z existente, NO de
+          # version.txt. Esto elimina la condición de carrera con la herramienta de
+          # "Actualización" que reescribe version.txt en cada guardado.
+          git fetch --tags --force --quiet || true
+          LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' \
+                    | sed 's/^v//' \
+                    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+                    | sort -V | tail -n1)
+          if [ -z "$LATEST" ]; then
             NEW="1.0.0"
+          else
+            IFS='.' read -r MA MI PA <<< "$LATEST"
+            PA=$((PA+1)); NEW="$MA.$MI.$PA"
           fi
 
           # Garantizar que el tag vX.Y.Z esté libre (subir patch hasta encontrar uno)
-          git fetch --tags --quiet || true
           while git rev-parse "v$NEW" >/dev/null 2>&1; do
             IFS='.' read -r MA MI PA <<< "$NEW"
             PA=$((PA+1)); NEW="$MA.$MI.$PA"
           done
 
           echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
-          echo "✓ Versión candidata: v$NEW (aún no commiteada)"
+          echo "✓ Versión candidata: v$NEW (basada en el último tag semántico, no en version.txt)"
 
   # ─────────────────────────────────────────────────────────────────────
   # 2) Compilar y publicar TODOS los binarios en la release vX.Y.Z.

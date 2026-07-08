@@ -10,7 +10,9 @@ name: Build Windows .exe
 on:
   push:
     tags:
-      - 'v*'
+      # Solo tags semánticos de 3 segmentos (vX.Y.Z). Evita que tags de 2
+      # segmentos (v1.20) o basura (vOK12) disparen un build/release duplicado.
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       release_tag:
