@@ -1,194 +1,352 @@
 #!/usr/bin/env python3
 """
-Backend Test - Security State Verification After Password Reset
-Tests the app-lock/security state after a forgotten password was removed from DB.
+Backend API Test Suite for Version-Check Bug Fix
+Tests the fix for GitHub version detection endpoints.
 """
 
 import requests
-import json
 import sys
+import json
+from typing import Dict, Any
 
-# Read backend URL from frontend .env
-BASE_URL = "https://event-booking-77.preview.emergentagent.com/api"
+# Backend URL from frontend/.env
+BACKEND_URL = "https://evento-manager-16.preview.emergentagent.com/api"
 
-def print_test_header(test_name):
-    print(f"\n{'='*80}")
-    print(f"TEST: {test_name}")
-    print(f"{'='*80}")
+# Expected values
+EXPECTED_VERSION = "1.13"
+EXPECTED_REPO = "AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
 
-def print_response(response):
-    print(f"Status Code: {response.status_code}")
-    print(f"Response Headers: {dict(response.headers)}")
-    try:
-        print(f"Response Body: {json.dumps(response.json(), indent=2)}")
-    except:
-        print(f"Response Text: {response.text}")
+# ANSI color codes for output
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+RESET = "\033[0m"
 
-def test_security_status():
-    """
-    Test 1: GET /api/security/status
-    Expected: password_enabled=false, failed_attempts=0, locked_until=""
-    """
-    print_test_header("GET /api/security/status - Verify no password is set")
+
+def print_test_header(test_name: str):
+    """Print a formatted test header."""
+    print(f"\n{BLUE}{'='*80}{RESET}")
+    print(f"{BLUE}TEST: {test_name}{RESET}")
+    print(f"{BLUE}{'='*80}{RESET}")
+
+
+def print_pass(message: str):
+    """Print a pass message."""
+    print(f"{GREEN}✓ PASS:{RESET} {message}")
+
+
+def print_fail(message: str):
+    """Print a fail message."""
+    print(f"{RED}✗ FAIL:{RESET} {message}")
+
+
+def print_info(message: str):
+    """Print an info message."""
+    print(f"{YELLOW}ℹ INFO:{RESET} {message}")
+
+
+def validate_response(response: requests.Response, endpoint: str) -> Dict[str, Any]:
+    """Validate HTTP response and return JSON data."""
+    print_info(f"Testing endpoint: {endpoint}")
+    print_info(f"Status code: {response.status_code}")
     
-    url = f"{BASE_URL}/security/status"
-    print(f"URL: {url}")
+    if response.status_code != 200:
+        print_fail(f"Expected status 200, got {response.status_code}")
+        print_info(f"Response text: {response.text[:500]}")
+        return None
+    
+    print_pass(f"HTTP 200 OK")
     
     try:
-        response = requests.get(url, timeout=10)
-        print_response(response)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Check critical fields
-            password_enabled = data.get('password_enabled')
-            failed_attempts = data.get('failed_attempts')
-            locked_until = data.get('locked_until')
-            
-            print(f"\n✓ Status Code: 200 ✅")
-            
-            if password_enabled == False:
-                print(f"✓ password_enabled: {password_enabled} ✅ (CORRECT - no password set)")
-            else:
-                print(f"✗ password_enabled: {password_enabled} ❌ (EXPECTED: false)")
-                return False
-            
-            if failed_attempts == 0:
-                print(f"✓ failed_attempts: {failed_attempts} ✅ (CORRECT - no failed attempts)")
-            else:
-                print(f"⚠ failed_attempts: {failed_attempts} (EXPECTED: 0)")
-            
-            if locked_until == "":
-                print(f"✓ locked_until: '{locked_until}' ✅ (CORRECT - not locked)")
-            else:
-                print(f"⚠ locked_until: '{locked_until}' (EXPECTED: empty string)")
-            
-            return password_enabled == False
-        else:
-            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
-            return False
-            
+        data = response.json()
+        print_info(f"Response JSON:\n{json.dumps(data, indent=2)}")
+        return data
     except Exception as e:
-        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        print_fail(f"Failed to parse JSON: {e}")
+        print_info(f"Response text: {response.text[:500]}")
+        return None
+
+
+def test_github_version_endpoint():
+    """Test GET /api/updates/github-version?refresh=true"""
+    print_test_header("Test 1: GET /api/updates/github-version?refresh=true")
+    
+    endpoint = f"{BACKEND_URL}/updates/github-version?refresh=true"
+    
+    try:
+        response = requests.get(endpoint, timeout=15)
+        data = validate_response(response, endpoint)
+        
+        if not data:
+            return False
+        
+        # Validate required fields
+        required_fields = ["github_version", "local_version", "has_update", "source_url"]
+        all_passed = True
+        
+        for field in required_fields:
+            if field not in data:
+                print_fail(f"Missing required field: {field}")
+                all_passed = False
+        
+        if not all_passed:
+            return False
+        
+        # Validate github_version
+        github_version = data.get("github_version", "")
+        if github_version == EXPECTED_VERSION:
+            print_pass(f"github_version = '{github_version}' (correct)")
+        else:
+            print_fail(f"github_version = '{github_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Check for old buggy version
+        if github_version == "1.0.18":
+            print_fail("BUG: Still returning old version 1.0.18 from version.txt!")
+            all_passed = False
+        
+        # Check for spurious tags
+        spurious_tags = ["2001.2", "ww", "g2"]
+        for tag in spurious_tags:
+            if tag in github_version:
+                print_fail(f"BUG: Spurious tag detected in version: {github_version}")
+                all_passed = False
+        
+        # Validate local_version
+        local_version = data.get("local_version", "")
+        if local_version == EXPECTED_VERSION:
+            print_pass(f"local_version = '{local_version}' (correct)")
+        else:
+            print_fail(f"local_version = '{local_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate has_update
+        has_update = data.get("has_update")
+        if has_update is False:
+            print_pass(f"has_update = {has_update} (correct)")
+        else:
+            print_fail(f"has_update = {has_update}, expected False")
+            all_passed = False
+        
+        # Validate source_url
+        source_url = data.get("source_url", "")
+        if "v1.13" in source_url and EXPECTED_REPO in source_url:
+            print_pass(f"source_url points to v1.13 tag: {source_url}")
+        else:
+            print_fail(f"source_url does not point to v1.13 tag: {source_url}")
+            all_passed = False
+        
+        return all_passed
+        
+    except requests.exceptions.Timeout:
+        print_fail("Request timed out after 15 seconds")
+        return False
+    except Exception as e:
+        print_fail(f"Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
-def test_verify_with_password():
-    """
-    Test 2: POST /api/security/verify with {"password":"anything"}
-    Expected: 200 {"valid": true} because no password is configured
-    """
-    print_test_header("POST /api/security/verify with password - Should return valid:true")
+
+def test_check_updates_endpoint_with_refresh():
+    """Test GET /api/updates/check?refresh=true"""
+    print_test_header("Test 2: GET /api/updates/check?refresh=true")
     
-    url = f"{BASE_URL}/security/verify"
-    payload = {"password": "anything"}
-    print(f"URL: {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
+    endpoint = f"{BACKEND_URL}/updates/check?refresh=true"
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        print_response(response)
+        response = requests.get(endpoint, timeout=15)
+        data = validate_response(response, endpoint)
         
-        if response.status_code == 200:
-            data = response.json()
-            valid = data.get('valid')
-            
-            print(f"\n✓ Status Code: 200 ✅")
-            
-            if valid == True:
-                print(f"✓ valid: {valid} ✅ (CORRECT - no password configured, should unlock)")
-                return True
-            else:
-                print(f"✗ valid: {valid} ❌ (EXPECTED: true)")
-                return False
-        else:
-            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
+        if not data:
             return False
-            
+        
+        # Validate required fields
+        required_fields = ["github_version", "local_version", "remote_version", "has_update"]
+        all_passed = True
+        
+        for field in required_fields:
+            if field not in data:
+                print_fail(f"Missing required field: {field}")
+                all_passed = False
+        
+        if not all_passed:
+            return False
+        
+        # Validate github_version
+        github_version = data.get("github_version", "")
+        if github_version == EXPECTED_VERSION:
+            print_pass(f"github_version = '{github_version}' (correct)")
+        else:
+            print_fail(f"github_version = '{github_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate local_version
+        local_version = data.get("local_version", "")
+        if local_version == EXPECTED_VERSION:
+            print_pass(f"local_version = '{local_version}' (correct)")
+        else:
+            print_fail(f"local_version = '{local_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate remote_version
+        remote_version = data.get("remote_version", "")
+        if remote_version == EXPECTED_VERSION:
+            print_pass(f"remote_version = '{remote_version}' (correct)")
+        else:
+            print_fail(f"remote_version = '{remote_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate has_update
+        has_update = data.get("has_update")
+        if has_update is False:
+            print_pass(f"has_update = {has_update} (correct)")
+        else:
+            print_fail(f"has_update = {has_update}, expected False")
+            all_passed = False
+        
+        return all_passed
+        
+    except requests.exceptions.Timeout:
+        print_fail("Request timed out after 15 seconds")
+        return False
     except Exception as e:
-        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        print_fail(f"Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
-def test_verify_empty():
-    """
-    Test 3: POST /api/security/verify with {} (empty body)
-    Expected: 200 {"valid": true}
-    """
-    print_test_header("POST /api/security/verify with empty body - Should return valid:true")
+
+def test_check_updates_endpoint_cached():
+    """Test GET /api/updates/check (no refresh, should use cache)"""
+    print_test_header("Test 3: GET /api/updates/check (cached)")
     
-    url = f"{BASE_URL}/security/verify"
-    payload = {}
-    print(f"URL: {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
+    endpoint = f"{BACKEND_URL}/updates/check"
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        print_response(response)
+        response = requests.get(endpoint, timeout=15)
+        data = validate_response(response, endpoint)
+        
+        if not data:
+            return False
+        
+        # Same validations as test 2
+        all_passed = True
+        
+        # Validate github_version
+        github_version = data.get("github_version", "")
+        if github_version == EXPECTED_VERSION:
+            print_pass(f"github_version = '{github_version}' (correct, from cache)")
+        else:
+            print_fail(f"github_version = '{github_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate local_version
+        local_version = data.get("local_version", "")
+        if local_version == EXPECTED_VERSION:
+            print_pass(f"local_version = '{local_version}' (correct)")
+        else:
+            print_fail(f"local_version = '{local_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate remote_version
+        remote_version = data.get("remote_version", "")
+        if remote_version == EXPECTED_VERSION:
+            print_pass(f"remote_version = '{remote_version}' (correct)")
+        else:
+            print_fail(f"remote_version = '{remote_version}', expected '{EXPECTED_VERSION}'")
+            all_passed = False
+        
+        # Validate has_update
+        has_update = data.get("has_update")
+        if has_update is False:
+            print_pass(f"has_update = {has_update} (correct)")
+        else:
+            print_fail(f"has_update = {has_update}, expected False")
+            all_passed = False
+        
+        return all_passed
+        
+    except requests.exceptions.Timeout:
+        print_fail("Request timed out after 15 seconds")
+        return False
+    except Exception as e:
+        print_fail(f"Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def test_sanity_check():
+    """Test GET /api/ (sanity check)"""
+    print_test_header("Test 4: GET /api/ (sanity check)")
+    
+    endpoint = f"{BACKEND_URL}/"
+    
+    try:
+        response = requests.get(endpoint, timeout=10)
+        print_info(f"Testing endpoint: {endpoint}")
+        print_info(f"Status code: {response.status_code}")
         
         if response.status_code == 200:
-            data = response.json()
-            valid = data.get('valid')
-            
-            print(f"\n✓ Status Code: 200 ✅")
-            
-            if valid == True:
-                print(f"✓ valid: {valid} ✅ (CORRECT - no password configured, should unlock)")
-                return True
-            else:
-                print(f"✗ valid: {valid} ❌ (EXPECTED: true)")
-                return False
+            print_pass("Backend is alive and responding")
+            return True
         else:
-            print(f"\n✗ FAILED: Expected 200, got {response.status_code} ❌")
+            print_fail(f"Expected status 200, got {response.status_code}")
             return False
-            
+        
     except Exception as e:
-        print(f"\n✗ EXCEPTION: {str(e)} ❌")
+        print_fail(f"Exception occurred: {e}")
         return False
+
 
 def main():
-    print("="*80)
-    print("BACKEND SECURITY STATE VERIFICATION - POST PASSWORD RESET")
-    print("="*80)
-    print(f"Base URL: {BASE_URL}")
-    print(f"Context: User was locked out by LockScreen, forgot password.")
-    print(f"         Password hash was removed from DB, lockout cleared.")
-    print(f"         Verifying app is now unlocked and no password required.")
-    print("="*80)
+    """Run all tests."""
+    print(f"\n{BLUE}{'='*80}{RESET}")
+    print(f"{BLUE}Version-Check Bug Fix Test Suite{RESET}")
+    print(f"{BLUE}Backend URL: {BACKEND_URL}{RESET}")
+    print(f"{BLUE}Expected Version: {EXPECTED_VERSION}{RESET}")
+    print(f"{BLUE}{'='*80}{RESET}")
     
-    results = {}
+    results = {
+        "Test 1: /api/updates/github-version?refresh=true": test_github_version_endpoint(),
+        "Test 2: /api/updates/check?refresh=true": test_check_updates_endpoint_with_refresh(),
+        "Test 3: /api/updates/check (cached)": test_check_updates_endpoint_cached(),
+        "Test 4: /api/ (sanity check)": test_sanity_check(),
+    }
     
-    # Test 1: Security Status
-    results['test_1_status'] = test_security_status()
+    # Print summary
+    print(f"\n{BLUE}{'='*80}{RESET}")
+    print(f"{BLUE}TEST SUMMARY{RESET}")
+    print(f"{BLUE}{'='*80}{RESET}")
     
-    # Test 2: Verify with password
-    results['test_2_verify_password'] = test_verify_with_password()
+    passed = 0
+    failed = 0
     
-    # Test 3: Verify empty
-    results['test_3_verify_empty'] = test_verify_empty()
+    for test_name, result in results.items():
+        if result:
+            print(f"{GREEN}✓ PASS:{RESET} {test_name}")
+            passed += 1
+        else:
+            print(f"{RED}✗ FAIL:{RESET} {test_name}")
+            failed += 1
     
-    # Summary
-    print("\n" + "="*80)
-    print("TEST SUMMARY")
-    print("="*80)
+    print(f"\n{BLUE}Total: {passed + failed} tests{RESET}")
+    print(f"{GREEN}Passed: {passed}{RESET}")
+    print(f"{RED}Failed: {failed}{RESET}")
     
-    all_passed = True
-    for test_name, passed in results.items():
-        status = "✅ PASS" if passed else "❌ FAIL"
-        print(f"{test_name}: {status}")
-        if not passed:
-            all_passed = False
-    
-    print("="*80)
-    
-    if all_passed:
-        print("\n🎉 ALL TESTS PASSED - APP IS UNLOCKED, NO PASSWORD REQUIRED")
-        print("✅ password_enabled = false")
-        print("✅ /security/verify returns valid:true (LockScreen will unlock)")
-        print("✅ App is accessible without password")
+    if failed == 0:
+        print(f"\n{GREEN}{'='*80}{RESET}")
+        print(f"{GREEN}ALL TESTS PASSED! ✓{RESET}")
+        print(f"{GREEN}{'='*80}{RESET}")
         return 0
     else:
-        print("\n❌ SOME TESTS FAILED - REVIEW RESULTS ABOVE")
+        print(f"\n{RED}{'='*80}{RESET}")
+        print(f"{RED}SOME TESTS FAILED! ✗{RESET}")
+        print(f"{RED}{'='*80}{RESET}")
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

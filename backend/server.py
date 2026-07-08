@@ -3461,8 +3461,18 @@ _gh_version_cache_srv: dict = {"ts": 0.0, "version": "", "source_url": ""}
 
 
 async def _fetch_github_version_txt() -> dict:
-    """Lee version.txt del repo GitHub configurado. Cachea 60s.
-    Devuelve {version, source_url}. Si falla, version == ''."""
+    """Lee la versión más reciente publicada en el repo GitHub configurado.
+
+    Combina dos fuentes:
+      1. `version.txt` en la raíz del repositorio (rama configurada).
+      2. Tags publicados en el repo (`vX.Y[.Z]`) — la versión más alta gana.
+
+    De esta forma, si el usuario publica una nueva versión creando un tag
+    (por ejemplo `v1.13`) pero `version.txt` no se actualiza inmediatamente,
+    el chequeo de actualizaciones sigue reflejando la última versión real.
+
+    Cachea 60 s. Devuelve {version, source_url}. Si falla, version == ''.
+    """
     import time as _t
     if _t.time() - _gh_version_cache_srv["ts"] < 60 and _gh_version_cache_srv["version"]:
         return {
@@ -3486,6 +3496,9 @@ async def _fetch_github_version_txt() -> dict:
             if b and b not in candidate_branches:
                 candidate_branches.append(b)
 
+        # ── 1) Leer version.txt del repo ─────────────────────────────────
+        txt_version = ""
+        txt_source_url = ""
         async with httpx.AsyncClient(timeout=8) as http:
             for b in candidate_branches:
                 raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{b}/version.txt"
@@ -3494,11 +3507,61 @@ async def _fetch_github_version_txt() -> dict:
                     if rv.status_code == 200:
                         v = (rv.text or "").strip().splitlines()[0].strip().lstrip("v")
                         if v:
-                            result["version"] = v
-                            result["source_url"] = raw_url
+                            txt_version = v
+                            txt_source_url = raw_url
                             break
                 except Exception:
                     continue
+
+            # ── 2) Buscar el tag semver más alto en el repo ───────────────
+            tag_version = ""
+            tag_source_url = ""
+            try:
+                api_headers = dict(headers)
+                api_headers.setdefault("Accept", "application/vnd.github+json")
+                api_headers.setdefault("User-Agent", "cinema-productions")
+                tag_re = re.compile(r"^v(1(?:\.\d+){1,2})$")
+                best_tuple = None
+                # Paginar hasta ~3 páginas por seguridad
+                for page in range(1, 4):
+                    tags_url = (
+                        f"https://api.github.com/repos/{owner}/{repo}/tags"
+                        f"?per_page=100&page={page}"
+                    )
+                    rt = await http.get(tags_url, headers=api_headers)
+                    if rt.status_code != 200:
+                        break
+                    tags = rt.json() or []
+                    if not isinstance(tags, list) or not tags:
+                        break
+                    for t in tags:
+                        name = (t.get("name") or "").strip()
+                        m = tag_re.match(name)
+                        if not m:
+                            continue
+                        v = m.group(1)
+                        tup = _version_tuple(v)
+                        if best_tuple is None or tup > best_tuple:
+                            best_tuple = tup
+                            tag_version = v
+                            tag_source_url = (
+                                f"https://github.com/{owner}/{repo}/releases/tag/v{v}"
+                            )
+                    if len(tags) < 100:
+                        break
+            except Exception as e:
+                logger.warning(f"GitHub tags scan failed: {e}")
+
+        # ── 3) Escoger la más alta entre version.txt y tags ──────────────
+        candidates = []
+        if txt_version:
+            candidates.append((txt_version, txt_source_url))
+        if tag_version:
+            candidates.append((tag_version, tag_source_url))
+        if candidates:
+            best = max(candidates, key=lambda x: _version_tuple(x[0]))
+            result["version"] = best[0]
+            result["source_url"] = best[1]
 
         _gh_version_cache_srv["ts"] = _t.time()
         _gh_version_cache_srv["version"] = result["version"]
