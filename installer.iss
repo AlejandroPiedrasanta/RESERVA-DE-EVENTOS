@@ -41,10 +41,10 @@ VersionInfoDescription={#MyAppName} — Gestor de Reservas de Eventos
 ; Instalación per-user en %LocalAppData% -> sin admin, sin UAC.
 DefaultDirName={localappdata}\CinemaProductions
 DefaultGroupName={#MyAppName}
-DisableDirPage=auto
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
-DisableReadyPage=no
+DisableReadyPage=yes
 DisableFinishedPage=no
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -83,31 +83,28 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-spanish.WelcomeLabel1=Bienvenido al asistente de instalación de [name]
-spanish.WelcomeLabel2=Este asistente instalará [name/ver] en tu equipo.%n%nCinema Productions te permite gestionar reservas de eventos con una interfaz moderna, ejecutándose 100%% en local, sin depender de internet.%n%nHaz clic en Siguiente para continuar.
-spanish.FinishedLabelNoIcons=La instalación de [name] se completó correctamente.
-spanish.FinishedLabel=[name] se ha instalado correctamente. Puedes lanzar la aplicación desde el menú Inicio o el acceso directo del escritorio.
-spanish.ClickFinish=Haz clic en Finalizar para cerrar el asistente y abrir Cinema Productions.
+spanish.WelcomeLabel1=Bienvenido a la instalación de [name/ver]
+spanish.WelcomeLabel2=Este asistente instalará [name/ver] en tu equipo.%n%nCinema Productions te permite gestionar reservas de eventos con una interfaz moderna, ejecutándose 100%% en local, sin depender de internet.%n%nSolo haz clic en Instalar: se creará un acceso directo en el escritorio y la app se abrirá al terminar.
+spanish.FinishedLabelNoIcons=[name/ver] se instaló correctamente.
+spanish.FinishedLabel=[name/ver] se ha instalado correctamente. Tienes un acceso directo en el escritorio.
+spanish.ClickFinish=Haz clic en Finalizar para abrir Cinema Productions.
 
 [Tasks]
-Name: "desktopicon";  Description: "Crear un acceso directo en el &escritorio";  GroupDescription: "Accesos directos:"; Flags: checkedonce
-Name: "startmenu";    Description: "Crear entrada en el menú &Inicio";           GroupDescription: "Accesos directos:"; Flags: checkedonce
-Name: "startup";      Description: "Iniciar Cinema Productions al arrancar Windows"; GroupDescription: "Al arrancar el sistema:"; Flags: unchecked
+; Sin página de selección de tareas: la instalación es de un solo camino.
+; El acceso directo de escritorio se crea siempre (ver [Icons]).
 
 [Files]
 Source: "CinemaProductions.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "favicon.ico";           DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}";                Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\favicon.ico"; Tasks: startmenu
-Name: "{group}\Desinstalar {#MyAppName}";    Filename: "{uninstallexe}";                                            Tasks: startmenu
-Name: "{autodesktop}\{#MyAppName}";          Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\favicon.ico"; Tasks: desktopicon
+; Acceso directo en el escritorio (siempre) + entradas en menú Inicio.
+Name: "{autodesktop}\{#MyAppName}";          Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\favicon.ico"
+Name: "{group}\{#MyAppName}";                Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\favicon.ico"
+Name: "{group}\Desinstalar {#MyAppName}";    Filename: "{uninstallexe}"
 
 [Registry]
-; Autostart opcional (per-user). Sin admin.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-  ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; \
-  Flags: uninsdeletevalue; Tasks: startup
+; (sin autostart — la app solo se abre desde el acceso directo)
 
 [Run]
 ; Postinstall: lanzar la app SIN mostrar consola (el .exe se compila con --windowed).

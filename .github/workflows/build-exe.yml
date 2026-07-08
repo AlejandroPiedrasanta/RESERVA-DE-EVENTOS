@@ -179,6 +179,41 @@ jobs:
           if (-not $ok) { throw "❌ Smoke test (b): el .exe no respondió en http://127.0.0.1:8001/api/" }
           Write-Host "✓ (b) HTTP /api/ respondió 200 — arranque OK sin consola"
 
+      - name: Firmar .exe (certificado auto-firmado, uso interno)
+        shell: pwsh
+        run: |
+          # NOTA: firma AUTO-FIRMADA para uso interno. Windows SmartScreen seguirá
+          # mostrando "editor desconocido" en equipos donde el certificado no esté
+          # instalado como raíz de confianza — es el comportamiento esperado.
+          Write-Host "→ Generando certificado de firma de código auto-firmado..."
+          $pass = "CP-" + [System.Guid]::NewGuid().ToString("N").Substring(0,16)
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+            -Subject "CN=Cinema Productions, O=Cinema Productions" `
+            -FriendlyName "Cinema Productions Code Signing" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -KeyExportPolicy Exportable -KeyLength 2048 `
+            -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(5)
+          $pfx = Join-Path $env:RUNNER_TEMP "cp_codesign.pfx"
+          $sec = ConvertTo-SecureString -String $pass -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $sec | Out-Null
+
+          # Localizar signtool.exe del Windows SDK (elige la versión más reciente)
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+                      Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "signtool.exe no encontrado en el Windows SDK" }
+          Write-Host "signtool: $signtool"
+
+          # Compartir cert + signtool con el paso de firma del instalador
+          "CP_PFX=$pfx"            | Out-File -Encoding ascii -Append $env:GITHUB_ENV
+          "CP_PFX_PASS=$pass"      | Out-File -Encoding ascii -Append $env:GITHUB_ENV
+          "CP_SIGNTOOL=$signtool"  | Out-File -Encoding ascii -Append $env:GITHUB_ENV
+
+          & $signtool sign /f $pfx /p $pass /fd sha256 /tr http://timestamp.digicert.com /td sha256 "dist/CinemaProductions.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Firma del .exe falló (exit $LASTEXITCODE)" }
+          # verify /pa no encadena a una raíz de confianza en un auto-firmado; solo informativo.
+          & $signtool verify /pa "dist/CinemaProductions.exe"
+          Write-Host "✓ .exe firmado (auto-firmado + timestamp). verify exit=$LASTEXITCODE (self-signed: no encadena, esperado)"
+
       - name: Verify .exe & compute SHA256
         id: hash
         shell: pwsh
@@ -262,6 +297,15 @@ jobs:
           if (-not (Test-Path $iscc)) { throw "Inno Setup no encontrado en $iscc" }
           & $iscc "/DMyAppVersion=${{ steps.appver.outputs.version }}" dist\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup falló con exit $LASTEXITCODE" }
+
+      - name: Firmar instalador (certificado auto-firmado, uso interno)
+        shell: pwsh
+        run: |
+          # Reutiliza el certificado y signtool creados al firmar el .exe.
+          & $env:CP_SIGNTOOL sign /f $env:CP_PFX /p $env:CP_PFX_PASS /fd sha256 /tr http://timestamp.digicert.com /td sha256 "dist/CinemaProductions-Setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Firma del instalador falló (exit $LASTEXITCODE)" }
+          & $env:CP_SIGNTOOL verify /pa "dist/CinemaProductions-Setup.exe"
+          Write-Host "✓ Instalador firmado (auto-firmado + timestamp). verify exit=$LASTEXITCODE (self-signed: esperado)"
 
       - name: Verify installer & compute SHA256
         id: hashsetup
