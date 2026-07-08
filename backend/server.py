@@ -5061,6 +5061,205 @@ async def github_push_preview():
     }
 
 
+# Cache simple en memoria para no re-clonar en cada apertura del modal.
+_push_diff_cache = {"data": None, "ts": 0.0}
+
+
+def _categorize_repo_path(rel_path: str) -> str:
+    """Mapea una ruta relativa del repo a la categoría del modal 'Elegir qué subir'."""
+    p = rel_path.replace("\\", "/").lstrip("/")
+    if p.startswith("backend/"):
+        return "backend"
+    if p.startswith("frontend/"):
+        return "frontend_src"
+    if p == "app.py":
+        return "standalone_app"
+    if p == "version.txt":
+        return "version_txt"
+    if p.startswith("build/"):
+        return "build_frontend"
+    return "root_files"
+
+
+@api_router.get("/github/push-diff")
+async def github_push_diff(refresh: bool = False):
+    """Compara el código LOCAL con la versión ACTUAL del repositorio en GitHub y
+    devuelve la lista REAL de archivos que cambiarían (nuevos, modificados y
+    eliminados), agrupados por categoría.
+
+    Esto alimenta la vista 'Ver cambios detallados' del modal para que el usuario
+    vea EXACTAMENTE qué se va a subir antes de publicar.
+
+    Response:
+    {
+      "ok": true,
+      "changed": 12,
+      "summary": {"added": 3, "modified": 8, "deleted": 1},
+      "by_category": {"backend": {"added":1,"modified":2,"deleted":0,"total":3}, ...},
+      "files": [{"path": "backend/server.py", "status": "M", "category": "backend", "size_bytes": 1234}, ...],
+      "truncated": false,
+      "remote_branch": "main",
+      "cached": false
+    }
+    """
+    import shutil, tempfile, time as _t
+
+    # Cache de 90s para respuestas instantáneas al reabrir el modal.
+    if not refresh and _push_diff_cache["data"] and (_t.time() - _push_diff_cache["ts"] < 90):
+        cached = dict(_push_diff_cache["data"])
+        cached["cached"] = True
+        return cached
+
+    cfg = await _get_github_config()
+    token = cfg.get("token", "")
+    repo_url = cfg.get("repo_url", "")
+    branch = cfg.get("branch", DEFAULT_GITHUB_BRANCH)
+    username = cfg.get("username", "")
+    if not token or not repo_url or not username:
+        raise HTTPException(status_code=400, detail="Conecta tu cuenta de GitHub primero para comparar los cambios.")
+
+    auth_url = repo_url.replace("https://", f"https://{username}:{token}@")
+    work_dir = Path(tempfile.mkdtemp(prefix="cp_diff_"))
+
+    def _run(args, cwd=None, timeout=120):
+        r = subprocess.run(args, cwd=str(cwd) if cwd else None,
+                            capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+    async def _arun(args, cwd=None, timeout=120):
+        return await asyncio.to_thread(_run, args, cwd=cwd, timeout=timeout)
+
+    try:
+        # 1. Clonar remoto (shallow + sin blobs = rápido)
+        rc, out = await _arun(
+            ["git", "clone", "--depth", "1", "--filter=blob:none", "--branch", branch, auth_url, str(work_dir)],
+            timeout=180,
+        )
+        if rc != 0:
+            rc2, out2 = await _arun(["git", "clone", "--depth", "1", "--filter=blob:none", auth_url, str(work_dir)], timeout=180)
+            if rc2 != 0:
+                raise HTTPException(status_code=502, detail="No se pudo clonar el repositorio para comparar.")
+
+        # 2. Espejar el contenido local (mismos filtros que el push real)
+        ignore_patterns = shutil.ignore_patterns(
+            "__pycache__", "*.pyc", ".pytest_cache",
+            "node_modules", "build", ".cache",
+            ".env", ".env.local", ".env.production", ".env.development",
+            ".db_override", "backups", "uploads",
+            "cinema_data.json", "cinema_data.json.bak",
+            "*.log", ".DS_Store", "desktop_wheels",
+        )
+        root_dir = ROOT_DIR.parent
+        for d in ("backend", "frontend"):
+            src = root_dir / d
+            dst = work_dir / d
+            if src.exists():
+                if dst.exists():
+                    await asyncio.to_thread(shutil.rmtree, str(dst))
+                await asyncio.to_thread(shutil.copytree, str(src), str(dst), ignore=ignore_patterns)
+
+        excluded_root_dirs = {"backend", "frontend", ".git", "node_modules",
+                              "backups", "uploads", "memory", "test_reports",
+                              "tests", "repo", "__pycache__", ".cache", "desktop_wheels"}
+        for item in root_dir.iterdir():
+            if item.name in excluded_root_dirs or item.name.startswith(".env"):
+                continue
+            if item.name == "version.txt":
+                continue
+            if item.is_file():
+                try:
+                    shutil.copy2(str(item), str(work_dir / item.name))
+                except Exception:
+                    pass
+            elif item.is_dir() and item.name in {"scripts", "docs", ".github", "public"}:
+                dst_sub = work_dir / item.name
+                if dst_sub.exists():
+                    await asyncio.to_thread(shutil.rmtree, str(dst_sub))
+                await asyncio.to_thread(shutil.copytree, str(item), str(dst_sub), ignore=ignore_patterns)
+
+        # App de escritorio (app.py) y version.txt
+        standalone_src = ROOT_DIR / "standalone_app.py"
+        if standalone_src.exists():
+            try:
+                shutil.copy2(str(standalone_src), str(work_dir / "app.py"))
+            except Exception:
+                pass
+        try:
+            local_ver = await _read_local_version()
+            next_ver = await _compute_next_unified_version()
+            (work_dir / "version.txt").write_text(next_ver or local_ver or "", encoding="utf-8")
+        except Exception:
+            pass
+
+        # 3. git status --porcelain para el diff REAL
+        await _arun(["git", "add", "-A"], cwd=work_dir)
+        for forced in ("app.py", "version.txt"):
+            if (work_dir / forced).exists():
+                await _arun(["git", "add", "-f", forced], cwd=work_dir)
+        rc_st, status_out = await _arun(["git", "status", "--porcelain"], cwd=work_dir)
+
+        files = []
+        summary = {"added": 0, "modified": 0, "deleted": 0}
+        by_category = {}
+        MAX_FILES = 800
+        for line in status_out.split("\n"):
+            if not line.strip():
+                continue
+            code = line[:2]
+            rest = line[3:].strip()
+            # Renombrados: "old -> new"
+            if " -> " in rest:
+                rest = rest.split(" -> ", 1)[1]
+            rest = rest.strip().strip('"')
+            xy = code.replace(" ", "")
+            if "D" in xy:
+                status = "D"
+                summary["deleted"] += 1
+            elif "A" in xy or "?" in xy:
+                status = "A"
+                summary["added"] += 1
+            else:
+                status = "M"
+                summary["modified"] += 1
+
+            cat = _categorize_repo_path(rest)
+            bc = by_category.setdefault(cat, {"added": 0, "modified": 0, "deleted": 0, "total": 0})
+            bc["total"] += 1
+            bc["added" if status == "A" else "deleted" if status == "D" else "modified"] += 1
+
+            if len(files) < MAX_FILES:
+                size_bytes = 0
+                if status != "D":
+                    try:
+                        size_bytes = (work_dir / rest).stat().st_size
+                    except Exception:
+                        size_bytes = 0
+                files.append({"path": rest, "status": status, "category": cat, "size_bytes": size_bytes})
+
+        # Orden: primero por categoría, luego eliminados/modificados/nuevos, luego path
+        _st_order = {"D": 0, "M": 1, "A": 2}
+        files.sort(key=lambda f: (f["category"], _st_order.get(f["status"], 3), f["path"]))
+
+        changed = summary["added"] + summary["modified"] + summary["deleted"]
+        result = {
+            "ok": True,
+            "changed": changed,
+            "summary": summary,
+            "by_category": by_category,
+            "files": files,
+            "truncated": changed > MAX_FILES,
+            "remote_branch": branch,
+            "cached": False,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _push_diff_cache["data"] = result
+        _push_diff_cache["ts"] = _t.time()
+        return result
+    finally:
+        await asyncio.to_thread(shutil.rmtree, str(work_dir), ignore_errors=True)
+
+
+
 @api_router.post("/github/push-all")
 async def github_push_all(payload: dict = Body(default={})):
     """Lanza el push-all en background para evitar timeouts de Cloudflare (>100s).

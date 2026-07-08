@@ -127,6 +127,8 @@ export const githubPushAll = (message, version, versionName, include) =>
   api.post("/github/push-all", { message, version, version_name: versionName, include }).then(r => r.data);
 export const getGithubPushStatus = () => api.get("/github/push-status").then(r => r.data);
 export const getGithubPushPreview = () => api.get("/github/push-preview").then(r => r.data);
+export const getGithubPushDiff = (refresh = false) =>
+  api.get("/github/push-diff", { params: { refresh }, timeout: 180000 }).then(r => r.data);
 export const getGithubNextVersion = () => api.get("/github/next-version").then(r => r.data);
 export const getGithubStorage = () => api.get("/github/storage").then(r => r.data);
 export const triggerGithubBuildExe = (version) => api.post("/github/build-exe", version ? { version } : {}).then(r => r.data);

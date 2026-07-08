@@ -12,6 +12,7 @@ import {
   Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
   Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
+  GitCompare, FilePlus2, FilePenLine, FileMinus2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -29,7 +30,7 @@ import {
   deleteBackupFile, downloadBackupUrl, downloadBackupFileUrl, restoreBackup,
   getGithubConfig, saveGithubConfig, getAiContext, saveAiContext, resetAiContext,
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
-  githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview,
+  githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview, getGithubPushDiff,
   getGithubStorage, deleteGithubBuilds, triggerGithubBuildExe,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
@@ -235,6 +236,12 @@ export default function DatabasePage() {
   const [ghPreview, setGhPreview] = useState(null); // { categories, totals_defaults }
   const [ghPreviewLoading, setGhPreviewLoading] = useState(false);
   const [ghInclude, setGhInclude] = useState({}); // { backend: true, ... }
+  // Diff REAL contra el repositorio remoto (vista "Ver cambios detallados")
+  const [ghDiff, setGhDiff] = useState(null); // { changed, summary, by_category, files, ... }
+  const [ghDiffLoading, setGhDiffLoading] = useState(false);
+  const [ghDiffError, setGhDiffError] = useState("");
+  const [ghDiffOpen, setGhDiffOpen] = useState(false);
+  const [ghDiffCat, setGhDiffCat] = useState("all"); // filtro por categoría en la lista
   const [diagnostic, setDiagnostic] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagFixingId, setDiagFixingId] = useState("");
@@ -568,6 +575,11 @@ export default function DatabasePage() {
     setGhPreview(null);
     setGhPreviewLoading(true);
     setGhSelectModalOpen(true);
+    // Reiniciar el diff detallado cada vez que se abre el modal
+    setGhDiff(null);
+    setGhDiffError("");
+    setGhDiffOpen(false);
+    setGhDiffCat("all");
     // Cargar info de versión en paralelo para mostrar en el modal
     setGhPushVersionInfo(null);
     setGhPushVersionLoading(true);
@@ -578,15 +590,43 @@ export default function DatabasePage() {
     try {
       const prev = await getGithubPushPreview();
       setGhPreview(prev);
-      // Inicializar `include` con los defaults del servidor
+      // Inicializar `include` con los defaults del servidor (fallback mientras
+      // se compara el diff; luego se autoselecciona según cambios reales).
       const initial = {};
       (prev?.categories || []).forEach(c => { initial[c.id] = !!c.default; });
       setGhInclude(initial);
+      // Autocargar el diff y autoseleccionar SOLO las categorías con cambios.
+      loadGhDiff(false, prev?.categories || []);
     } catch (e) {
       toast({ title: "No se pudo cargar la lista de archivos", description: e?.response?.data?.detail || String(e), variant: "destructive" });
       setGhSelectModalOpen(false);
     } finally {
       setGhPreviewLoading(false);
+    }
+  };
+
+  // Cargar el diff REAL contra el repo remoto (bajo demanda al pulsar "Ver cambios")
+  // Si se pasa `autoSelectFrom` (lista de categorías), autoselecciona SOLO las que
+  // tienen cambios reales y deja el resto desmarcadas.
+  const loadGhDiff = async (refresh = false, autoSelectFrom = null) => {
+    setGhDiffLoading(true);
+    setGhDiffError("");
+    setGhDiffOpen(true);
+    try {
+      const data = await getGithubPushDiff(refresh);
+      setGhDiff(data);
+      if (autoSelectFrom && Array.isArray(autoSelectFrom)) {
+        const sel = {};
+        autoSelectFrom.forEach(c => {
+          const bc = data?.by_category?.[c.id];
+          sel[c.id] = !!(bc && bc.total > 0);
+        });
+        setGhInclude(sel);
+      }
+    } catch (e) {
+      setGhDiffError(e?.response?.data?.detail || "No se pudieron comparar los cambios con GitHub.");
+    } finally {
+      setGhDiffLoading(false);
     }
   };
 
@@ -2906,26 +2946,24 @@ export default function DatabasePage() {
                   {/* Comparación de versiones dinámica */}
                   <motion.div
                     initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-                    className="mt-4 grid grid-cols-3 gap-2"
+                    className="mt-4 grid grid-cols-3 gap-2 items-stretch"
                     data-testid="github-select-version-compare"
                   >
-                    <div className="bg-white/10 rounded-xl p-2.5 text-center backdrop-blur-sm">
+                    <div className="flex flex-col justify-center bg-white/10 border border-white/15 rounded-xl p-2.5 text-center backdrop-blur-sm min-h-[54px]">
                       <p className="text-[9px] font-black uppercase tracking-wider text-white/70 mb-0.5">Local</p>
-                      <p className="text-sm font-black font-mono">
+                      <p className="text-sm font-black font-mono truncate">
                         {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.current_local || "?"}`}
                       </p>
                     </div>
-                    <div className="bg-white/10 rounded-xl p-2.5 text-center backdrop-blur-sm relative">
+                    <div className="flex flex-col justify-center bg-white/10 border border-white/15 rounded-xl p-2.5 text-center backdrop-blur-sm min-h-[54px]">
                       <p className="text-[9px] font-black uppercase tracking-wider text-white/70 mb-0.5">GitHub</p>
-                      <p className="text-sm font-black font-mono">
+                      <p className="text-sm font-black font-mono truncate">
                         {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.current_remote || "?"}`}
                       </p>
-                      <ArrowRight size={12} className="absolute -left-2 top-1/2 -translate-y-1/2 text-white/60" />
-                      <ArrowRight size={12} className="absolute -right-2 top-1/2 -translate-y-1/2 text-white/60" />
                     </div>
-                    <div className="bg-emerald-400/30 border border-emerald-300/40 rounded-xl p-2.5 text-center backdrop-blur-sm">
+                    <div className="flex flex-col justify-center bg-emerald-400/25 border border-emerald-300/50 rounded-xl p-2.5 text-center backdrop-blur-sm min-h-[54px]">
                       <p className="text-[9px] font-black uppercase tracking-wider text-white mb-0.5">Próxima</p>
-                      <p className="text-sm font-black font-mono text-white">
+                      <p className="text-sm font-black font-mono text-white truncate">
                         {ghPushVersionLoading ? "…" : `v${ghPushVersionInfo?.next_auto_version || "?"}`}
                       </p>
                     </div>
@@ -3003,6 +3041,24 @@ export default function DatabasePage() {
                       )}
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (!ghDiff?.by_category) { loadGhDiff(false, ghPreview.categories); return; }
+                          const sel = {};
+                          ghPreview.categories.forEach(c => {
+                            const bc = ghDiff.by_category[c.id];
+                            sel[c.id] = !!(bc && bc.total > 0);
+                          });
+                          setGhInclude(sel);
+                        }}
+                        disabled={ghDiffLoading}
+                        title="Selecciona automáticamente solo las categorías con cambios reales"
+                        data-testid="gh-select-changed-btn"
+                        className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {ghDiffLoading ? <Loader2 size={10} className="animate-spin" /> : <GitCompare size={10} />}
+                        Con cambios
+                      </button>
                       <button
                         onClick={() => {
                           const all = {};
@@ -3135,20 +3191,195 @@ export default function DatabasePage() {
                                 )}
                               </div>
                             )}
+                            {/* Badges de cambios REALES de esta categoría (si ya se comparó) */}
+                            {ghDiff?.by_category && (() => {
+                              const bc = ghDiff.by_category[c.id];
+                              if (!bc || bc.total === 0) {
+                                return (
+                                  <div className="mt-1.5 text-[10px] font-bold text-slate-400" data-testid={`gh-diff-cat-none-${c.id}`}>
+                                    Sin cambios
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="flex items-center gap-1.5 mt-1.5" data-testid={`gh-diff-cat-badges-${c.id}`}>
+                                  {bc.added > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">
+                                      <FilePlus2 size={9} /> {bc.added}
+                                    </span>
+                                  )}
+                                  {bc.modified > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700">
+                                      <FilePenLine size={9} /> {bc.modified}
+                                    </span>
+                                  )}
+                                  {bc.deleted > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700">
+                                      <FileMinus2 size={9} /> {bc.deleted}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
-                          {checked && (
-                            <motion.div
-                              initial={{ scale: 0, rotate: -90 }}
-                              animate={{ scale: 1, rotate: 0 }}
-                              transition={{ type: "spring", stiffness: 300, damping: 15 }}
-                              className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${c.slow ? "bg-amber-500" : "bg-indigo-500"}`}
-                            >
-                              <CheckCircle size={14} className="text-white" />
-                            </motion.div>
-                          )}
+                          <div className="shrink-0 self-center">
+                            {checked ? (
+                              <motion.div
+                                initial={{ scale: 0, rotate: -90 }}
+                                animate={{ scale: 1, rotate: 0 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 15 }}
+                                className={`w-6 h-6 rounded-full flex items-center justify-center ${c.slow ? "bg-amber-500" : "bg-indigo-500"}`}
+                              >
+                                <CheckCircle size={14} className="text-white" />
+                              </motion.div>
+                            ) : (
+                              <div className="w-6 h-6 rounded-full border-2 border-slate-200" />
+                            )}
+                          </div>
                         </motion.label>
                       );
                     })}
+                  </motion.div>
+                )}
+
+                {/* ── Ver cambios detallados: diff REAL contra el repo remoto ── */}
+                {!ghPreviewLoading && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                    className="mt-3 rounded-2xl border border-slate-200 overflow-hidden"
+                    data-testid="github-diff-section"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => (ghDiff || ghDiffError ? setGhDiffOpen(o => !o) : loadGhDiff(false))}
+                      disabled={ghDiffLoading}
+                      data-testid="github-diff-toggle-btn"
+                      className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors disabled:opacity-60"
+                    >
+                      <span className="flex items-center gap-2 text-sm font-black text-slate-800">
+                        <GitCompare size={16} className="text-indigo-600" />
+                        Ver cambios reales vs GitHub
+                        {ghDiff && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                            {ghDiff.changed} {ghDiff.changed === 1 ? "cambio" : "cambios"}
+                          </span>
+                        )}
+                      </span>
+                      {ghDiffLoading
+                        ? <Loader2 size={16} className="animate-spin text-indigo-500" />
+                        : <ChevronDown size={16} className={`text-slate-400 transition-transform ${ghDiffOpen ? "rotate-180" : ""}`} />}
+                    </button>
+
+                    <AnimatePresence>
+                      {ghDiffOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-4 py-3 bg-white border-t border-slate-100">
+                            {ghDiffLoading && (
+                              <div className="flex flex-col items-center justify-center py-6 gap-2" data-testid="github-diff-loading">
+                                <Loader2 className="animate-spin text-indigo-400" size={22} />
+                                <span className="text-xs text-slate-500 font-semibold">Comparando tu código con el repositorio…</span>
+                                <span className="text-[10px] text-slate-400">Clonando la versión actual de GitHub</span>
+                              </div>
+                            )}
+
+                            {!ghDiffLoading && ghDiffError && (
+                              <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100" data-testid="github-diff-error">
+                                <AlertCircle size={14} className="text-rose-600 mt-0.5 shrink-0" />
+                                <div className="flex-1">
+                                  <p className="text-[11px] text-rose-800 leading-snug">{ghDiffError}</p>
+                                  <button onClick={() => loadGhDiff(true)} className="mt-1.5 text-[11px] font-bold text-rose-700 underline">Reintentar</button>
+                                </div>
+                              </div>
+                            )}
+
+                            {!ghDiffLoading && !ghDiffError && ghDiff && (
+                              <div data-testid="github-diff-result">
+                                {/* Resumen global */}
+                                <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700">
+                                      <FilePlus2 size={11} /> {ghDiff.summary.added} nuevos
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-1 rounded-lg bg-amber-100 text-amber-700">
+                                      <FilePenLine size={11} /> {ghDiff.summary.modified} modificados
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-1 rounded-lg bg-rose-100 text-rose-700">
+                                      <FileMinus2 size={11} /> {ghDiff.summary.deleted} eliminados
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => loadGhDiff(true)}
+                                    data-testid="github-diff-refresh-btn"
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors"
+                                  >
+                                    <RefreshCw size={11} /> Actualizar
+                                  </button>
+                                </div>
+
+                                {ghDiff.changed === 0 ? (
+                                  <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100" data-testid="github-diff-clean">
+                                    <CheckCircle size={15} className="text-emerald-600 shrink-0" />
+                                    <p className="text-[11px] text-emerald-800 font-semibold">Tu código local es idéntico al repositorio. No hay nada nuevo que subir.</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {/* Filtro por categoría */}
+                                    <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                                      {["all", ...Object.keys(ghDiff.by_category)].map((cid) => {
+                                        const label = cid === "all"
+                                          ? `Todos (${ghDiff.changed})`
+                                          : `${(ghPreview?.categories?.find(x => x.id === cid)?.label) || cid} (${ghDiff.by_category[cid]?.total || 0})`;
+                                        const active = ghDiffCat === cid;
+                                        return (
+                                          <button
+                                            key={cid}
+                                            onClick={() => setGhDiffCat(cid)}
+                                            data-testid={`github-diff-filter-${cid}`}
+                                            className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${active ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                                          >
+                                            {label}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* Lista de archivos */}
+                                    <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50" data-testid="github-diff-file-list">
+                                      {ghDiff.files
+                                        .filter(f => ghDiffCat === "all" || f.category === ghDiffCat)
+                                        .map((f, i) => {
+                                          const st = {
+                                            A: { icon: <FilePlus2 size={12} />, color: "text-emerald-600", bg: "bg-emerald-50", tag: "Nuevo" },
+                                            M: { icon: <FilePenLine size={12} />, color: "text-amber-600", bg: "bg-amber-50", tag: "Modificado" },
+                                            D: { icon: <FileMinus2 size={12} />, color: "text-rose-600", bg: "bg-rose-50", tag: "Eliminado" },
+                                          }[f.status] || { icon: <FileText size={12} />, color: "text-slate-500", bg: "bg-slate-50", tag: "" };
+                                          const kb = f.size_bytes ? (f.size_bytes / 1024).toFixed(0) : 0;
+                                          return (
+                                            <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-50" data-testid="github-diff-file-row">
+                                              <span className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${st.bg} ${st.color}`}>{st.icon}</span>
+                                              <span className="flex-1 min-w-0 text-[11px] font-mono text-slate-700 truncate" title={f.path}>{f.path}</span>
+                                              {f.status !== "D" && f.size_bytes > 0 && (
+                                                <span className="text-[9px] font-mono text-slate-400 shrink-0">{kb} KB</span>
+                                              )}
+                                              <span className={`text-[9px] font-black ${st.color} shrink-0`}>{st.tag}</span>
+                                            </div>
+                                          );
+                                        })}
+                                    </div>
+                                    {ghDiff.truncated && (
+                                      <p className="mt-1.5 text-[10px] text-slate-400 text-center">Mostrando los primeros archivos · hay más cambios de los que caben aquí.</p>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )}
 
