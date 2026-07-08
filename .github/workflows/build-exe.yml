@@ -93,8 +93,18 @@ jobs:
         shell: pwsh
         run: |
           # Copiar el build del frontend al lado del standalone_app para que PyInstaller lo empaquete
+          if (-not (Test-Path frontend/build/index.html)) {
+            throw "❌ frontend/build/index.html no existe. ¿Falló 'yarn build'?"
+          }
           New-Item -ItemType Directory -Force -Path backend/_bundle | Out-Null
+          # Copy-Item con /* copia el CONTENIDO, no la carpeta. Usamos rm previo + copia entera.
+          if (Test-Path backend/_bundle/build) { Remove-Item -Recurse -Force backend/_bundle/build }
           Copy-Item -Recurse -Force frontend/build backend/_bundle/build
+          if (-not (Test-Path backend/_bundle/build/index.html)) {
+            throw "❌ backend/_bundle/build/index.html no existe tras la copia."
+          }
+          Write-Host "✓ Payload preparado. Contenido de backend/_bundle/build:"
+          Get-ChildItem backend/_bundle/build | Select-Object -First 20 Name, Length
           # Copiar assets extra que espera el runtime (ai_context, versión, temas)
           if (Test-Path backend/ai_context_default.py) { Copy-Item backend/ai_context_default.py backend/_bundle/ }
           if (Test-Path version.txt) { Copy-Item version.txt backend/_bundle/ }
@@ -133,6 +143,24 @@ jobs:
           ) + $iconArg + @("backend/standalone_app.py")
           pyinstaller @pyiArgs
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló con exit $LASTEXITCODE" }
+
+      - name: Smoke test .exe (verify build/index.html is bundled)
+        shell: pwsh
+        run: |
+          # Ejecutamos el .exe con PYINSTALLER_STRICT_UNPACK y stopamos tras 6s.
+          # Verificamos que en el _MEI temp exista build/index.html.
+          $exe = "dist/CinemaProductions.exe"
+          if (-not (Test-Path $exe)) { throw "No hay .exe para smoke test" }
+          $env:CP_NO_BROWSER = "1"
+          $p = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 6
+          $meiDirs = Get-ChildItem "$env:TEMP" -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue |
+                     Where-Object { Test-Path (Join-Path $_.FullName "build/index.html") }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          if (-not $meiDirs) {
+            throw "❌ Smoke test falló: ningún _MEI* contiene build/index.html. Revisa --add-data."
+          }
+          Write-Host "✓ Smoke test OK — build/index.html empaquetado en $($meiDirs[0].FullName)"
 
       - name: Verify .exe & compute SHA256
         id: hash

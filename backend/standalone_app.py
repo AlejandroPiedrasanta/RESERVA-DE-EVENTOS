@@ -28,13 +28,23 @@ import webbrowser
 import threading
 import time
 import asyncio
+import sys
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 
+# ROOT_DIR: dónde vive el módulo (para .env, cinema_data.json, backups, etc.)
 ROOT_DIR = Path(__file__).parent
+
+# BUNDLE_DIR: dónde PyInstaller extrae los recursos --add-data (build/, themes/, ...).
+# En modo frozen (--onefile) es sys._MEIPASS (temp dir _MEI*). En dev = ROOT_DIR.
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    BUNDLE_DIR = ROOT_DIR
+
 load_dotenv(ROOT_DIR / '.env')
 
 DB_NAME = os.environ.get('DB_NAME', 'cinema_productions')
@@ -3850,9 +3860,46 @@ def _inject_local_url(html: str) -> str:
     return html.replace("</head>", _LOCAL_INJECT + "</head>", 1)
 
 
-BUILD_DIR = ROOT_DIR / "build"
-if BUILD_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(BUILD_DIR / "static")), name="static")
+def _resolve_build_dir() -> Optional[Path]:
+    """Localiza la carpeta build/ del frontend en runtime.
+
+    Prioridades:
+      1. BUNDLE_DIR/build      → PyInstaller onefile (sys._MEIPASS/build)
+      2. ROOT_DIR/build        → ejecución en dev / desde source
+      3. ROOT_DIR.parent/build → cuando standalone_app está en backend/ y
+                                 el build vive un nivel arriba (repo layout).
+    Devuelve el primer path que contenga index.html; None si ninguno.
+    """
+    candidates = [
+        BUNDLE_DIR / "build",
+        ROOT_DIR / "build",
+        ROOT_DIR.parent / "build",
+        ROOT_DIR.parent / "frontend" / "build",
+    ]
+    seen = set()
+    for c in candidates:
+        try:
+            c_res = c.resolve()
+        except Exception:
+            continue
+        if c_res in seen:
+            continue
+        seen.add(c_res)
+        if (c_res / "index.html").is_file():
+            logging.getLogger(__name__).info("Frontend build dir: %s", c_res)
+            return c_res
+    logging.getLogger(__name__).warning(
+        "No se encontró build/index.html en ninguna ubicación esperada: %s",
+        [str(c) for c in candidates],
+    )
+    return None
+
+
+BUILD_DIR = _resolve_build_dir()
+if BUILD_DIR is not None:
+    _static_dir = BUILD_DIR / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/favicon.ico")
     async def favicon():
@@ -3882,6 +3929,28 @@ if BUILD_DIR.exists():
         html_path = BUILD_DIR / "index.html"
         html = _inject_local_url(html_path.read_text(encoding="utf-8"))
         return Response(content=html, media_type="text/html; charset=utf-8")
+else:
+    # Sin frontend build: exponer una landing mínima para no romper el navegador.
+    _MISSING_BUILD_HTML = (
+        "<!doctype html><meta charset='utf-8'>"
+        "<title>Cinema Productions</title>"
+        "<style>body{font-family:system-ui;padding:40px;max-width:640px;margin:auto;"
+        "color:#222;background:#faf7ff}code{background:#eee;padding:2px 6px;border-radius:4px}</style>"
+        "<h1>Frontend no empaquetado</h1>"
+        "<p>El backend arrancó, pero <code>build/index.html</code> no está en el .exe. "
+        "Reconstruye el ejecutable asegurándote de que <code>frontend/build/</code> se "
+        "generó con <code>yarn build</code> antes de PyInstaller y que "
+        "<code>--add-data \"backend/_bundle/build;build\"</code> se pasó correctamente.</p>"
+        "<p>API disponible en <a href='/api/'>/api/</a>.</p>"
+    )
+
+    @app.get("/")
+    async def serve_index_missing():
+        return Response(content=_MISSING_BUILD_HTML, media_type="text/html; charset=utf-8")
+
+    @app.get("/favicon.ico")
+    async def favicon_missing():
+        return Response(status_code=204)
 
 
 # ─── Entry point ─────────────────────────────────────────
