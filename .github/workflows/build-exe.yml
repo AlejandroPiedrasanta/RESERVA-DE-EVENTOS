@@ -177,7 +177,13 @@ jobs:
           # Copiar el .iss del repo a dist/ para que las rutas relativas apunten a dist/CinemaProductions.exe
           if (-not (Test-Path build/installer.iss)) { throw "No existe build/installer.iss en el repo" }
           Copy-Item build/installer.iss dist/installer.iss -Force
-          Write-Host "✓ installer.iss copiado a dist/"
+          # Copiar el MISMO ícono del .exe (favicon.ico generado desde logo.png)
+          # para que el instalador use el mismo logo. Si faltara, generarlo aquí.
+          if (-not (Test-Path frontend/public/favicon.ico)) {
+            python -c "from PIL import Image; im=Image.open('frontend/public/logo.png').convert('RGBA'); w,h=im.size; s=max(w,h); c=Image.new('RGBA',(s,s),(0,0,0,0)); c.paste(im,((s-w)//2,(s-h)//2)); c.save('frontend/public/favicon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          }
+          Copy-Item frontend/public/favicon.ico dist/favicon.ico -Force
+          Write-Host "✓ installer.iss + favicon.ico copiados a dist/"
 
       - name: Build installer with Inno Setup
         shell: pwsh

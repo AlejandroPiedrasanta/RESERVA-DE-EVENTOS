@@ -2066,6 +2066,200 @@ async def dismiss_update():
     return {"message": "OK"}
 
 
+# ── AUTO-UPDATE (binario compilado) ─────────────────────────────────────────
+# Copiar código fuente sobre un binario compilado NO actualiza nada (el código
+# vive DENTRO del .exe/binario) y deja la instalación en estado inconsistente
+# ("se arruina el exe"). Para binarios congelados SIEMPRE hay que reemplazar el
+# propio binario descargándolo desde GitHub Releases.
+
+def _current_asset_name() -> str:
+    """Nombre del asset de release para este SO/arquitectura."""
+    import platform
+    sysname = platform.system()
+    machine = (platform.machine() or "").lower()
+    if sysname == "Windows":
+        return "CinemaProductions.exe"
+    if sysname == "Darwin":
+        return "CinemaProductions-macos-arm64"
+    if machine in ("arm64", "aarch64"):
+        return "CinemaProductions-linux-arm64"
+    return "CinemaProductions-linux-x86_64"
+
+
+async def _find_release_asset(asset_name: str) -> dict:
+    """Devuelve {tag, version, url, size} del release MÁS RECIENTE (incluye
+    prereleases como 'latest-exe') que contenga el asset indicado."""
+    import urllib.request, json as _json
+    cfg = await _get_github_cfg()
+    repo_url = cfg.get("repo_url") or DEFAULT_GITHUB_REPO
+    token = (cfg.get("token") or "").strip()
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        return {}
+    headers = {"User-Agent": "cinema-productions-desktop",
+               "Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def _get():
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=30",
+            headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return _json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+    try:
+        releases = await asyncio.to_thread(_get)
+    except Exception as e:
+        logger.warning(f"No se pudieron listar releases de GitHub: {e}")
+        return {}
+    if not isinstance(releases, list):
+        return {}
+    for rel in releases:
+        for asset in (rel.get("assets") or []):
+            if asset.get("name") == asset_name and asset.get("browser_download_url"):
+                tag = rel.get("tag_name") or ""
+                return {"tag": tag,
+                        "version": tag.lstrip("v"),
+                        "url": asset["browser_download_url"],
+                        "size": asset.get("size", 0)}
+    return {}
+
+
+def _spawn_swap_helper(exe_path: Path, new_path: Path):
+    """Lanza un proceso externo independiente que espera a que ESTE proceso
+    libere el binario, lo reemplaza por el nuevo y relanza la app. En Windows
+    no se puede sobrescribir un .exe en ejecución: el helper hace polling hasta
+    que el archivo se libera (al salir el proceso)."""
+    import subprocess, os as _os, stat as _stat, platform
+    install_dir = exe_path.parent
+    if platform.system() == "Windows":
+        bat = install_dir / "_cp_update.bat"
+        old = str(exe_path)
+        new = str(new_path)
+        bak = old + ".bak"
+        script = (
+            "@echo off\r\n"
+            "setlocal\r\n"
+            ":waitloop\r\n"
+            "ping -n 2 127.0.0.1 >nul\r\n"
+            f'del "{bak}" >nul 2>&1\r\n'
+            f'move /y "{old}" "{bak}" >nul 2>&1\r\n'
+            f'if exist "{old}" goto waitloop\r\n'
+            f'move /y "{new}" "{old}" >nul 2>&1\r\n'
+            f'del "{bak}" >nul 2>&1\r\n'
+            f'start "" "{old}"\r\n'
+            '(goto) 2>nul & del "%~f0"\r\n'
+        )
+        bat.write_text(script, encoding="ascii")
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        subprocess.Popen(["cmd", "/c", str(bat)], cwd=str(install_dir),
+                         creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                         close_fds=True)
+    else:
+        sh = install_dir / "_cp_update.sh"
+        old = str(exe_path)
+        new = str(new_path)
+        pid = _os.getpid()
+        script = (
+            "#!/usr/bin/env bash\n"
+            f"PID={pid}\n"
+            'while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done\n'
+            "sleep 0.5\n"
+            f'mv -f "{new}" "{old}"\n'
+            f'chmod +x "{old}"\n'
+            f'nohup "{old}" >/dev/null 2>&1 &\n'
+            'rm -- "$0"\n'
+        )
+        sh.write_text(script)
+        sh.chmod(sh.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+        subprocess.Popen(["/usr/bin/env", "bash", str(sh)], cwd=str(install_dir),
+                         start_new_session=True, close_fds=True)
+
+
+async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False):
+    """Actualiza un binario compilado descargando el asset correspondiente desde
+    GitHub Releases y programando el swap + relanzamiento. Los datos del usuario
+    (.env, cinema_data.json, backups/, uploads/) NO se tocan: viven fuera del
+    binario."""
+    import sys as _sys, os as _os, shutil, threading, time as _time, urllib.request
+    exe_path = Path(_sys.executable).resolve()
+    install_dir = exe_path.parent
+    asset_name = _current_asset_name()
+
+    rel = await _find_release_asset(asset_name)
+    if not rel or not rel.get("url"):
+        raise HTTPException(status_code=404,
+            detail=f"No se encontró el binario '{asset_name}' en las releases de GitHub. "
+                   f"Verifica que el workflow 'Build Windows .exe' haya publicado el asset.")
+
+    # La versión objetivo la marca version.txt del repo (fuente de verdad del build)
+    gh = await _fetch_github_version()
+    new_version = gh.get("version", "") or rel.get("version", "")
+    if new_version and not _is_newer(new_version, _local_version) and not force:
+        return {"success": True, "restarted": False,
+                "old_version": _local_version, "new_version": new_version,
+                "message": "Ya estás en la última versión"}
+
+    new_path = install_dir / (exe_path.name + ".new")
+    cfg = await _get_github_cfg()
+    token = (cfg.get("token") or "").strip()
+    dl_headers = {"User-Agent": "cinema-productions-desktop",
+                  "Accept": "application/octet-stream"}
+    if token:
+        dl_headers["Authorization"] = f"Bearer {token}"
+
+    def _download():
+        req = urllib.request.Request(rel["url"], headers=dl_headers)
+        with urllib.request.urlopen(req, timeout=600) as resp, open(new_path, "wb") as f:
+            shutil.copyfileobj(resp, f)
+
+    try:
+        if new_path.exists():
+            new_path.unlink()
+        await asyncio.to_thread(_download)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Descarga del binario falló: {e}")
+
+    # Validación mínima: un binario válido pesa varios MB
+    try:
+        if new_path.stat().st_size < 1_000_000:
+            try:
+                new_path.unlink()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500,
+                detail="El binario descargado es inválido (demasiado pequeño).")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    if dry_run:
+        try:
+            new_path.unlink()
+        except Exception:
+            pass
+        return {"success": True, "restarted": False, "dry_run": True,
+                "old_version": _local_version, "new_version": new_version,
+                "asset": asset_name, "install_dir": str(install_dir),
+                "message": "DRY RUN — binario descargado y verificado; no se aplicó el swap."}
+
+    _spawn_swap_helper(exe_path, new_path)
+
+    def _shutdown():
+        _time.sleep(1.5)
+        _os._exit(0)
+    threading.Thread(target=_shutdown, daemon=True).start()
+
+    return {"success": True, "restarted": True, "is_desktop": True,
+            "files_updated": 1,
+            "old_version": _local_version, "new_version": new_version,
+            "asset": asset_name, "install_dir": str(install_dir),
+            "message": "Descarga completa. La app se cerrará y se actualizará automáticamente en unos segundos."}
+
+
 # ── AUTO-UPDATE: descarga, aplica y reinicia el ejecutable ──────────────────
 @api_router.post("/updates/apply-and-restart")
 async def apply_update_and_restart(payload: dict = Body(default={})):
@@ -2086,14 +2280,21 @@ async def apply_update_and_restart(payload: dict = Body(default={})):
     debe usar la contraseña guardada en security_config.zip_password.
     """
     import sys, subprocess, zipfile, shutil, tempfile, threading, time
+
+    dry_run = bool(payload.get("dry_run", False))
+    force = bool(payload.get("force", False))
+
+    # Binario compilado (.exe / ejecutable): reemplazar el propio binario desde
+    # GitHub Releases en lugar de descomprimir código fuente encima (que no
+    # actualiza nada y arruina la instalación).
+    if getattr(sys, 'frozen', False):
+        return await _apply_binary_update_frozen(dry_run=dry_run, force=force)
+
     try:
         import pyzipper
         _has_pyzipper = True
     except ImportError:
         _has_pyzipper = False
-
-    dry_run = bool(payload.get("dry_run", False))
-    force = bool(payload.get("force", False))
 
     # 1) Últimas update en la BD
     latest = await db.app_updates.find_one({"is_latest": True}, sort=[("created_at", -1)])
@@ -2655,6 +2856,14 @@ async def apply_github_update(payload: dict = Body(default={})):
     owner, repo = _parse_github_url(repo_url)
     if not owner:
         raise HTTPException(status_code=400, detail=f"URL de GitHub inválida: {repo_url}")
+
+    # Binario compilado (.exe / ejecutable): NO se puede actualizar copiando
+    # código fuente encima (el código vive dentro del binario, así que "no
+    # recibe la actualización" y la instalación queda inconsistente). Se
+    # descarga y reemplaza el binario desde GitHub Releases.
+    if getattr(sys, 'frozen', False):
+        return await _apply_binary_update_frozen(
+            dry_run=dry_run, force=bool(payload.get("force", False)))
 
     # 1) Detectar carpeta de instalación
     if getattr(sys, 'frozen', False):
