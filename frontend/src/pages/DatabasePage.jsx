@@ -160,6 +160,10 @@ export default function DatabasePage() {
   const [unifiedTab, setUnifiedTab] = useState("conn");
   const [clearLoading, setClearLoading] = useState(false);
 
+  // Unified "Soporte avanzado" internal tabs: "publish" | "desktop" | "storage" | "tools"
+  const [supportTab, setSupportTab] = useState("publish");
+  const [copiedRepo, setCopiedRepo] = useState(false);
+
   // ── Soporte avanzado (antes GitHub) — bloqueado por contraseña de fábrica ──
   const [soporteUnlocked, setSoporteUnlocked] = useState(false);
   const [pwdModalOpen, setPwdModalOpen] = useState(false);
@@ -420,11 +424,32 @@ export default function DatabasePage() {
 
   // Cargar almacenamiento del repo al abrir Soporte avanzado (una vez)
   useEffect(() => {
-    if (soporteUnlocked && openBlocks.github && !storage && !storageLoading) {
+    if (soporteUnlocked && openBlocks.github && supportTab === "storage" && !storage && !storageLoading) {
       loadStorage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soporteUnlocked, openBlocks.github]);
+  }, [soporteUnlocked, openBlocks.github, supportTab]);
+
+  // Cargar diagnóstico automáticamente al abrir la pestaña "Herramientas"
+  useEffect(() => {
+    if (soporteUnlocked && openBlocks.github && supportTab === "tools" && !diagnostic && !diagLoading) {
+      loadDiagnostic();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soporteUnlocked, openBlocks.github, supportTab]);
+
+  // Helper: copiar URL del repositorio al portapapeles
+  const handleCopyRepoUrl = async () => {
+    if (!ghConfig.repo_url) return;
+    try {
+      await navigator.clipboard.writeText(ghConfig.repo_url);
+      setCopiedRepo(true);
+      toast({ title: "URL copiada al portapapeles" });
+      setTimeout(() => setCopiedRepo(false), 1600);
+    } catch {
+      toast({ title: "No se pudo copiar", variant: "destructive" });
+    }
+  };
 
   const loadAll = () => { loadDbStats(); loadBackupHistory(); loadCleanupPreview(); loadDbUpdates(); loadGithubConfig(); };
 
@@ -1974,7 +1999,7 @@ export default function DatabasePage() {
             <CollapseBody open={openBlocks.github && soporteUnlocked}>
               <div className="p-4 space-y-3">
 
-                {/* ── Conectar con GitHub (1 clic) ── */}
+                {/* ── Encabezado unificado: cuenta conectada / conectar ── */}
                 <div className={`rounded-2xl border p-3 ${ghConfig.username ? "bg-emerald-50/70 border-emerald-200" : "bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700 text-white"}`}>
                   {ghConfig.username ? (
                     <div className="flex items-center gap-3">
@@ -1990,9 +2015,28 @@ export default function DatabasePage() {
                           <UserCheck size={13} className="text-emerald-600" />
                           <p className="text-sm font-black text-emerald-800 truncate">@{ghConfig.username}</p>
                         </div>
-                        <p className="text-[10px] text-emerald-700/70">
-                          {ghConfig.connected_at ? `Conectado ${new Date(ghConfig.connected_at).toLocaleString("es-GT")}` : "Cuenta activa"}
-                        </p>
+                        {ghConfig.repo_url && (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <p className="text-[10px] text-emerald-700/80 font-mono truncate">
+                              {ghConfig.repo_url.replace(/^https?:\/\/github\.com\//, "")}
+                            </p>
+                            <button
+                              onClick={handleCopyRepoUrl}
+                              title="Copiar URL"
+                              className="text-emerald-600/60 hover:text-emerald-700 transition-colors shrink-0"
+                            >
+                              {copiedRepo ? <CheckCircle size={10} /> : <Copy size={10} />}
+                            </button>
+                            <a
+                              href={ghConfig.repo_url}
+                              target="_blank" rel="noopener noreferrer"
+                              title="Abrir en GitHub"
+                              className="text-emerald-600/60 hover:text-emerald-700 transition-colors shrink-0"
+                            >
+                              <ExternalLink size={10} />
+                            </a>
+                          </div>
+                        )}
                       </div>
                       <motion.button
                         whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
@@ -2010,7 +2054,7 @@ export default function DatabasePage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-black">Conecta tu cuenta de GitHub</p>
-                        <p className="text-[11px] text-white/60 mt-0.5">Sube cambios y guarda backups directo al repositorio</p>
+                        <p className="text-[11px] text-white/60 mt-0.5">Sube cambios, publica versiones y compila la app de escritorio</p>
                       </div>
                       <motion.button
                         whileHover={{ scale: 1.04, y: -1 }} whileTap={{ scale: 0.96 }}
@@ -2024,364 +2068,587 @@ export default function DatabasePage() {
                   )}
                 </div>
 
-                {/* URL del repositorio */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-black text-slate-600 flex items-center gap-1.5">
-                    <Link2 size={12} /> URL del repositorio GitHub
-                  </label>
-                  <input
-                    type="text"
-                    value={ghRepoInput}
-                    onChange={(e) => setGhRepoInput(e.target.value)}
-                    placeholder="https://github.com/usuario/repositorio"
-                    data-testid="github-repo-url-input"
-                    className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition-all"
-                  />
-                </div>
-
-                {/* Estado */}
-                {ghConfig.repo_url && (
-                  <div className="bg-white/60 rounded-2xl p-3 border border-slate-200/60 space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 font-semibold">Último SHA local</span>
-                      <span className="font-mono text-slate-800 font-bold">{ghConfig.last_commit_sha ? ghConfig.last_commit_sha.slice(0, 7) : "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 font-semibold">Última verificación</span>
-                      <span className="text-slate-700 font-medium">{ghConfig.last_check_at ? new Date(ghConfig.last_check_at).toLocaleString("es-GT") : "Nunca"}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Botones: Guardar config + Push all */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <motion.button
-                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={handleSaveGithub} disabled={ghSaving}
-                    data-testid="github-save-config-btn"
-                    className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all disabled:opacity-60"
-                  >
-                    {ghSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    Guardar configuración
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={handlePushAllToGithub}
-                    disabled={ghPushing || !ghConfig.username}
-                    data-testid="github-push-all-btn"
-                    title={!ghConfig.username ? "Conecta tu cuenta de GitHub primero" : "Sube todos los cambios al repositorio"}
-                    className={`flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold transition-all disabled:opacity-60 ${
-                      ghConfig.username
-                        ? "text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-lg"
-                        : "text-slate-500 bg-slate-100 cursor-not-allowed"
-                    }`}
-                  >
-                    {ghPushing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                    {ghPushing ? "Subiendo..." : "Guardar todo al repositorio"}
-                  </motion.button>
-                </div>
-
-                {/* Barra de progreso del push a GitHub */}
-                <AnimatePresence>
-                  {ghPushing && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      data-testid="github-push-progress"
-                      className="overflow-hidden bg-emerald-50/60 border border-emerald-100 rounded-2xl px-4 py-3 space-y-3"
-                    >
-                      {/* Encabezado: mensaje principal + % + paso + tiempo */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
-                          <span className="flex items-center gap-2 min-w-0">
-                            <Loader2 size={13} className="animate-spin shrink-0" />
-                            <span className="truncate">{ghPushMsg || "Subiendo repositorio…"}</span>
-                          </span>
-                          <span data-testid="github-push-progress-pct" className="font-mono tabular-nums shrink-0 ml-2">
-                            {Math.round(ghPushProgress)}%
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-[10px] text-emerald-700/80">
-                          <span className="flex items-center gap-1.5">
-                            {ghPushStep > 0 && (
-                              <span className="font-semibold">
-                                Paso {ghPushStep} de {ghPushTotalSteps}
-                                {ghPushStepLabel ? ` · ${ghPushStepLabel}` : ""}
-                              </span>
-                            )}
-                          </span>
-                          <span className="flex items-center gap-1 font-mono tabular-nums">
-                            <Clock size={10} />
-                            {Math.floor(ghPushElapsed / 60)}:{String(ghPushElapsed % 60).padStart(2, "0")}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Sub-detalle rotativo de lo que está haciendo ahora mismo */}
-                      {ghPushDetail && (
-                        <div className="text-[11px] text-emerald-700/90 flex items-center gap-1.5 bg-white/60 rounded-lg px-2.5 py-1.5 border border-emerald-100">
-                          <Sparkles size={11} className="shrink-0 text-emerald-500" />
-                          <span className="truncate">{ghPushDetail}</span>
-                        </div>
-                      )}
-
-                      {/* Barra */}
-                      <div className="h-2.5 w-full rounded-full bg-emerald-100 overflow-hidden">
-                        <motion.div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.max(3, Math.min(100, ghPushProgress))}%` }}
-                          transition={{ duration: 0.4, ease: "easeOut" }}
-                        />
-                      </div>
-
-                      {/* Desglose de todos los pasos con estado (hecho / actual / pendiente) */}
-                      {ghPushSteps.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-1">
-                          {ghPushSteps.map((label, i) => {
-                            const n = i + 1;
-                            const done = ghPushStep > n || (ghPushProgress >= 100);
-                            const active = ghPushStep === n && ghPushProgress < 100;
-                            return (
-                              <div
-                                key={label}
-                                className={`flex items-center gap-1.5 text-[10px] leading-tight ${
-                                  done ? "text-emerald-700" : active ? "text-emerald-900 font-bold" : "text-emerald-700/40"
-                                }`}
-                              >
-                                {done ? (
-                                  <CheckCircle size={11} className="shrink-0 text-emerald-500" />
-                                ) : active ? (
-                                  <Loader2 size={11} className="shrink-0 animate-spin" />
-                                ) : (
-                                  <span className="w-[11px] h-[11px] shrink-0 rounded-full border border-emerald-300/60" />
-                                )}
-                                <span className="truncate">{label}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <p className="text-[9px] text-emerald-600/70 leading-tight pt-0.5">
-                        Puedes dejar esta ventana abierta. La compilación tarda 1–2 min; tus actualizaciones para PC se publican automáticamente al terminar.
-                      </p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Estado del último push */}
-                {ghConfig.last_push_at && (
-                  <div className="text-[10px] text-slate-500 flex items-center justify-between bg-emerald-50/50 border border-emerald-100 rounded-xl px-3 py-2">
-                    <span>Último push: <b className="font-mono">{ghConfig.last_commit_sha?.slice(0, 7) || "—"}</b></span>
-                    <span>{new Date(ghConfig.last_push_at).toLocaleString("es-GT")}</span>
-                  </div>
-                )}
-
-                {/* ── App de Escritorio (movida desde Ajustes) ── */}
-                <motion.div
-                  className="pt-2"
-                  initial="show"
-                  animate="show"
-                >
-                  <DesktopAppSection />
-                </motion.div>
-
-                {/* ── Almacenamiento del repositorio ── */}
-                <div data-testid="repo-storage-card" className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
-                  <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
-                    <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
-                      <HardDrive size={16} className="text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                        Almacenamiento del repositorio
-                      </p>
-                      <p className="text-[11px] text-slate-400">Espacio usado · Plan de GitHub · Builds .exe publicados</p>
-                    </div>
+                {/* ── TABS: Publicar · App Escritorio · Almacenamiento · Herramientas ── */}
+                <div className="flex items-center gap-1 p-1 bg-slate-100/80 rounded-2xl">
+                  {[
+                    { id: "publish",  label: "Publicar",       icon: <CloudUpload size={12} /> },
+                    { id: "desktop",  label: "App Escritorio", icon: <Laptop size={12} /> },
+                    { id: "storage",  label: "Almacenamiento", icon: <HardDrive size={12} /> },
+                    { id: "tools",    label: "Herramientas",   icon: <Wrench size={12} /> },
+                  ].map(t => (
                     <button
-                      onClick={loadStorage}
-                      disabled={storageLoading}
-                      data-testid="repo-storage-refresh-btn"
-                      className="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all"
-                      title="Actualizar">
-                      <RefreshCw size={13} className={storageLoading ? "animate-spin" : ""} />
+                      key={t.id}
+                      onClick={() => setSupportTab(t.id)}
+                      data-testid={`support-tab-${t.id}`}
+                      className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-[11px] font-bold transition-all ${
+                        supportTab === t.id
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700 hover:bg-white/60"
+                      }`}
+                    >
+                      {t.icon}
+                      <span className="hidden sm:inline">{t.label}</span>
                     </button>
-                  </div>
+                  ))}
+                </div>
 
-                  <div className="p-4 space-y-4">
-                    {storageLoading && !storage ? (
-                      <div className="flex items-center justify-center py-6 gap-3 text-slate-400">
-                        <Loader2 size={18} className="animate-spin" />
-                        <span className="text-sm">Consultando GitHub…</span>
-                      </div>
-                    ) : !storage ? (
-                      <div className="flex items-center justify-between py-3">
-                        <p className="text-sm text-slate-400">Sin datos de almacenamiento.</p>
-                        <button onClick={loadStorage} className="text-xs text-indigo-500 font-bold hover:underline">Cargar</button>
-                      </div>
-                    ) : (
-                      <>
-                        {/* Métricas: repo / plan / builds */}
-                        <div className="grid grid-cols-3 gap-2.5" data-testid="repo-storage-metrics">
-                          <div className="rounded-2xl p-3.5 bg-indigo-50">
-                            <div className="flex items-center gap-1.5 text-indigo-600 mb-1">
-                              <Database size={12} />
-                              <span className="text-[9px] font-black uppercase tracking-widest">Repositorio</span>
-                            </div>
-                            <div className="text-lg font-black text-indigo-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                              {storage.repo?.size_human || "—"}
-                            </div>
-                            <div className="text-[10px] font-semibold text-indigo-500/70 truncate">{storage.repo_full_name}</div>
-                          </div>
-                          <div className="rounded-2xl p-3.5 bg-violet-50">
-                            <div className="flex items-center gap-1.5 text-violet-600 mb-1">
-                              <Github size={12} />
-                              <span className="text-[9px] font-black uppercase tracking-widest">Plan</span>
-                            </div>
-                            <div className="text-lg font-black text-violet-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                              {storage.plan?.name || (storage.connected ? "—" : "Sin token")}
-                            </div>
-                            <div className="text-[10px] font-semibold text-violet-500/70">
-                              {storage.plan?.login ? `@${storage.plan.login}` : "Conecta tu cuenta"}
-                            </div>
-                          </div>
-                          <div className="rounded-2xl p-3.5 bg-amber-50">
-                            <div className="flex items-center gap-1.5 text-amber-600 mb-1">
-                              <Package size={12} />
-                              <span className="text-[9px] font-black uppercase tracking-widest">Builds .exe</span>
-                            </div>
-                            <div className="text-lg font-black text-amber-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                              {storage.builds_total_human || "0 B"}
-                            </div>
-                            <div className="text-[10px] font-semibold text-amber-500/70">
-                              {storage.builds_count || 0} ejecutable(s)
-                            </div>
-                          </div>
+                {/* ═══════════ TAB 1: PUBLICAR ═══════════ */}
+                {supportTab === "publish" && (
+                  <div className="space-y-3" data-testid="support-panel-publish">
+
+                    {/* Estado del repo */}
+                    {ghConfig.repo_url && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-white/70 rounded-2xl p-3 border border-slate-200/60">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                            <GitCommit size={10} /> Último SHA
+                          </p>
+                          <p className="font-mono text-sm font-black text-slate-800">
+                            {ghConfig.last_commit_sha ? ghConfig.last_commit_sha.slice(0, 7) : "—"}
+                          </p>
                         </div>
+                        <div className="bg-white/70 rounded-2xl p-3 border border-slate-200/60">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                            <Clock size={10} /> Último push
+                          </p>
+                          <p className="text-[11px] font-bold text-slate-700 truncate">
+                            {ghConfig.last_push_at
+                              ? timeAgo(new Date(ghConfig.last_push_at).getTime()) || "reciente"
+                              : "Nunca"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
-                        {/* Detalle del plan */}
-                        {storage.plan && (
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 bg-slate-50/70 rounded-2xl px-4 py-2.5">
-                            {storage.plan.space_human && storage.plan.space_human !== "—" && (
-                              <span>Espacio del plan: <b className="text-slate-700">{storage.plan.space_human}</b></span>
-                            )}
-                            {typeof storage.plan.private_repos === "number" && (
-                              <span>Repos privados: <b className="text-slate-700">{storage.plan.private_repos}</b></span>
-                            )}
-                            {typeof storage.plan.public_repos === "number" && (
-                              <span>Repos públicos: <b className="text-slate-700">{storage.plan.public_repos}</b></span>
-                            )}
-                          </div>
-                        )}
+                    {/* Botón principal: Publicar todo */}
+                    <motion.button
+                      whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                      onClick={handlePushAllToGithub}
+                      disabled={ghPushing || !ghConfig.username}
+                      data-testid="github-push-all-btn"
+                      title={!ghConfig.username ? "Conecta tu cuenta de GitHub primero" : "Sube todos los cambios al repositorio"}
+                      className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-sm font-black transition-all disabled:opacity-60 ${
+                        ghConfig.username
+                          ? "text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-lg"
+                          : "text-slate-500 bg-slate-100 cursor-not-allowed"
+                      }`}
+                    >
+                      {ghPushing ? <Loader2 size={16} className="animate-spin" /> : <CloudUpload size={16} />}
+                      {ghPushing ? "Subiendo cambios..." : "Publicar cambios al repositorio"}
+                    </motion.button>
 
-                        {/* Reintentar compilación del .exe */}
-                        {storage.connected && (
-                          <div className="flex items-center gap-3 bg-slate-50/70 rounded-2xl px-4 py-3">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold text-slate-700">¿El .exe no se construyó?</p>
-                              <p className="text-[10px] text-slate-400">Inicia manualmente la compilación en GitHub Actions.</p>
+                    {/* Enlaces rápidos */}
+                    {ghConfig.repo_url && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <a
+                          href={ghConfig.repo_url}
+                          target="_blank" rel="noopener noreferrer"
+                          data-testid="link-open-repo"
+                          className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors"
+                        >
+                          <Github size={11} /> Repositorio
+                          <ExternalLink size={9} className="opacity-60" />
+                        </a>
+                        <a
+                          href={`${ghConfig.repo_url}/releases`}
+                          target="_blank" rel="noopener noreferrer"
+                          data-testid="link-open-releases"
+                          className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors"
+                        >
+                          <Package size={11} /> Releases
+                          <ExternalLink size={9} className="opacity-60" />
+                        </a>
+                        <a
+                          href={`${ghConfig.repo_url}/actions`}
+                          target="_blank" rel="noopener noreferrer"
+                          data-testid="link-open-actions"
+                          className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[11px] font-bold text-slate-700 transition-colors"
+                        >
+                          <Zap size={11} /> Actions
+                          <ExternalLink size={9} className="opacity-60" />
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Barra de progreso del push a GitHub */}
+                    <AnimatePresence>
+                      {ghPushing && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          data-testid="github-push-progress"
+                          className="overflow-hidden bg-emerald-50/60 border border-emerald-100 rounded-2xl px-4 py-3 space-y-3"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
+                              <span className="flex items-center gap-2 min-w-0">
+                                <Loader2 size={13} className="animate-spin shrink-0" />
+                                <span className="truncate">{ghPushMsg || "Subiendo repositorio…"}</span>
+                              </span>
+                              <span data-testid="github-push-progress-pct" className="font-mono tabular-nums shrink-0 ml-2">
+                                {Math.round(ghPushProgress)}%
+                              </span>
                             </div>
-                            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                              onClick={handleTriggerBuild} disabled={buildTriggering}
-                              data-testid="repo-trigger-build-btn"
-                              className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 shrink-0 disabled:opacity-60">
-                              {buildTriggering ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-                              Compilar .exe
-                            </motion.button>
+                            <div className="flex items-center justify-between text-[10px] text-emerald-700/80">
+                              <span className="flex items-center gap-1.5">
+                                {ghPushStep > 0 && (
+                                  <span className="font-semibold">
+                                    Paso {ghPushStep} de {ghPushTotalSteps}
+                                    {ghPushStepLabel ? ` · ${ghPushStepLabel}` : ""}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="flex items-center gap-1 font-mono tabular-nums">
+                                <Clock size={10} />
+                                {Math.floor(ghPushElapsed / 60)}:{String(ghPushElapsed % 60).padStart(2, "0")}
+                              </span>
+                            </div>
+                          </div>
+
+                          {ghPushDetail && (
+                            <div className="text-[11px] text-emerald-700/90 flex items-center gap-1.5 bg-white/60 rounded-lg px-2.5 py-1.5 border border-emerald-100">
+                              <Sparkles size={11} className="shrink-0 text-emerald-500" />
+                              <span className="truncate">{ghPushDetail}</span>
+                            </div>
+                          )}
+
+                          <div className="h-2.5 w-full rounded-full bg-emerald-100 overflow-hidden">
+                            <motion.div
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-600"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.max(3, Math.min(100, ghPushProgress))}%` }}
+                              transition={{ duration: 0.4, ease: "easeOut" }}
+                            />
+                          </div>
+
+                          {ghPushSteps.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-1">
+                              {ghPushSteps.map((label, i) => {
+                                const n = i + 1;
+                                const done = ghPushStep > n || (ghPushProgress >= 100);
+                                const active = ghPushStep === n && ghPushProgress < 100;
+                                return (
+                                  <div
+                                    key={label}
+                                    className={`flex items-center gap-1.5 text-[10px] leading-tight ${
+                                      done ? "text-emerald-700" : active ? "text-emerald-900 font-bold" : "text-emerald-700/40"
+                                    }`}
+                                  >
+                                    {done ? (
+                                      <CheckCircle size={11} className="shrink-0 text-emerald-500" />
+                                    ) : active ? (
+                                      <Loader2 size={11} className="shrink-0 animate-spin" />
+                                    ) : (
+                                      <span className="w-[11px] h-[11px] shrink-0 rounded-full border border-emerald-300/60" />
+                                    )}
+                                    <span className="truncate">{label}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          <p className="text-[9px] text-emerald-600/70 leading-tight pt-0.5">
+                            Puedes dejar esta ventana abierta. La compilación tarda 1–2 min; tus actualizaciones para PC se publican automáticamente al terminar.
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Info: fecha del último push */}
+                    {ghConfig.last_push_at && !ghPushing && (
+                      <div className="text-[10px] text-slate-500 flex items-center justify-between bg-emerald-50/50 border border-emerald-100 rounded-xl px-3 py-2">
+                        <span className="flex items-center gap-1.5">
+                          <GitCommit size={11} className="text-emerald-500" />
+                          Último push: <b className="font-mono">{ghConfig.last_commit_sha?.slice(0, 7) || "—"}</b>
+                        </span>
+                        <span>{new Date(ghConfig.last_push_at).toLocaleString("es-GT")}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ═══════════ TAB 2: APP DE ESCRITORIO ═══════════ */}
+                {supportTab === "desktop" && (
+                  <div className="space-y-3" data-testid="support-panel-desktop">
+                    <DesktopAppSection />
+
+                    {/* Reintentar compilación del .exe en GitHub Actions */}
+                    {storage?.connected && (
+                      <div className="flex items-center gap-3 bg-slate-50/70 rounded-2xl px-4 py-3 border border-slate-200/60">
+                        <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
+                          <Zap size={14} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-700">Recompilar .exe en GitHub Actions</p>
+                          <p className="text-[10px] text-slate-400">Reinicia manualmente la compilación remota si algo falló.</p>
+                        </div>
+                        <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                          onClick={handleTriggerBuild} disabled={buildTriggering}
+                          data-testid="repo-trigger-build-btn"
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 shrink-0 disabled:opacity-60">
+                          {buildTriggering ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                          Compilar
+                        </motion.button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ═══════════ TAB 3: ALMACENAMIENTO ═══════════ */}
+                {supportTab === "storage" && (
+                  <div className="space-y-3" data-testid="support-panel-storage">
+                    <div data-testid="repo-storage-card" className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
+                        <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
+                          <HardDrive size={16} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                            Almacenamiento del repositorio
+                          </p>
+                          <p className="text-[11px] text-slate-400">Espacio · Plan · Builds .exe publicados</p>
+                        </div>
+                        <button
+                          onClick={loadStorage}
+                          disabled={storageLoading}
+                          data-testid="repo-storage-refresh-btn"
+                          className="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all"
+                          title="Actualizar">
+                          <RefreshCw size={13} className={storageLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      <div className="p-4 space-y-4">
+                        {storageLoading && !storage ? (
+                          <div className="flex items-center justify-center py-6 gap-3 text-slate-400">
+                            <Loader2 size={18} className="animate-spin" />
+                            <span className="text-sm">Consultando GitHub…</span>
+                          </div>
+                        ) : !storage ? (
+                          <div className="flex items-center justify-between py-3">
+                            <p className="text-sm text-slate-400">Sin datos de almacenamiento.</p>
+                            <button onClick={loadStorage} className="text-xs text-indigo-500 font-bold hover:underline">Cargar</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-3 gap-2.5" data-testid="repo-storage-metrics">
+                              <div className="rounded-2xl p-3.5 bg-indigo-50">
+                                <div className="flex items-center gap-1.5 text-indigo-600 mb-1">
+                                  <Database size={12} />
+                                  <span className="text-[9px] font-black uppercase tracking-widest">Repositorio</span>
+                                </div>
+                                <div className="text-lg font-black text-indigo-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                                  {storage.repo?.size_human || "—"}
+                                </div>
+                                <div className="text-[10px] font-semibold text-indigo-500/70 truncate">{storage.repo_full_name}</div>
+                              </div>
+                              <div className="rounded-2xl p-3.5 bg-violet-50">
+                                <div className="flex items-center gap-1.5 text-violet-600 mb-1">
+                                  <Github size={12} />
+                                  <span className="text-[9px] font-black uppercase tracking-widest">Plan</span>
+                                </div>
+                                <div className="text-lg font-black text-violet-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                                  {storage.plan?.name || (storage.connected ? "—" : "Sin token")}
+                                </div>
+                                <div className="text-[10px] font-semibold text-violet-500/70">
+                                  {storage.plan?.login ? `@${storage.plan.login}` : "Conecta tu cuenta"}
+                                </div>
+                              </div>
+                              <div className="rounded-2xl p-3.5 bg-amber-50">
+                                <div className="flex items-center gap-1.5 text-amber-600 mb-1">
+                                  <Package size={12} />
+                                  <span className="text-[9px] font-black uppercase tracking-widest">Builds .exe</span>
+                                </div>
+                                <div className="text-lg font-black text-amber-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                                  {storage.builds_total_human || "0 B"}
+                                </div>
+                                <div className="text-[10px] font-semibold text-amber-500/70">
+                                  {storage.builds_count || 0} ejecutable(s)
+                                </div>
+                              </div>
+                            </div>
+
+                            {storage.plan && (
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 bg-slate-50/70 rounded-2xl px-4 py-2.5">
+                                {storage.plan.space_human && storage.plan.space_human !== "—" && (
+                                  <span>Espacio del plan: <b className="text-slate-700">{storage.plan.space_human}</b></span>
+                                )}
+                                {typeof storage.plan.private_repos === "number" && (
+                                  <span>Repos privados: <b className="text-slate-700">{storage.plan.private_repos}</b></span>
+                                )}
+                                {typeof storage.plan.public_repos === "number" && (
+                                  <span>Repos públicos: <b className="text-slate-700">{storage.plan.public_repos}</b></span>
+                                )}
+                              </div>
+                            )}
+
+                            {storage.builds && storage.builds.length > 0 ? (
+                              <div className="space-y-1.5" data-testid="repo-builds-list">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Archivos publicados</p>
+                                <div className="max-h-64 overflow-auto space-y-1.5 pr-1">
+                                  {storage.builds.map((b) => (
+                                    <div key={b.asset_id} data-testid={`repo-build-${b.asset_id}`}
+                                      className="flex items-center gap-3 bg-white rounded-xl border border-slate-100 px-3 py-2">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${b.kind === ".sha256" ? "bg-slate-100 text-slate-400" : b.kind === "installer" ? "bg-blue-50 text-blue-500" : "bg-emerald-50 text-emerald-500"}`}>
+                                        {b.kind === ".sha256" ? <FileCheck2 size={14} /> : <Package size={14} />}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-slate-700 truncate">{b.name}</p>
+                                        <p className="text-[10px] text-slate-400">
+                                          {b.tag ? `${b.tag} · ` : ""}{b.size_human}{b.kind !== ".sha256" ? ` · ${b.kind === "installer" ? "Instalador" : "Portable"}` : ""}
+                                        </p>
+                                      </div>
+                                      <button
+                                        onClick={() => handleDeleteOneBuild(b)}
+                                        disabled={deletingAssetId === b.asset_id || buildsDeleting}
+                                        data-testid={`repo-build-delete-${b.asset_id}`}
+                                        className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-300 hover:text-red-500 transition-all disabled:opacity-40"
+                                        title="Borrar este archivo">
+                                        {deletingAssetId === b.asset_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {!showDeleteBuilds ? (
+                                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                                    onClick={() => setShowDeleteBuilds(true)}
+                                    disabled={!storage.connected}
+                                    data-testid="repo-delete-all-builds-btn"
+                                    title={!storage.connected ? "Conecta tu cuenta de GitHub primero" : "Borra todos los builds .exe para liberar espacio"}
+                                    className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-2xl text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <Trash2 size={13} /> Borrar todos los builds .exe ({storage.builds_total_human})
+                                  </motion.button>
+                                ) : (
+                                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                                    className="mt-2 space-y-2 bg-red-50/70 border border-red-200/70 rounded-2xl p-3">
+                                    <div className="flex items-start gap-2.5">
+                                      <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
+                                      <p className="text-xs font-semibold text-red-700">
+                                        Se eliminarán <b>{storage.builds.length}</b> archivo(s) de los Releases y se liberarán <b>{storage.builds_total_human}</b>. Esta acción no se puede deshacer, pero puedes regenerar los builds con "Publicar cambios al repositorio".
+                                      </p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                        onClick={handleDeleteAllBuilds} disabled={buildsDeleting}
+                                        data-testid="repo-delete-all-confirm-btn"
+                                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 transition-all disabled:opacity-60">
+                                        {buildsDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                        Sí, borrar todo
+                                      </motion.button>
+                                      <button
+                                        onClick={() => setShowDeleteBuilds(false)} disabled={buildsDeleting}
+                                        data-testid="repo-delete-all-cancel-btn"
+                                        className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 transition-all disabled:opacity-60">
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2.5 bg-slate-50/70 rounded-2xl px-4 py-3">
+                                <Info size={14} className="text-slate-400 shrink-0" />
+                                <p className="text-[11px] font-semibold text-slate-500">
+                                  No hay builds .exe publicados en Releases. El repositorio no tiene ejecutables ocupando espacio.
+                                </p>
+                              </div>
+                            )}
+
+                            {!storage.connected && (
+                              <div className="flex items-center gap-2.5 bg-amber-50/70 border border-amber-200/60 rounded-2xl px-4 py-2.5">
+                                <Lock size={13} className="text-amber-500 shrink-0" />
+                                <p className="text-[11px] font-semibold text-amber-700">
+                                  Conecta tu cuenta de GitHub arriba para ver tu plan y poder borrar builds.
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ═══════════ TAB 4: HERRAMIENTAS (Diagnóstico + Contexto IA) ═══════════ */}
+                {supportTab === "tools" && (
+                  <div className="space-y-3" data-testid="support-panel-tools">
+
+                    {/* Diagnóstico del sistema */}
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+                          <Stethoscope size={16} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                            Diagnóstico del sistema
+                          </p>
+                          <p className="text-[11px] text-slate-400">Verifica dependencias, servicios y configuración</p>
+                        </div>
+                        {diagnostic?.summary && (
+                          <div className={`px-3 py-1 rounded-full text-[10px] font-black flex items-center gap-1 ${
+                            diagnostic.summary.score >= 90 ? "bg-emerald-100 text-emerald-700"
+                              : diagnostic.summary.score >= 70 ? "bg-amber-100 text-amber-700"
+                              : "bg-red-100 text-red-700"
+                          }`}>
+                            {diagnostic.summary.score}/100
                           </div>
                         )}
+                        <button
+                          onClick={loadDiagnostic}
+                          disabled={diagLoading}
+                          data-testid="diagnostic-refresh-btn"
+                          className="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all"
+                          title="Ejecutar diagnóstico">
+                          <RefreshCw size={13} className={diagLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
 
+                      <div className="p-4 space-y-3">
+                        {diagLoading && !diagnostic ? (
+                          <div className="flex items-center justify-center py-6 gap-3 text-slate-400">
+                            <Loader2 size={18} className="animate-spin" />
+                            <span className="text-sm">Ejecutando diagnóstico…</span>
+                          </div>
+                        ) : !diagnostic ? (
+                          <div className="flex items-center justify-between py-3">
+                            <p className="text-sm text-slate-400">Aún no se ha ejecutado el diagnóstico.</p>
+                            <button
+                              onClick={loadDiagnostic}
+                              data-testid="diagnostic-run-btn"
+                              className="text-xs text-indigo-500 font-bold hover:underline">
+                              Ejecutar ahora
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Resumen: OK/warnings/errors */}
+                            <div className="grid grid-cols-3 gap-2" data-testid="diagnostic-summary">
+                              <div className="rounded-xl p-2.5 bg-emerald-50 text-center">
+                                <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600 mb-0.5">OK</p>
+                                <p className="text-lg font-black text-emerald-800">{diagnostic.summary?.ok || 0}</p>
+                              </div>
+                              <div className="rounded-xl p-2.5 bg-amber-50 text-center">
+                                <p className="text-[9px] font-black uppercase tracking-wider text-amber-600 mb-0.5">Avisos</p>
+                                <p className="text-lg font-black text-amber-800">{diagnostic.summary?.warnings || 0}</p>
+                              </div>
+                              <div className="rounded-xl p-2.5 bg-red-50 text-center">
+                                <p className="text-[9px] font-black uppercase tracking-wider text-red-600 mb-0.5">Errores</p>
+                                <p className="text-lg font-black text-red-800">{diagnostic.summary?.errors || 0}</p>
+                              </div>
+                            </div>
 
-                        {/* Lista de builds */}
-                        {storage.builds && storage.builds.length > 0 ? (
-                          <div className="space-y-1.5" data-testid="repo-builds-list">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Archivos publicados</p>
-                            <div className="max-h-64 overflow-auto space-y-1.5 pr-1">
-                              {storage.builds.map((b) => (
-                                <div key={b.asset_id} data-testid={`repo-build-${b.asset_id}`}
-                                  className="flex items-center gap-3 bg-white rounded-xl border border-slate-100 px-3 py-2">
-                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${b.kind === ".sha256" ? "bg-slate-100 text-slate-400" : b.kind === "installer" ? "bg-blue-50 text-blue-500" : "bg-emerald-50 text-emerald-500"}`}>
-                                    {b.kind === ".sha256" ? <FileCheck2 size={14} /> : <Package size={14} />}
+                            {/* Lista de checks */}
+                            <div className="space-y-1.5 max-h-72 overflow-auto pr-1" data-testid="diagnostic-checks">
+                              {(diagnostic.checks || []).map((c) => (
+                                <div
+                                  key={c.id}
+                                  data-testid={`diagnostic-check-${c.id}`}
+                                  className={`flex items-start gap-2.5 rounded-xl px-3 py-2 border ${
+                                    c.ok
+                                      ? "bg-emerald-50/40 border-emerald-100"
+                                      : c.severity === "error"
+                                        ? "bg-red-50/60 border-red-200"
+                                        : "bg-amber-50/60 border-amber-200"
+                                  }`}
+                                >
+                                  <div className="shrink-0 mt-0.5">
+                                    {c.ok ? (
+                                      <CheckCircle size={13} className="text-emerald-500" />
+                                    ) : c.severity === "error" ? (
+                                      <XCircle size={13} className="text-red-500" />
+                                    ) : (
+                                      <AlertCircle size={13} className="text-amber-500" />
+                                    )}
                                   </div>
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-slate-700 truncate">{b.name}</p>
-                                    <p className="text-[10px] text-slate-400">
-                                      {b.tag ? `${b.tag} · ` : ""}{b.size_human}{b.kind !== ".sha256" ? ` · ${b.kind === "installer" ? "Instalador" : "Portable"}` : ""}
-                                    </p>
+                                    <p className="text-xs font-bold text-slate-800">{c.label}</p>
+                                    {c.detail && (
+                                      <p className={`text-[10px] mt-0.5 ${c.ok ? "text-emerald-600/80" : "text-slate-500"}`}>
+                                        {c.detail}
+                                      </p>
+                                    )}
                                   </div>
-                                  <button
-                                    onClick={() => handleDeleteOneBuild(b)}
-                                    disabled={deletingAssetId === b.asset_id || buildsDeleting}
-                                    data-testid={`repo-build-delete-${b.asset_id}`}
-                                    className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-300 hover:text-red-500 transition-all disabled:opacity-40"
-                                    title="Borrar este archivo">
-                                    {deletingAssetId === b.asset_id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                  </button>
+                                  {!c.ok && c.fixable && (
+                                    <button
+                                      onClick={() => handleFixIssue(c.id)}
+                                      disabled={diagFixingId === c.id}
+                                      data-testid={`diagnostic-fix-${c.id}`}
+                                      className="shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 flex items-center gap-1 disabled:opacity-60"
+                                    >
+                                      {diagFixingId === c.id ? (
+                                        <Loader2 size={9} className="animate-spin" />
+                                      ) : (
+                                        <Wrench size={9} />
+                                      )}
+                                      Corregir
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
 
-                            {/* Borrar todos */}
-                            {!showDeleteBuilds ? (
-                              <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                                onClick={() => setShowDeleteBuilds(true)}
-                                disabled={!storage.connected}
-                                data-testid="repo-delete-all-builds-btn"
-                                title={!storage.connected ? "Conecta tu cuenta de GitHub primero" : "Borra todos los builds .exe para liberar espacio"}
-                                className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-2xl text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                                <Trash2 size={13} /> Borrar todos los builds .exe ({storage.builds_total_human})
+                            {/* Auto-corregir todo */}
+                            {(diagnostic.summary?.errors > 0 || diagnostic.summary?.warnings > 0) && (
+                              <motion.button
+                                whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                                onClick={handleFixAll}
+                                disabled={diagFixingAll}
+                                data-testid="diagnostic-fix-all-btn"
+                                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-xs font-black text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md disabled:opacity-60"
+                              >
+                                {diagFixingAll ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                                {diagFixingAll ? "Aplicando correcciones…" : "Auto-corregir todo lo posible"}
                               </motion.button>
-                            ) : (
-                              <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                                className="mt-2 space-y-2 bg-red-50/70 border border-red-200/70 rounded-2xl p-3">
-                                <div className="flex items-start gap-2.5">
-                                  <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
-                                  <p className="text-xs font-semibold text-red-700">
-                                    Se eliminarán <b>{storage.builds.length}</b> archivo(s) de los Releases y se liberarán <b>{storage.builds_total_human}</b>. Esta acción no se puede deshacer, pero puedes regenerar los builds con "Guardar todo al repositorio".
-                                  </p>
-                                </div>
-                                <div className="flex gap-2">
-                                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                    onClick={handleDeleteAllBuilds} disabled={buildsDeleting}
-                                    data-testid="repo-delete-all-confirm-btn"
-                                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 transition-all disabled:opacity-60">
-                                    {buildsDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                                    Sí, borrar todo
-                                  </motion.button>
-                                  <button
-                                    onClick={() => setShowDeleteBuilds(false)} disabled={buildsDeleting}
-                                    data-testid="repo-delete-all-cancel-btn"
-                                    className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 transition-all disabled:opacity-60">
-                                    Cancelar
-                                  </button>
-                                </div>
-                              </motion.div>
                             )}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2.5 bg-slate-50/70 rounded-2xl px-4 py-3">
-                            <Info size={14} className="text-slate-400 shrink-0" />
-                            <p className="text-[11px] font-semibold text-slate-500">
-                              No hay builds .exe publicados en Releases. El repositorio no tiene ejecutables ocupando espacio.
-                            </p>
-                          </div>
-                        )}
 
-                        {!storage.connected && (
-                          <div className="flex items-center gap-2.5 bg-amber-50/70 border border-amber-200/60 rounded-2xl px-4 py-2.5">
-                            <Lock size={13} className="text-amber-500 shrink-0" />
-                            <p className="text-[11px] font-semibold text-amber-700">
-                              Conecta tu cuenta de GitHub arriba para ver tu plan y poder borrar builds.
-                            </p>
-                          </div>
+                            {diagnostic.generated_at && (
+                              <p className="text-[10px] text-slate-400 text-center">
+                                Última verificación: {new Date(diagnostic.generated_at).toLocaleString("es-GT")}
+                              </p>
+                            )}
+                          </>
                         )}
-                      </>
-                    )}
+                      </div>
+                    </div>
+
+                    {/* Contexto para la próxima IA */}
+                    <div className="rounded-2xl border border-purple-200 bg-gradient-to-br from-purple-50/70 to-indigo-50/60 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center shrink-0">
+                          <Brain size={18} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                            Contexto para la próxima IA
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Notas y decisiones técnicas que la próxima IA (o desarrollador) debería conocer para mantener el proyecto.
+                          </p>
+                        </div>
+                        <motion.button
+                          whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                          onClick={handleOpenContext}
+                          data-testid="open-ai-context-btn"
+                          className="px-3.5 py-2 rounded-xl text-xs font-black text-white bg-gradient-to-br from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 flex items-center gap-1.5 shrink-0 shadow-md"
+                        >
+                          <BookOpen size={12} /> Abrir
+                        </motion.button>
+                      </div>
+                    </div>
+
+                    {/* Info: contraseña de fábrica */}
+                    <div className="flex items-start gap-2.5 bg-slate-50/70 rounded-2xl px-4 py-3 border border-slate-200/60">
+                      <ShieldCheck size={13} className="text-slate-400 shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-slate-500 leading-relaxed">
+                        Esta sección requiere <b>contraseña de fábrica</b> y contiene herramientas avanzadas. Los cambios aquí pueden afectar el funcionamiento del sistema.
+                      </p>
+                    </div>
                   </div>
-                </div>
-
+                )}
 
               </div>
             </CollapseBody>
