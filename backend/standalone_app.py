@@ -4002,4 +4002,45 @@ if __name__ == "__main__":
     print("  Para cerrar: Ctrl+C  o  cierra esta ventana")
     print("=" * 54 + "\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="warning")
+    # ── Shutdown limpio para evitar "Failed to remove temporary directory _MEIxxx" ──
+    # PyInstaller onefile extrae recursos a %TEMP%/_MEIxxx y trata de borrarlo al
+    # salir. Si uvicorn/threads/loggers todavia tienen handles abiertos, Windows
+    # rechaza el rmdir y el bootloader muestra un popup Warning. Forzamos:
+    #   1) Cerrar file handlers de logging (liberan .log dentro de _MEI si hay)
+    #   2) uvicorn.Server con should_exit + config controlada
+    #   3) atexit + signal handlers que fuerzan flush y cierre de stdio
+    import atexit
+    import signal as _signal
+    import logging as _logging
+
+    def _graceful_shutdown(*_a, **_kw):
+        try:
+            _logging.shutdown()
+        except Exception:
+            pass
+        try:
+            if hasattr(sys.stdout, "flush"): sys.stdout.flush()
+            if hasattr(sys.stderr, "flush"): sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            _fh = globals().get("_log_fh")
+            if _fh and not _fh.closed:
+                _fh.close()
+        except Exception:
+            pass
+
+    atexit.register(_graceful_shutdown)
+    for _sig in (getattr(_signal, "SIGINT", None), getattr(_signal, "SIGTERM", None), getattr(_signal, "SIGBREAK", None)):
+        if _sig is not None:
+            try:
+                _signal.signal(_sig, lambda *_a: (_graceful_shutdown(), sys.exit(0)))
+            except Exception:
+                pass
+
+    config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning", access_log=False)
+    server = uvicorn.Server(config)
+    try:
+        server.run()
+    finally:
+        _graceful_shutdown()
