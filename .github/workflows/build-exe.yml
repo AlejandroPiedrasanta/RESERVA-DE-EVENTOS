@@ -17,6 +17,20 @@ on:
         description: 'Tag para la release (default: latest-exe)'
         required: false
         default: 'latest-exe'
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: false
+        default: 'latest-exe'
+      prerelease:
+        type: string
+        required: false
+        default: 'true'
+      ref:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -29,6 +43,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -216,9 +232,9 @@ jobs:
             echo "name=Release ${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
-            echo "name=Latest Windows Build" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "tag=${{ inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "name=Cinema Productions ${{ inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=${{ inputs.prerelease || 'true' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish release
@@ -270,6 +286,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -347,8 +365,8 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "tag=${{ inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=${{ inputs.prerelease || 'true' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish to release
@@ -383,6 +401,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -477,8 +497,8 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "tag=${{ inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=${{ inputs.prerelease || 'true' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish to release
@@ -514,6 +534,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -591,8 +613,8 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            echo "tag=${{ github.event.inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "tag=${{ inputs.release_tag || 'latest-exe' }}" >> $GITHUB_OUTPUT
+            echo "prerelease=${{ inputs.prerelease || 'true' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish to release

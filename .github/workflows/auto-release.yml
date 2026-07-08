@@ -1,0 +1,81 @@
+name: Auto Release on Save
+
+# Cada vez que guardas el repositorio (push a main/master) esto:
+#   1. Sube automáticamente el número de versión en version.txt (patch +1).
+#   2. Hace commit del nuevo version.txt con [skip ci] (para no re-disparar).
+#   3. Llama al workflow de build (build-exe.yml) que compila y publica en la
+#      Release el .exe de Windows + instalador + binarios Linux/macOS.
+#
+# Resultado: no tienes que crear tags a mano; guardar el repo = nueva versión
+# publicada = los .exe instalados detectan y aplican la actualización.
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    # No re-ejecutar por el commit automático de versión ([skip ci]).
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      new_sha: ${{ steps.bump.outputs.new_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version.txt, commit y push
+        id: bump
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          CUR=$(tr -d '[:space:]' < version.txt 2>/dev/null || echo "")
+          if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IFS='.' read -r MA MI PA <<< "$CUR"
+            PA=$((PA+1)); NEW="$MA.$MI.$PA"
+          else
+            # version.txt no es semántico (ej. "OK12") -> empezar en 1.0.0
+            NEW="1.0.0"
+          fi
+
+          # Garantizar que el tag vX.Y.Z esté libre (subir patch hasta encontrar uno)
+          git fetch --tags --quiet || true
+          while git rev-parse "v$NEW" >/dev/null 2>&1; do
+            IFS='.' read -r MA MI PA <<< "$NEW"
+            PA=$((PA+1)); NEW="$MA.$MI.$PA"
+          done
+
+          echo "$NEW" > version.txt
+          git add version.txt
+          git commit -m "chore(release): v$NEW [skip ci]"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+          echo "new_version=$NEW"        >> "$GITHUB_OUTPUT"
+          echo "new_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "✓ Nueva versión: v$NEW"
+
+  build:
+    needs: version
+    permissions:
+      contents: write
+    # Compila y publica usando el commit recién creado con la versión nueva.
+    uses: ./.github/workflows/build-exe.yml
+    with:
+      release_tag: v${{ needs.version.outputs.new_version }}
+      prerelease: 'false'
+      ref: ${{ needs.version.outputs.new_sha }}
+    secrets: inherit

@@ -2135,18 +2135,25 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
     install_dir = exe_path.parent
     if platform.system() == "Windows":
         bat = install_dir / "_cp_update.bat"
+        exe_name = exe_path.name
         old = str(exe_path)
         new = str(new_path)
         bak = old + ".bak"
         script = (
             "@echo off\r\n"
-            "setlocal\r\n"
+            "setlocal enabledelayedexpansion\r\n"
+            "set TRIES=0\r\n"
             ":waitloop\r\n"
+            "set /a TRIES+=1\r\n"
             "ping -n 2 127.0.0.1 >nul\r\n"
             f'del "{bak}" >nul 2>&1\r\n'
             f'move /y "{old}" "{bak}" >nul 2>&1\r\n'
-            f'if exist "{old}" goto waitloop\r\n'
+            f'if exist "{old}" (\r\n'
+            f'  if !TRIES! GEQ 60 taskkill /F /IM "{exe_name}" >nul 2>&1\r\n'
+            "  goto waitloop\r\n"
+            ")\r\n"
             f'move /y "{new}" "{old}" >nul 2>&1\r\n'
+            f'if not exist "{old}" move /y "{bak}" "{old}" >nul 2>&1\r\n'
             f'del "{bak}" >nul 2>&1\r\n'
             f'start "" "{old}"\r\n'
             '(goto) 2>nul & del "%~f0"\r\n'
@@ -2222,19 +2229,34 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Descarga del binario falló: {e}")
 
-    # Validación mínima: un binario válido pesa varios MB
-    try:
-        if new_path.stat().st_size < 1_000_000:
-            try:
-                new_path.unlink()
-            except Exception:
-                pass
-            raise HTTPException(status_code=500,
-                detail="El binario descargado es inválido (demasiado pequeño).")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    # Validación: tamaño + "magic bytes" del binario. Evita que una respuesta
+    # de error (HTML/JSON) se guarde como si fuera el ejecutable, lo que
+    # "arruinaría" el exe al hacer el swap.
+    def _valid_binary(p: Path) -> bool:
+        try:
+            if p.stat().st_size < 1_000_000:
+                return False
+            with open(p, "rb") as fh:
+                head = fh.read(4)
+            import platform as _pf
+            s = _pf.system()
+            if s == "Windows":
+                return head[:2] == b"MZ"
+            if s == "Darwin":
+                return head in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                                b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf",
+                                b"\xfe\xed\xfa\xce")
+            return head == b"\x7fELF"
+        except Exception:
+            return False
+
+    if not _valid_binary(new_path):
+        try:
+            new_path.unlink()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500,
+            detail="El binario descargado es inválido o está corrupto; no se aplicó la actualización.")
 
     if dry_run:
         try:
