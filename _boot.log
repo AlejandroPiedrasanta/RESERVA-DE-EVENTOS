@@ -1,0 +1,31 @@
+📦 node_modules requiere yarn install (sin tarball)
+🏗  Building production frontend…
+yarn run v1.22.22
+$ craco build
+Cannot find ESLint plugin (ESLintWebpackPlugin).
+Creating an optimized production build...
+Compiled successfully.
+
+File sizes after gzip:
+
+  515.52 kB  build/static/js/main.d681c14a.js
+  46.3 kB    build/static/js/52.4caabcbd.chunk.js
+  43.28 kB   build/static/js/239.35667523.chunk.js
+  32.64 kB   build/static/css/main.c08ac0d3.css
+  10.46 kB   build/static/js/82.1f56ef37.chunk.js
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  yarn global add serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
+Done in 97.29s.
+==> ✅ Ready in 110s · Backend :8001 · Frontend :3000 · Preview: https://booking-events-3.preview.emergentagent.com
