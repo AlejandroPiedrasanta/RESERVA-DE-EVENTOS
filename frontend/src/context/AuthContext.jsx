@@ -35,8 +35,8 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const exchangeSession = useCallback(async (session_id) => {
-    const { data } = await api.post("/auth/session", { session_id });
+  const loginWithGoogleCredential = useCallback(async (credential) => {
+    const { data } = await api.post("/auth/session", { credential });
     if (data.session_token) setToken(data.session_token);
     setUser(data.user);
     setSubscription(data.subscription);
@@ -76,12 +76,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (window.location.hash?.includes("session_id=")) return;
     refresh();
   }, [refresh]);
 
   return (
-    <AuthContext.Provider value={{ user, subscription, status, refresh, exchangeSession, logout, setSubscription, setUser, authHeaders, registerWithPassword, loginWithPassword, updateProfile }}>
+    <AuthContext.Provider value={{ user, subscription, status, refresh, loginWithGoogleCredential, logout, setSubscription, setUser, authHeaders, registerWithPassword, loginWithPassword, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

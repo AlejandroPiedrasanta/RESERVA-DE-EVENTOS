@@ -1,5 +1,5 @@
 """
-Subscription + Auth (Emergent Google Auth + PayPal) module.
+Subscription + Auth (Google OAuth + PayPal) module.
 - 3-day trial per user (from first login)
 - $1/month subscription OR $20 lifetime via PayPal
 - Session cookie based auth
@@ -17,6 +17,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Cookie, Header
 from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
+
+# REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+from google.oauth2 import id_token as _google_id_token
+from google.auth.transport import requests as _google_requests
 
 
 # ── Password helpers (PBKDF2-HMAC-SHA256) ────────────────────────────
@@ -46,7 +50,17 @@ _db = _client[_DB_NAME]
 
 # ── Constants ─────────────────────────────────────────────────────────
 TRIAL_DAYS = 3
-EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+GOOGLE_LOGIN_CLIENT_ID_ENV = os.environ.get("GOOGLE_LOGIN_CLIENT_ID", "")
+GOOGLE_LOGIN_CLIENT_SECRET_ENV = os.environ.get("GOOGLE_LOGIN_CLIENT_SECRET", "")
+
+
+async def _get_google_login_settings() -> dict:
+    """Read Google Sign-In credentials from DB (preferred) or env fallback."""
+    doc = await _db.app_settings.find_one({"_id": "google_login"}, {"_id": 0}) or {}
+    return {
+        "client_id": (doc.get("client_id") or GOOGLE_LOGIN_CLIENT_ID_ENV or "").strip(),
+        "client_secret": (doc.get("client_secret") or GOOGLE_LOGIN_CLIENT_SECRET_ENV or "").strip(),
+    }
 
 PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox")
 PAYPAL_BASE = "https://api-m.sandbox.paypal.com" if PAYPAL_MODE == "sandbox" else "https://api-m.paypal.com"
@@ -79,7 +93,7 @@ def _require_admin(x_admin_password: Optional[str]):
 
 # ── Models ────────────────────────────────────────────────────────────
 class SessionExchangeReq(BaseModel):
-    session_id: str
+    credential: str  # Google ID token (JWT) obtained by @react-oauth/google on the frontend
 
 
 class RegisterReq(BaseModel):
@@ -191,16 +205,31 @@ async def _paypal_access_token() -> str:
 # ── Auth Endpoints ────────────────────────────────────────────────────
 @router.post("/auth/session")
 async def auth_session(body: SessionExchangeReq, response: Response):
-    """Exchange Emergent session_id → session_token cookie, create/update user, start trial."""
-    async with httpx.AsyncClient(timeout=15) as c:
-        r = await c.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": body.session_id})
-    if r.status_code != 200:
-        raise HTTPException(401, "Session inválida")
-    data = r.json()
-    email = data["email"]
-    name = data.get("name", "")
-    picture = data.get("picture", "")
-    session_token = data["session_token"]
+    """Verify Google ID token → session_token cookie, create/update user, start trial."""
+    google_cfg = await _get_google_login_settings()
+    client_id = google_cfg["client_id"]
+    if not client_id:
+        raise HTTPException(500, "GOOGLE_LOGIN_CLIENT_ID no configurado. Ve a Base de datos → Soporte avanzado → Google Sign-In y guarda tu Client ID.")
+    try:
+        # Verify signature + audience against our Google OAuth Client ID
+        idinfo = _google_id_token.verify_oauth2_token(
+            body.credential,
+            _google_requests.Request(),
+            client_id,
+        )
+    except ValueError as e:
+        raise HTTPException(401, f"Token de Google inválido: {e}")
+
+    iss = idinfo.get("iss")
+    if iss not in ("accounts.google.com", "https://accounts.google.com"):
+        raise HTTPException(401, "Emisor de token inválido")
+    if not idinfo.get("email_verified", False):
+        raise HTTPException(401, "Correo de Google no verificado")
+
+    email = idinfo["email"].lower().strip()
+    name = idinfo.get("name", "") or ""
+    picture = idinfo.get("picture", "") or ""
+    session_token = _secrets_mod.token_urlsafe(48)
 
     now = datetime.now(timezone.utc)
     existing = await _db.app_users.find_one({"email": email}, {"_id": 0})
@@ -219,6 +248,7 @@ async def auth_session(body: SessionExchangeReq, response: Response):
             "email": email,
             "name": name,
             "picture": picture,
+            "auth_provider": "google",
             "trial_start_at": now.isoformat(),
             "plan": None,
             "plan_expires_at": None,
@@ -451,6 +481,57 @@ async def admin_paypal_test(x_admin_password: Optional[str] = Header(default=Non
         return {"ok": False, "error": e.detail}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── Google Sign-In credentials (admin config) ─────────────────────────
+class GoogleLoginCredsReq(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+
+
+@router.get("/auth/google-config")
+async def auth_google_config():
+    """Public endpoint: exposes ONLY the Google Sign-In client_id so the frontend
+    can render the Google button. Never returns the client secret."""
+    cfg = await _get_google_login_settings()
+    return {"client_id": cfg["client_id"], "configured": bool(cfg["client_id"])}
+
+
+@router.get("/admin/google-login/config")
+async def admin_google_login_config(x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    cfg = await _get_google_login_settings()
+    secret = cfg["client_secret"] or ""
+    masked = ("•" * 20 + secret[-4:]) if len(secret) > 4 else ("•" * len(secret))
+    return {
+        "client_id": cfg["client_id"],
+        "client_secret_masked": masked,
+        "has_client_secret": bool(secret),
+        "configured": bool(cfg["client_id"]),
+    }
+
+
+@router.patch("/admin/google-login/config")
+async def admin_google_login_config_update(
+    body: GoogleLoginCredsReq,
+    x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password"),
+):
+    _require_admin(x_admin_password)
+    upd = {}
+    if body.client_id is not None:
+        upd["client_id"] = body.client_id.strip()
+    if body.client_secret is not None and body.client_secret.strip():
+        upd["client_secret"] = body.client_secret.strip()
+    if not upd:
+        raise HTTPException(400, "Nada que actualizar")
+    upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await _db.app_settings.update_one({"_id": "google_login"}, {"$set": upd}, upsert=True)
+    cfg = await _get_google_login_settings()
+    return {
+        "ok": True,
+        "client_id": cfg["client_id"],
+        "configured": bool(cfg["client_id"]),
+    }
 
 
 @router.post("/paypal/create-order")

@@ -13,7 +13,7 @@ import {
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
   Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
   GitCompare, FilePlus2, FilePenLine, FileMinus2,
-  Users, UserX, Ban, Crown, Gift, CreditCard,
+  Users, UserX, Ban, Crown, Gift, CreditCard, KeyRound,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -40,6 +40,7 @@ import { fireEpic } from "@/lib/celebrations";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 import { DesktopAppSection } from "@/components/DesktopAppSection";
 import PaypalConfigPanel from "@/components/PaypalConfigPanel";
+import GoogleAuthConfigPanel from "@/components/GoogleAuthConfigPanel";
 
 const BASE = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL;
 

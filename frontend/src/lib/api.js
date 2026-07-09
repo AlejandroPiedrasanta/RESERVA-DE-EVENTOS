@@ -252,3 +252,9 @@ export const adminDeleteUser  = (pwd, userId)       => api.delete(`/admin/users/
 export const adminGetPaypalConfig    = (pwd)          => api.get("/admin/paypal/config", adminHeaders(pwd)).then(r => r.data);
 export const adminUpdatePaypalConfig = (pwd, payload) => api.patch("/admin/paypal/config", payload, adminHeaders(pwd)).then(r => r.data);
 export const adminTestPaypalConfig   = (pwd)          => api.post("/admin/paypal/test", {}, adminHeaders(pwd)).then(r => r.data);
+
+// ─── Admin: Google Sign-In credentials management ───────────────────────
+export const adminGetGoogleLoginConfig    = (pwd)          => api.get("/admin/google-login/config", adminHeaders(pwd)).then(r => r.data);
+export const adminUpdateGoogleLoginConfig = (pwd, payload) => api.patch("/admin/google-login/config", payload, adminHeaders(pwd)).then(r => r.data);
+export const getGoogleAuthConfig          = ()             => api.get("/auth/google-config").then(r => r.data);
+
