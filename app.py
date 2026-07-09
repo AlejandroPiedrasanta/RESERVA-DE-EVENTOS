@@ -3067,21 +3067,8 @@ async def check_github_updates():
             logger.warning(f"No se pudo leer remote_version en check-updates: {e}")
             return ""
 
-    # Fuente de verdad REAL de "hay update": que el binario de ESTA plataforma
-    # ya esté PUBLICADO como asset en un GitHub Release. Así el notificador NO
-    # se adelanta al build: si el workflow 'Build Windows .exe' aún no terminó
-    # (no hay asset), no se anuncia ninguna versión nueva. Cuando el build
-    # publica el asset, recién ahí se anuncia y se puede descargar/instalar.
-    async def _fetch_asset():
-        try:
-            return await _find_release_asset(_current_asset_name())
-        except Exception as e:
-            logger.warning(f"No se pudo consultar el asset de release: {e}")
-            return {}
-
     try:
-        r, remote_version, asset = await asyncio.gather(
-            _fetch_commits(), _fetch_ver(), _fetch_asset())
+        r, remote_version = await asyncio.gather(_fetch_commits(), _fetch_ver())
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Sin conexión a GitHub: {e}")
     if r.status_code == 404:
@@ -3101,21 +3088,10 @@ async def check_github_updates():
     # cuando el usuario ya tenía v1.0.14 instalada.
     # Solo cae al SHA como fallback cuando no hay información de versión.
     sha_differs = bool(remote_sha) and remote_sha != last_seen
-
-    # Versión REALMENTE instalable = la del release donde está publicado el
-    # binario de esta plataforma. Si no hay asset (build no activo / en curso),
-    # NO se anuncia update aunque version.txt del repo sea mayor. Esto evita el
-    # falso "hay nueva versión" cuando el .exe todavía no existe.
-    asset_version = (asset or {}).get("version", "") or ""
-    has_downloadable = bool(asset and asset.get("url"))
-
-    if has_downloadable and asset_version:
-        # La versión anunciada es la del asset descargable (autoritativa).
-        remote_version = asset_version
-        has_updates = _is_newer(asset_version, _local_version)
+    if remote_version and _local_version:
+        has_updates = _is_newer(remote_version, _local_version)
     else:
-        # Sin binario publicado todavía → no adelantarse: no hay update aplicable.
-        has_updates = False
+        has_updates = sha_differs
 
     new_commits = [{
         "sha": c["sha"][:7],
