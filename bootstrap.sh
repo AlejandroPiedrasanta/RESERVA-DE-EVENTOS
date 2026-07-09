@@ -6,6 +6,13 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 t0=$(date +%s)
 
+# ── 0.a) Matar procesos viejos ANTES de nada ─────────────────────
+# Si /app/backend o /app/frontend fueron borrados/recreados mientras los
+# servicios corrían, sus procesos quedan con un working-dir eliminado y
+# webpack/uvicorn fallan con "Can't resolve ..." o "getcwd() FileNotFound".
+# Pararlos aquí garantiza que al final arranquen procesos limpios con cwd válido.
+sudo supervisorctl stop backend frontend >/dev/null 2>&1 || true
+
 # ── 0) (eliminado) instalación de zstd/pigz — ya no hay tarball ──
 # El tarball de node_modules (~670MB) fue eliminado. Ahora usamos
 # yarn install con caché-awareness (reutiliza node_modules si el hash
