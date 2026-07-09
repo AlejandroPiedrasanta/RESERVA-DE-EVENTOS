@@ -91,7 +91,12 @@ jobs:
           # emergentintegrations is an Emergent-internal package (not on PyPI).
           # Strip it out for the Windows build — it's only used by the LLM
           # integration path which is not exercised in the .exe runtime.
-          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          # Quitamos paquetes que (a) no se usan en el runtime del binario y
+          # (b) rompen o ralentizan el build fuera de Emergent:
+          #   · emergentintegrations → paquete interno (no está en PyPI)
+          #   · litellm              → wheel interno de Emergent (URL privada)
+          #   · jq                   → extensión C sin wheel fiable en Windows
+          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
           pip install -r /tmp/req.txt
           pip install "pyinstaller>=6.10,<7" pillow
 
@@ -445,7 +450,12 @@ jobs:
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          # Quitamos paquetes que (a) no se usan en el runtime del binario y
+          # (b) rompen o ralentizan el build fuera de Emergent:
+          #   · emergentintegrations → paquete interno (no está en PyPI)
+          #   · litellm              → wheel interno de Emergent (URL privada)
+          #   · jq                   → extensión C sin wheel fiable en Windows
+          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
           pip install -r /tmp/req.txt
           pip install "pyinstaller>=6.10,<7" pillow
 
@@ -566,7 +576,12 @@ jobs:
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          # Quitamos paquetes que (a) no se usan en el runtime del binario y
+          # (b) rompen o ralentizan el build fuera de Emergent:
+          #   · emergentintegrations → paquete interno (no está en PyPI)
+          #   · litellm              → wheel interno de Emergent (URL privada)
+          #   · jq                   → extensión C sin wheel fiable en Windows
+          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
           pip install -r /tmp/req.txt
           pip install "pyinstaller>=6.10,<7" pillow
 
@@ -705,7 +720,12 @@ jobs:
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          grep -v '^emergentintegrations' backend/requirements.txt > /tmp/req.txt
+          # Quitamos paquetes que (a) no se usan en el runtime del binario y
+          # (b) rompen o ralentizan el build fuera de Emergent:
+          #   · emergentintegrations → paquete interno (no está en PyPI)
+          #   · litellm              → wheel interno de Emergent (URL privada)
+          #   · jq                   → extensión C sin wheel fiable en Windows
+          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
           pip install -r /tmp/req.txt
           pip install "pyinstaller>=6.10,<7" pillow
 
