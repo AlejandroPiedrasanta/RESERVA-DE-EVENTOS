@@ -33,7 +33,15 @@ PAYPAL_SECRET = os.environ.get("PAYPAL_SECRET", "")
 PLAN_MONTHLY_PRICE = "1.00"
 PLAN_LIFETIME_PRICE = "20.00"
 
+# Admin password – matches SOPORTE_FACTORY_PASSWORD in DatabasePage.jsx
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "286811")
+
 router = APIRouter(prefix="/api")
+
+
+def _require_admin(x_admin_password: Optional[str]):
+    if not x_admin_password or x_admin_password != ADMIN_PASSWORD:
+        raise HTTPException(401, "Admin no autorizado")
 
 
 # ── Models ────────────────────────────────────────────────────────────
@@ -64,6 +72,8 @@ async def _get_user_by_token(token: Optional[str]):
     if exp < datetime.now(timezone.utc):
         return None
     user = await _db.app_users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+    if user and user.get("disabled"):
+        return None
     return user
 
 
@@ -145,6 +155,8 @@ async def auth_session(body: SessionExchangeReq, response: Response):
     now = datetime.now(timezone.utc)
     existing = await _db.app_users.find_one({"email": email}, {"_id": 0})
     if existing:
+        if existing.get("disabled"):
+            raise HTTPException(403, "Esta cuenta ha sido desactivada por el administrador")
         user_id = existing["user_id"]
         await _db.app_users.update_one(
             {"user_id": user_id},
@@ -439,3 +451,114 @@ async def referral_redeem(
 
     user = await _db.app_users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     return {"ok": True, "user": user, "subscription": _subscription_state(user)}
+
+
+# ── Admin Endpoints ────────────────────────────────────────────────────
+@router.get("/admin/users")
+async def admin_list_users(x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    users = await _db.app_users.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    total_referrals_by_user = {}
+    async for r in _db.referrals.aggregate([
+        {"$group": {"_id": "$referrer_user_id", "n": {"$sum": 1}}}
+    ]):
+        total_referrals_by_user[r["_id"]] = r["n"]
+    total_payments_by_user = {}
+    async for p in _db.payments.aggregate([
+        {"$match": {"status": "COMPLETED"}},
+        {"$group": {"_id": "$user_id", "n": {"$sum": 1}, "amount": {"$sum": {"$toDouble": "$amount"}}}}
+    ]):
+        total_payments_by_user[p["_id"]] = {"count": p["n"], "amount": p["amount"]}
+
+    enriched = []
+    for u in users:
+        sub = _subscription_state(u)
+        u_out = dict(u)
+        u_out["subscription"] = sub
+        u_out["disabled"] = bool(u.get("disabled"))
+        u_out["referrals_count"] = total_referrals_by_user.get(u["user_id"], 0)
+        u_out["payments"] = total_payments_by_user.get(u["user_id"], {"count": 0, "amount": 0})
+        enriched.append(u_out)
+    return {"users": enriched, "total": len(enriched)}
+
+
+@router.post("/admin/users/{user_id}/disable")
+async def admin_disable_user(user_id: str, x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    res = await _db.app_users.update_one({"user_id": user_id}, {"$set": {"disabled": True}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Usuario no encontrado")
+    # Kill all active sessions
+    await _db.user_sessions.delete_many({"user_id": user_id})
+    return {"ok": True, "disabled": True}
+
+
+@router.post("/admin/users/{user_id}/enable")
+async def admin_enable_user(user_id: str, x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    res = await _db.app_users.update_one({"user_id": user_id}, {"$set": {"disabled": False}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Usuario no encontrado")
+    return {"ok": True, "disabled": False}
+
+
+@router.post("/admin/users/{user_id}/revoke")
+async def admin_revoke_plan(user_id: str, x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    """Clear the user's plan (removes paid subscription; trial remains as computed)."""
+    _require_admin(x_admin_password)
+    res = await _db.app_users.update_one(
+        {"user_id": user_id},
+        {"$set": {"plan": None, "plan_expires_at": None}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Usuario no encontrado")
+    return {"ok": True, "plan": None}
+
+
+class GrantPlanReq(BaseModel):
+    plan: str  # "monthly" | "lifetime"
+    months: Optional[int] = 1
+
+
+@router.post("/admin/users/{user_id}/grant")
+async def admin_grant_plan(
+    user_id: str,
+    body: GrantPlanReq,
+    x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password"),
+):
+    _require_admin(x_admin_password)
+    if body.plan not in ("monthly", "lifetime"):
+        raise HTTPException(400, "Plan inválido")
+    user = await _db.app_users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+    now = datetime.now(timezone.utc)
+    if body.plan == "lifetime":
+        upd = {"plan": "lifetime", "plan_expires_at": None}
+    else:
+        cur_exp = user.get("plan_expires_at")
+        if isinstance(cur_exp, str):
+            try:
+                cur = datetime.fromisoformat(cur_exp)
+                if cur.tzinfo is None:
+                    cur = cur.replace(tzinfo=timezone.utc)
+            except Exception:
+                cur = now
+        else:
+            cur = now
+        base = cur if cur > now else now
+        months = max(1, int(body.months or 1))
+        upd = {"plan": "monthly", "plan_expires_at": (base + timedelta(days=30 * months)).isoformat()}
+    await _db.app_users.update_one({"user_id": user_id}, {"$set": upd})
+    return {"ok": True, **upd}
+
+
+@router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    res = await _db.app_users.delete_one({"user_id": user_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Usuario no encontrado")
+    await _db.user_sessions.delete_many({"user_id": user_id})
+    return {"ok": True, "deleted": True}
+

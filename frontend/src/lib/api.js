@@ -196,3 +196,13 @@ export const getAiContext = () => api.get("/ai-context").then(r => r.data);
 export const saveAiContext = (content) => api.post("/ai-context", { content }).then(r => r.data);
 export const resetAiContext = () => api.post("/ai-context/reset").then(r => r.data);
 
+
+
+// ─── Admin: user management (Soporte avanzado > Usuarios) ───────────────
+const adminHeaders = (password) => ({ headers: { "X-Admin-Password": password || "" } });
+export const adminListUsers   = (pwd)               => api.get("/admin/users", adminHeaders(pwd)).then(r => r.data);
+export const adminDisableUser = (pwd, userId)       => api.post(`/admin/users/${userId}/disable`, {}, adminHeaders(pwd)).then(r => r.data);
+export const adminEnableUser  = (pwd, userId)       => api.post(`/admin/users/${userId}/enable`, {}, adminHeaders(pwd)).then(r => r.data);
+export const adminRevokePlan  = (pwd, userId)       => api.post(`/admin/users/${userId}/revoke`, {}, adminHeaders(pwd)).then(r => r.data);
+export const adminGrantPlan   = (pwd, userId, plan, months=1) => api.post(`/admin/users/${userId}/grant`, { plan, months }, adminHeaders(pwd)).then(r => r.data);
+export const adminDeleteUser  = (pwd, userId)       => api.delete(`/admin/users/${userId}`, adminHeaders(pwd)).then(r => r.data);

@@ -13,6 +13,7 @@ import {
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
   Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
   GitCompare, FilePlus2, FilePenLine, FileMinus2,
+  Users, UserX, Ban, Crown, Gift,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -32,6 +33,7 @@ import {
   connectGithub, disconnectGithub, runDiagnostic, fixDiagnosticIssue, fixAllDiagnosticIssues,
   githubPushAll, getGithubPushStatus, getGithubNextVersion, getGithubPushPreview, getGithubPushDiff,
   getGithubStorage, deleteGithubBuilds, triggerGithubBuildExe,
+  adminListUsers, adminDisableUser, adminEnableUser, adminRevokePlan, adminGrantPlan, adminDeleteUser,
 } from "@/lib/api";
 import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
@@ -165,9 +167,14 @@ export default function DatabasePage() {
   const [unifiedTab, setUnifiedTab] = useState("conn");
   const [clearLoading, setClearLoading] = useState(false);
 
-  // Unified "Soporte avanzado" internal tabs: "publish" | "desktop" | "storage" | "tools"
+  // Unified "Soporte avanzado" internal tabs: "publish" | "desktop" | "storage" | "tools" | "users"
   const [supportTab, setSupportTab] = useState("publish");
   const [copiedRepo, setCopiedRepo] = useState(false);
+
+  // Usuarios registrados (admin)
+  const [users, setUsers] = useState(null);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userActionId, setUserActionId] = useState(null);
 
   // ── Soporte avanzado (antes GitHub) — bloqueado por contraseña de fábrica ──
   const [soporteUnlocked, setSoporteUnlocked] = useState(false);
@@ -448,6 +455,38 @@ export default function DatabasePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soporteUnlocked, openBlocks.github, supportTab]);
+
+  // Cargar lista de usuarios al abrir la pestaña "Usuarios"
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const data = await adminListUsers(SOPORTE_FACTORY_PASSWORD);
+      setUsers(data.users || []);
+    } catch (e) {
+      toast({ title: "Error", description: e?.response?.data?.detail || "No se pudieron cargar los usuarios", variant: "destructive" });
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (soporteUnlocked && openBlocks.github && supportTab === "users" && users === null && !usersLoading) {
+      loadUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soporteUnlocked, openBlocks.github, supportTab]);
+
+  const runUserAction = async (uid, fn, successMsg) => {
+    setUserActionId(uid);
+    try {
+      await fn();
+      toast({ title: successMsg });
+      await loadUsers();
+    } catch (e) {
+      toast({ title: "Error", description: e?.response?.data?.detail || "Operación fallida", variant: "destructive" });
+    } finally {
+      setUserActionId(null);
+    }
+  };
 
   // Helper: copiar URL del repositorio al portapapeles
   const handleCopyRepoUrl = async () => {
@@ -2189,13 +2228,14 @@ export default function DatabasePage() {
                   )}
                 </div>
 
-                {/* ── TABS: Publicar · App Escritorio · Almacenamiento · Herramientas ── */}
+                {/* ── TABS: Publicar · App Escritorio · Almacenamiento · Herramientas · Usuarios ── */}
                 <div className="flex items-center gap-1 p-1 bg-slate-100/80 rounded-2xl">
                   {[
                     { id: "publish",  label: "Publicar",       icon: <CloudUpload size={12} /> },
                     { id: "desktop",  label: "App Escritorio", icon: <Laptop size={12} /> },
                     { id: "storage",  label: "Almacenamiento", icon: <HardDrive size={12} /> },
                     { id: "tools",    label: "Herramientas",   icon: <Wrench size={12} /> },
+                    { id: "users",    label: "Usuarios",       icon: <Users size={12} /> },
                   ].map(t => (
                     <button
                       key={t.id}
@@ -2770,6 +2810,179 @@ export default function DatabasePage() {
                     </div>
                   </div>
                 )}
+
+                {/* ═══════════ TAB 5: USUARIOS ═══════════ */}
+                {supportTab === "users" && (
+                  <div className="space-y-3" data-testid="support-panel-users">
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-500 flex items-center justify-center shrink-0">
+                          <Users size={16} className="text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                            Usuarios registrados
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            {users ? `${users.length} usuario(s) · plan, prueba y estado` : "Google Sign-In · gestión avanzada"}
+                          </p>
+                        </div>
+                        <button
+                          onClick={loadUsers}
+                          disabled={usersLoading}
+                          data-testid="admin-users-refresh-btn"
+                          className="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all"
+                          title="Recargar">
+                          <RefreshCw size={13} className={usersLoading ? "animate-spin" : ""} />
+                        </button>
+                      </div>
+
+                      <div className="p-4 space-y-3">
+                        {usersLoading && !users ? (
+                          <div className="flex items-center justify-center py-8 gap-3 text-slate-400">
+                            <Loader2 size={18} className="animate-spin" />
+                            <span className="text-sm">Cargando usuarios…</span>
+                          </div>
+                        ) : !users ? (
+                          <div className="flex items-center justify-between py-3">
+                            <p className="text-sm text-slate-400">Aún no se ha cargado la lista.</p>
+                            <button
+                              onClick={loadUsers}
+                              data-testid="admin-users-load-btn"
+                              className="text-xs text-indigo-500 font-bold hover:underline">
+                              Cargar ahora
+                            </button>
+                          </div>
+                        ) : users.length === 0 ? (
+                          <div className="text-center py-8 text-sm text-slate-400" data-testid="admin-users-empty">
+                            Todavía no hay usuarios registrados.
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-[520px] overflow-auto pr-1" data-testid="admin-users-list">
+                            {users.map((u) => {
+                              const sub = u.subscription || {};
+                              const planLabel = sub.plan === "lifetime" ? "De por vida"
+                                : sub.plan === "monthly" ? "Mensual"
+                                : sub.trial_active ? `Prueba (${sub.trial_days_left}d)`
+                                : "Sin plan";
+                              const planTone = u.disabled ? "bg-slate-200 text-slate-600"
+                                : sub.plan === "lifetime" ? "bg-amber-100 text-amber-800"
+                                : sub.plan === "monthly" ? "bg-emerald-100 text-emerald-800"
+                                : sub.trial_active ? "bg-indigo-100 text-indigo-700"
+                                : "bg-slate-100 text-slate-500";
+                              const busy = userActionId === u.user_id;
+                              return (
+                                <div
+                                  key={u.user_id}
+                                  data-testid={`admin-user-row-${u.user_id}`}
+                                  className={`rounded-2xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3 ${
+                                    u.disabled ? "bg-slate-50 border-slate-200 opacity-70" : "bg-white border-slate-200/70"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    {u.picture ? (
+                                      <img src={u.picture} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                                    ) : (
+                                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-black shrink-0">
+                                        {(u.name || u.email || "?").slice(0, 1).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-sm font-black text-slate-900 truncate" data-testid={`admin-user-name-${u.user_id}`}>
+                                        {u.name || "(sin nombre)"} {u.disabled && <span className="text-red-600">· desactivado</span>}
+                                      </p>
+                                      <p className="text-[11px] text-slate-500 truncate" data-testid={`admin-user-email-${u.user_id}`}>{u.email}</p>
+                                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${planTone}`}
+                                          data-testid={`admin-user-plan-${u.user_id}`}>
+                                          {sub.plan === "lifetime" ? <Crown size={9}/> : sub.trial_active ? <Sparkles size={9}/> : sub.plan === "monthly" ? <CheckCircle size={9}/> : <Clock size={9}/>}
+                                          {planLabel}
+                                        </span>
+                                        {sub.plan === "monthly" && sub.plan_expires_at && (
+                                          <span className="text-[10px] text-slate-400">
+                                            hasta {new Date(sub.plan_expires_at).toLocaleDateString("es-MX", {day:"2-digit", month:"short", year:"numeric"})}
+                                          </span>
+                                        )}
+                                        {u.payments?.count > 0 && (
+                                          <span className="text-[10px] text-slate-400">· {u.payments.count} pago(s) · ${Number(u.payments.amount||0).toFixed(2)}</span>
+                                        )}
+                                        {u.referrals_count > 0 && (
+                                          <span className="text-[10px] text-slate-400">· {u.referrals_count} referido(s)</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {sub.plan && (
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => runUserAction(u.user_id,
+                                          () => adminRevokePlan(SOPORTE_FACTORY_PASSWORD, u.user_id),
+                                          "Plan retirado")}
+                                        data-testid={`admin-user-revoke-${u.user_id}`}
+                                        className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 flex items-center gap-1"
+                                        title="Quitar plan (dejar sin plan)">
+                                        <Gift size={10}/> Quitar plan
+                                      </button>
+                                    )}
+                                    {!u.disabled ? (
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => runUserAction(u.user_id,
+                                          () => adminDisableUser(SOPORTE_FACTORY_PASSWORD, u.user_id),
+                                          "Cuenta desactivada")}
+                                        data-testid={`admin-user-disable-${u.user_id}`}
+                                        className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 disabled:opacity-50 flex items-center gap-1"
+                                        title="Desactivar (bloquear ingreso)">
+                                        <Ban size={10}/> Desactivar
+                                      </button>
+                                    ) : (
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => runUserAction(u.user_id,
+                                          () => adminEnableUser(SOPORTE_FACTORY_PASSWORD, u.user_id),
+                                          "Cuenta reactivada")}
+                                        data-testid={`admin-user-enable-${u.user_id}`}
+                                        className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 flex items-center gap-1"
+                                        title="Reactivar cuenta">
+                                        <UserCheck size={10}/> Reactivar
+                                      </button>
+                                    )}
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => {
+                                        if (window.confirm(`¿Eliminar a ${u.email}? Esta acción es irreversible.`)) {
+                                          runUserAction(u.user_id,
+                                            () => adminDeleteUser(SOPORTE_FACTORY_PASSWORD, u.user_id),
+                                            "Usuario eliminado");
+                                        }
+                                      }}
+                                      data-testid={`admin-user-delete-${u.user_id}`}
+                                      className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50 flex items-center gap-1"
+                                      title="Eliminar definitivamente">
+                                      {busy ? <Loader2 size={10} className="animate-spin"/> : <Trash2 size={10}/>} Eliminar
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="flex items-start gap-2.5 bg-indigo-50/60 rounded-2xl px-4 py-3 border border-indigo-100">
+                          <Info size={13} className="text-indigo-400 shrink-0 mt-0.5" />
+                          <p className="text-[10px] text-indigo-700/80 leading-relaxed">
+                            <b>Desactivar</b> impide que la persona vuelva a iniciar sesión con Google (cierra todas sus sesiones).
+                            <b> Quitar plan</b> retira su suscripción pagada; conserva el registro y podrá volver a suscribirse.
+                            <b> Eliminar</b> borra completamente su cuenta y datos de sesión.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
 
               </div>
             </CollapseBody>
