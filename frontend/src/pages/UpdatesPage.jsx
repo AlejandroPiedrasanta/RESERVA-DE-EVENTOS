@@ -8,6 +8,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
 import { getUpdatesHistory, uploadAppUpdate, deleteUpdate, setLatestUpdate, getUpdateDownloadUrl, checkForUpdates,
+  getUpdateManifest,
   getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate } from "@/lib/api";
 import { celebrateUpdate } from "@/lib/celebrations";
 
@@ -166,9 +167,51 @@ export default function UpdatesPage() {
   const handleCheckOnline = async (silent = false) => {
     setChecking(true);
     try {
+      // ── 1) SEMÁFORO AUTORITATIVO: consultar el manifest version.json primero.
+      //     Solo notificamos actualización cuando el manifest existe (indica
+      //     que TODOS los binarios están 100% publicados en la Release y sus
+      //     hashes SHA256 son verificables). Esto elimina la carrera donde
+      //     el cliente ve una versión nueva antes de que el .exe termine de subir.
+      let manifest = null;
+      try {
+        manifest = await getUpdateManifest(true);
+      } catch { /* fallback silencioso al método legacy */ }
+
+      if (manifest && manifest.status === "ready" && manifest.has_update) {
+        setCheckResult({
+          status: "update",
+          local_version: manifest.local_version,
+          remote_version: manifest.remote_version,
+          from_manifest: true,
+          manifest: manifest.manifest,
+          source_url: manifest.source_url,
+          notes: (manifest.manifest && manifest.manifest.release_url)
+            ? `Descarga verificada con SHA256 · Release ${manifest.manifest.release_tag}`
+            : "Descarga verificada con SHA256",
+          download_url: manifest.manifest?.release_url || manifest.source_url,
+        });
+        return;
+      }
+
+      // ── 2) Fallback al chequeo legacy (version.txt + MongoDB).
       const r = await checkForUpdates();
-      if (r.has_update) setCheckResult({ status: "update", ...r });
-      else setCheckResult({ status: "latest", version: r.remote_version || r.local_version });
+
+      // Guard extra: si el chequeo legacy dice has_update pero el manifest
+      // NO está disponible (o no está listo), NO notificar — evita descargas fallidas.
+      const manifestBlocks =
+        r.has_update && r.remote_source !== "manifest" && manifest && manifest.status === "not_available";
+
+      if (r.has_update && !manifestBlocks) {
+        setCheckResult({ status: "update", ...r });
+      } else if (manifestBlocks) {
+        setCheckResult({
+          status: "latest",
+          version: r.local_version,
+          waiting_manifest: true,
+        });
+      } else {
+        setCheckResult({ status: "latest", version: r.remote_version || r.local_version });
+      }
     } catch {
       if (!silent) toast({ title: "No se pudo consultar la base de datos", variant: "destructive" });
     } finally { setChecking(false); }

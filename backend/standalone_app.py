@@ -3396,28 +3396,260 @@ async def github_disconnect():
     return {"success": True}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Push al repositorio DESDE EL .EXE (sin git binario)
+#
+# El .exe portable NO tiene `git.exe` disponible ni un checkout de trabajo.
+# Publicamos los archivos que existen en la carpeta de instalación / bundle
+# usando la GitHub Git Data API (blobs + tree + commit + ref). Es UN solo
+# commit atómico con todos los archivos, sin dependencias externas.
+#
+# Alcance: archivos que el .exe SÍ tiene localmente (version.txt, temas,
+# config, backups exportados). NO se suben backend/ ni frontend/ porque el
+# .exe no carga sus fuentes — sólo el bundle empaquetado por PyInstaller.
+# ─────────────────────────────────────────────────────────────────────
+_desktop_push_state = {
+    "status": "idle",          # idle | running | done | error
+    "progress": 0,
+    "message": "",
+    "detail": "",
+    "step": 0,
+    "total_steps": 6,
+    "started_at": None,
+    "finished_at": None,
+    "result": None,
+    "error": None,
+}
+
+
+def _set_desktop_push(progress=None, message=None, status=None, step=None, detail=None):
+    if progress is not None: _desktop_push_state["progress"] = int(progress)
+    if message is not None:  _desktop_push_state["message"] = str(message)
+    if status is not None:   _desktop_push_state["status"] = status
+    if step is not None:     _desktop_push_state["step"] = int(step)
+    if detail is not None:   _desktop_push_state["detail"] = str(detail)
+
+
+def _iter_desktop_push_files():
+    """Devuelve una lista de (repo_path, absolute_local_path) que el .exe
+    puede subir al repositorio. Incluye SOLO archivos que existan localmente.
+
+    Fuentes:
+      · install_dir/version.txt   → repo:/version.txt
+      · install_dir/themes/*.json → repo:/themes/*.json
+      · install_dir/version.json  → repo:/version.json  (si algún día lo cachea)
+      · install_dir/bootstrap.sh  → repo:/bootstrap.sh  (si el usuario lo tiene local)
+      · install_dir/backups/*.json (config exportado) → repo:/backups/*.json
+    """
+    import sys as _sys
+    exe_path = Path(_sys.executable)
+    # Cuando corre con --onefile, sys.executable apunta al bootloader (.exe).
+    # Los archivos externos que puede editar el usuario viven al lado del .exe.
+    install_dir = exe_path.parent if exe_path.suffix.lower() == ".exe" else Path.cwd()
+
+    candidates: list[tuple[str, Path]] = []
+    # 1) version.txt / version.json
+    for name in ("version.txt", "version.json", "bootstrap.sh"):
+        p = install_dir / name
+        if p.exists() and p.is_file() and p.stat().st_size < 2 * 1024 * 1024:
+            candidates.append((name, p))
+    # 2) themes/
+    tdir = install_dir / "themes"
+    if tdir.exists() and tdir.is_dir():
+        for p in tdir.rglob("*"):
+            if p.is_file() and p.suffix.lower() in {".json", ".css"} and p.stat().st_size < 1024 * 1024:
+                rel = p.relative_to(install_dir).as_posix()
+                candidates.append((rel, p))
+    # 3) backups/ (archivos JSON pequeños)
+    bdir = install_dir / "backups"
+    if bdir.exists() and bdir.is_dir():
+        for p in bdir.rglob("*.json"):
+            if p.is_file() and p.stat().st_size < 2 * 1024 * 1024:
+                rel = p.relative_to(install_dir).as_posix()
+                candidates.append((rel, p))
+    return candidates
+
+
+async def _do_desktop_push(payload: dict):
+    """Ejecuta el push vía GitHub API. Actualiza `_desktop_push_state` en vivo."""
+    import base64
+    _desktop_push_state["result"] = None
+    _desktop_push_state["error"] = None
+    _desktop_push_state["started_at"] = datetime.now(timezone.utc).isoformat()
+    _desktop_push_state["finished_at"] = None
+    _set_desktop_push(progress=2, message="Verificando credenciales…", status="running", step=1,
+                      detail="Leyendo configuración de GitHub")
+
+    try:
+        cfg = await _get_github_cfg()
+        token = (cfg.get("token") or "").strip()
+        repo_url = (cfg.get("repo_url") or "").strip()
+        branch = (cfg.get("branch") or DEFAULT_GITHUB_BRANCH).strip()
+        owner, repo = _parse_github_url(repo_url)
+        if not token or not owner or not repo:
+            raise RuntimeError("Falta token o repositorio configurado. Conéctate primero en GitHub → Conectar cuenta.")
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "cinema-productions-desktop",
+        }
+        message = (payload.get("message") or f"Cambios desde la app de escritorio — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}").strip()
+
+        files = _iter_desktop_push_files()
+        if not files:
+            _set_desktop_push(progress=100, message="No hay archivos locales para subir.",
+                              status="done", step=6, detail="Nada que publicar")
+            _desktop_push_state["result"] = {"success": True, "nothing_to_commit": True,
+                                              "message": "El .exe no tiene archivos locales editables."}
+            _desktop_push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+            return
+
+        _set_desktop_push(progress=15, message=f"Preparando {len(files)} archivo(s)…", step=2,
+                          detail="Codificando en base64 para la API de GitHub")
+
+        base = f"https://api.github.com/repos/{owner}/{repo}"
+        async with httpx.AsyncClient(timeout=45, headers=headers) as http:
+            # 1) Obtener SHA de la rama y del último commit
+            r = await http.get(f"{base}/git/ref/heads/{branch}")
+            if r.status_code == 404:
+                # rama no existe: usar la rama por defecto del repo
+                rr = await http.get(base)
+                default_branch = (rr.json() or {}).get("default_branch") if rr.status_code == 200 else None
+                if not default_branch:
+                    raise RuntimeError(f"Rama '{branch}' no existe y no se pudo determinar la rama por defecto.")
+                branch = default_branch
+                r = await http.get(f"{base}/git/ref/heads/{branch}")
+            if r.status_code != 200:
+                raise RuntimeError(f"No se pudo leer la rama '{branch}': HTTP {r.status_code}")
+            ref_sha = r.json()["object"]["sha"]
+
+            rc = await http.get(f"{base}/git/commits/{ref_sha}")
+            if rc.status_code != 200:
+                raise RuntimeError(f"No se pudo leer el commit base: HTTP {rc.status_code}")
+            base_tree_sha = rc.json()["tree"]["sha"]
+
+            # 2) Crear blobs
+            _set_desktop_push(progress=30, message="Subiendo archivos a GitHub…", step=3,
+                              detail=f"Creando {len(files)} blob(s)")
+            tree_entries = []
+            for i, (rel, local) in enumerate(files):
+                try:
+                    data = local.read_bytes()
+                except Exception as e:
+                    logger.warning(f"[desktop-push] no se pudo leer {local}: {e}")
+                    continue
+                b64 = base64.b64encode(data).decode("ascii")
+                rb = await http.post(f"{base}/git/blobs", json={"content": b64, "encoding": "base64"})
+                if rb.status_code not in (200, 201):
+                    raise RuntimeError(f"Fallo blob {rel}: HTTP {rb.status_code} · {rb.text[:200]}")
+                tree_entries.append({
+                    "path": rel,
+                    "mode": "100755" if rel.endswith(".sh") else "100644",
+                    "type": "blob",
+                    "sha": rb.json()["sha"],
+                })
+                pct = 30 + int(40 * (i + 1) / max(1, len(files)))
+                _set_desktop_push(progress=pct, detail=f"blob {i+1}/{len(files)} · {rel}")
+
+            if not tree_entries:
+                raise RuntimeError("Ningún archivo pudo prepararse para el commit.")
+
+            # 3) Crear tree (base_tree preserva el resto del repo)
+            _set_desktop_push(progress=75, message="Ensamblando árbol de archivos…", step=4)
+            rt = await http.post(f"{base}/git/trees",
+                                  json={"base_tree": base_tree_sha, "tree": tree_entries})
+            if rt.status_code not in (200, 201):
+                raise RuntimeError(f"Fallo create tree: HTTP {rt.status_code} · {rt.text[:200]}")
+            new_tree_sha = rt.json()["sha"]
+
+            # 4) Crear commit
+            _set_desktop_push(progress=85, message="Creando commit…", step=5,
+                              detail=f"{len(tree_entries)} archivo(s)")
+            commit_msg = f"{message}\n\n[desktop app] [skip ci]"
+            rcc = await http.post(f"{base}/git/commits",
+                                  json={"message": commit_msg, "tree": new_tree_sha, "parents": [ref_sha]})
+            if rcc.status_code not in (200, 201):
+                raise RuntimeError(f"Fallo create commit: HTTP {rcc.status_code} · {rcc.text[:200]}")
+            new_commit_sha = rcc.json()["sha"]
+
+            # 5) Actualizar la ref de la rama
+            _set_desktop_push(progress=95, message="Publicando en la rama…", step=6,
+                              detail=f"origin/{branch}")
+            ru = await http.patch(f"{base}/git/refs/heads/{branch}",
+                                   json={"sha": new_commit_sha, "force": False})
+            if ru.status_code not in (200, 201):
+                raise RuntimeError(f"Fallo update ref: HTTP {ru.status_code} · {ru.text[:200]}")
+
+        _set_desktop_push(progress=100, message="¡Cambios publicados en GitHub!", status="done",
+                          step=6, detail=f"commit {new_commit_sha[:7]} · {len(tree_entries)} archivo(s)")
+        _desktop_push_state["result"] = {
+            "success": True,
+            "nothing_to_commit": False,
+            "commit_sha": new_commit_sha,
+            "commit_short": new_commit_sha[:7],
+            "branch": branch,
+            "files_changed": len(tree_entries),
+            "repo_url": repo_url,
+            "via": "github_api",
+        }
+        _desktop_push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Persistir metadatos del último push
+        try:
+            await db.app_settings.update_one(
+                {},
+                {"$set": {
+                    "github_config.last_commit_sha": new_commit_sha,
+                    "github_config.last_push_at": datetime.now(timezone.utc).isoformat(),
+                    "github_config.last_push_message": message,
+                    "github_config.last_push_files": len(tree_entries),
+                }},
+                upsert=True,
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"[desktop-push] falló: {e}")
+        _set_desktop_push(progress=0, message=f"Error: {e}", status="error")
+        _desktop_push_state["error"] = str(e)[:400]
+        _desktop_push_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
 @api_router.post("/github/push-all")
 async def github_push_all(payload: dict = Body(default={})):
-    """No disponible en escritorio: subir el código fuente al repositorio requiere
-    un entorno git de desarrollo. En la app de escritorio, GitHub se usa solo para
-    RECIBIR actualizaciones (Actualizaciones → Buscar/Aplicar)."""
-    return {
-        "status": "unavailable",
-        "is_desktop": True,
-        "message": "Subir cambios al repositorio no está disponible en la app de escritorio. "
-                   "Usa esta función desde la versión en la nube. Aquí puedes RECIBIR actualizaciones "
-                   "desde 'Actualizaciones'.",
-    }
+    """Publica los archivos LOCALES del .exe al repositorio vía GitHub API.
+
+    A diferencia del server web (que clona con `git`), aquí usamos la Git
+    Data API para no depender de un binario `git` en la PC del usuario.
+    Sube: version.txt, version.json, bootstrap.sh (si existe), themes/, backups/.
+    """
+    if _desktop_push_state.get("status") == "running":
+        return {
+            "status": "already_running",
+            "message": "Ya hay un push en curso.",
+            "progress": _desktop_push_state.get("progress", 0),
+        }
+    cfg = await _get_github_cfg()
+    if not (cfg.get("token") or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Sin cuenta conectada. Usa 'Conectar con GitHub' primero.")
+
+    _desktop_push_state["result"] = None
+    _desktop_push_state["error"] = None
+    _set_desktop_push(progress=1, message="En cola…", status="running", step=0,
+                      detail="Preparando push desde la app de escritorio")
+    asyncio.create_task(_do_desktop_push(payload))
+    return {"status": "started",
+            "message": "Push iniciado. Sigue el progreso en /github/push-status."}
 
 
 @api_router.get("/github/push-status")
 async def github_push_status():
-    """Estado de push (siempre inactivo en escritorio)."""
+    """Estado del push en curso (o el último resultado)."""
     return {
-        "status": "idle",
+        **_desktop_push_state,
         "is_desktop": True,
-        "progress": 0,
-        "message": "El push al repositorio no está disponible en la app de escritorio.",
     }
 
 

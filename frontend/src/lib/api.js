@@ -95,6 +95,8 @@ export const uploadAppUpdate = (file, version, notes, channel) => {
   return api.post("/updates/upload", form).then(r => r.data);
 };
 export const checkForUpdates = () => api.get("/updates/check").then(r => r.data);
+export const getUpdateManifest = (refresh = false) =>
+  api.get("/updates/manifest", { params: refresh ? { refresh: true } : {} }).then(r => r.data);
 
 // Appearance cloud sync & saved themes
 export const getCloudAppearance = () => api.get("/settings/appearance").then(r => r.data);
