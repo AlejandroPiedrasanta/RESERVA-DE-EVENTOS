@@ -155,6 +155,10 @@ export default function DatabasePage() {
   const [backupModal, setBackupModal]   = useState(false);
   const [optimizing, setOptimizing]     = useState(false);
   const [showClear, setShowClear]       = useState(false);
+  const [uploadModal, setUploadModal]   = useState(false);
+  const [uploadPreview, setUploadPreview] = useState(null); // { reservations, socios, settings, themes, total, size, is_cloud }
+  const [uploadPreviewLoading, setUploadPreviewLoading] = useState(false);
+  const [uploadBreakdownOpen, setUploadBreakdownOpen] = useState(false);
   const [openBlocks, setOpenBlocks] = useState({ backup: false, conn: false, github: false, diagnostic: false, cleanup: false, updates: false, options: false, danger: false });
   const toggleBlock = (k) => setOpenBlocks(p => ({ ...p, [k]: !p[k] }));
   // Unified "Datos y Respaldos" internal tabs: "conn" | "presets" | "backup"
@@ -976,6 +980,68 @@ export default function DatabasePage() {
     } finally { setOptimizing(false); }
   };
 
+  // ── Preview + confirm upload flow (modal) ─────────────────────────────────
+  const openUploadModal = async () => {
+    setUploadModal(true);
+    setUploadPreview(null);
+    setUploadPreviewLoading(true);
+    try {
+      // Cargar contadores por colección para el preview animado
+      const res = await fetch(`${BASE}/api/settings/database/stats-detailed`).catch(() => null);
+      let detailed = null;
+      if (res && res.ok) detailed = await res.json();
+      // Fallback: usar dbStats generales si no existe el endpoint detallado
+      if (!detailed) {
+        const rs = await getReservations().catch(() => []);
+        detailed = {
+          reservations: Array.isArray(rs) ? rs.length : 0,
+          socios: 0,
+          settings: 1,
+          themes: 0,
+          total: (Array.isArray(rs) ? rs.length : 0),
+          size: dbStats?.total_size || "—",
+          is_cloud: !!dbStats?.is_atlas,
+        };
+      }
+      setUploadPreview(detailed);
+    } catch {
+      setUploadPreview({
+        reservations: dbStats?.objects || 0,
+        socios: 0, settings: 1, themes: 0,
+        total: dbStats?.objects || 0,
+        size: dbStats?.total_size || "—",
+        is_cloud: !!dbStats?.is_atlas,
+      });
+    } finally {
+      setUploadPreviewLoading(false);
+    }
+  };
+
+  const confirmUploadToCloud = async () => {
+    setUploadModal(false);
+    // Si hay una nube configurada y estamos en LOCAL → subir de verdad
+    const cloudPreset = presets.find(p => p.url?.startsWith("mongodb+srv"));
+    const isOnCloud = !!dbStats?.is_atlas;
+    if (!isOnCloud && cloudPreset) {
+      try {
+        setOptimizing(true);
+        const res = await switchDatabase(cloudPreset.url);
+        const uploaded = res?.total_uploaded || 0;
+        toast({
+          title: uploaded > 0 ? `☁️ ${uploaded} reservas subidas a la nube` : "☁️ Nube conectada",
+          description: "Tus datos locales se fusionaron con la nube. Actualizando…",
+        });
+        fireEpic("success");
+        setTimeout(() => window.location.reload(), 1400);
+        return;
+      } catch (e) {
+        toast({ title: e?.response?.data?.detail || "Error al subir a la nube", variant: "destructive" });
+      } finally { setOptimizing(false); }
+    }
+    // Si ya estamos en la nube (o no hay preset de nube): sincronizar/optimizar
+    await handleOptimize();
+  };
+
   const handleRestoreFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1407,15 +1473,23 @@ export default function DatabasePage() {
                     </div>
                   )}
 
-                  {/* ── Actualizar base de datos ── */}
-                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={handleOptimize} disabled={optimizing}
+                  {/* ── Sube tus reservas a la nube ── */}
+                  <motion.button whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.98 }}
+                    onClick={openUploadModal} disabled={optimizing}
                     data-testid="optimize-db-btn"
-                    title="Sincroniza reservas, contactos, diseño, configuración y todo el estado de la app. Compacta y reordena la BD."
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold disabled:opacity-60 shadow-md">
+                    title="Muestra un resumen animado de lo que se subirá y luego sincroniza tus datos con la nube."
+                    className="relative w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-2xl text-white text-sm font-black disabled:opacity-60 shadow-lg overflow-hidden"
+                    style={{ background: "linear-gradient(120deg,#0ea5e9 0%,#6366f1 45%,#8b5cf6 100%)" }}>
+                    <motion.span
+                      className="absolute inset-0 pointer-events-none"
+                      initial={{ x: "-120%" }}
+                      animate={{ x: "120%" }}
+                      transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
+                      style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)" }}
+                    />
                     {optimizing
-                      ? <><RefreshCw size={14} className="animate-spin" /> Actualizando datos…</>
-                      : <><RefreshCw size={14} /> Actualizar base de datos</>}
+                      ? <><Loader2 size={15} className="animate-spin" /> Subiendo a la nube…</>
+                      : <><CloudUpload size={16} /> Sube tus reservas a la nube</>}
                   </motion.button>
                   <p className="text-[10px] text-slate-400 -mt-1 px-1">
                     Sincroniza reservas · contactos · diseño · configuración · optimiza la BD
@@ -2859,6 +2933,272 @@ export default function DatabasePage() {
                   </pre>
                 )}
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>,
+      document.body
+      )}
+
+      {/* ═══════════ MODAL: SUBIR RESERVAS A LA NUBE (preview animado) ═══════════ */}
+      {createPortal(
+      <AnimatePresence>
+        {uploadModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setUploadModal(false)}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+            data-testid="upload-cloud-modal">
+            <motion.div
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", stiffness: 240, damping: 22 }}
+              className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+
+              {/* Header animado con gradiente */}
+              <div className="relative overflow-hidden px-6 pt-6 pb-8 text-white"
+                style={{ background: "linear-gradient(130deg,#0ea5e9 0%,#6366f1 50%,#8b5cf6 100%)" }}>
+                {/* Orbes animados */}
+                <motion.div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/10 blur-2xl"
+                  animate={{ scale: [1, 1.25, 1], rotate: [0, 45, 0] }}
+                  transition={{ duration: 6, repeat: Infinity }} />
+                <motion.div className="absolute -left-10 bottom-0 w-40 h-40 rounded-full bg-white/10 blur-2xl"
+                  animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 5, repeat: Infinity, delay: 0.5 }} />
+
+                {/* Partículas subiendo */}
+                {[...Array(6)].map((_, i) => (
+                  <motion.div key={i}
+                    className="absolute w-1.5 h-1.5 rounded-full bg-white/60"
+                    style={{ left: `${15 + i * 13}%`, bottom: 10 }}
+                    animate={{ y: [-4, -110], opacity: [0, 1, 0] }}
+                    transition={{ duration: 2.6 + (i % 3) * 0.4, repeat: Infinity, delay: i * 0.35, ease: "easeOut" }}
+                  />
+                ))}
+
+                <div className="relative flex items-center gap-4">
+                  <motion.div
+                    animate={{ y: [0, -6, 0], rotate: [0, -6, 6, 0] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                    className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shadow-lg">
+                    <CloudUpload size={28} className="text-white" strokeWidth={2} />
+                  </motion.div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/70">Vista previa</p>
+                    <p className="text-2xl font-black leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                      Sube tus reservas a la nube
+                    </p>
+                    <p className="text-[11px] text-white/80 mt-0.5">
+                      {uploadPreview?.is_cloud
+                        ? "Ya estás en la nube. Se sincronizará y optimizará todo."
+                        : "Esto es lo que se subirá y quedará respaldado en la nube."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cuerpo */}
+              <div className="p-6 space-y-4 overflow-y-auto">
+                {uploadPreviewLoading ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                      style={{ background: "linear-gradient(135deg,#0ea5e9,#8b5cf6)" }}>
+                      <Database size={22} className="text-white" />
+                    </motion.div>
+                    <p className="text-sm font-bold text-slate-500">Analizando tus datos…</p>
+                  </div>
+                ) : uploadPreview ? (
+                  <>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Se subirá lo siguiente</p>
+
+                    <motion.div initial="hidden" animate="show"
+                      variants={{ show: { transition: { staggerChildren: 0.08 } } }}
+                      className="grid grid-cols-2 gap-3">
+                      {[
+                        { key: "reservations", label: "Reservas",       icon: FileText,      color: "from-sky-500 to-indigo-500",     bg: "bg-sky-50",     text: "text-sky-700" },
+                        { key: "socios",       label: "Contactos",       icon: UserCheck,     color: "from-emerald-500 to-teal-500",   bg: "bg-emerald-50", text: "text-emerald-700" },
+                        { key: "settings",     label: "Configuración",   icon: ShieldCheck,   color: "from-violet-500 to-fuchsia-500", bg: "bg-violet-50",  text: "text-violet-700" },
+                        { key: "themes",       label: "Diseños / temas", icon: Sparkles,      color: "from-amber-500 to-orange-500",   bg: "bg-amber-50",   text: "text-amber-700" },
+                      ].map(({ key, label, icon: Icon, color, bg, text }) => {
+                        const value = Number(uploadPreview?.[key] || 0);
+                        return (
+                          <motion.div key={key}
+                            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+                            whileHover={{ y: -2 }}
+                            className={`relative overflow-hidden rounded-2xl p-4 ${bg}`}>
+                            <div className={`absolute -right-3 -top-3 w-16 h-16 rounded-full bg-gradient-to-br ${color} opacity-20 blur-xl`} />
+                            <div className="relative flex items-start justify-between">
+                              <div>
+                                <p className={`text-[10px] font-black uppercase tracking-wider opacity-70 ${text}`}>{label}</p>
+                                <motion.p className={`text-2xl font-black ${text}`}
+                                  style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                                  initial={{ scale: 0.6, opacity: 0 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  transition={{ type: "spring", stiffness: 260, damping: 18 }}>
+                                  {value.toLocaleString()}
+                                </motion.p>
+                              </div>
+                              <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shadow`}>
+                                <Icon size={15} className="text-white" />
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+
+                    {/* Total resumen */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.35 }}
+                      className="flex items-center justify-between rounded-2xl p-4 border border-indigo-100"
+                      style={{ background: "linear-gradient(120deg, rgba(224,242,254,0.6), rgba(237,233,254,0.6))" }}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center">
+                          <Package size={16} className="text-indigo-600" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total a subir</p>
+                          <p className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                            {Number(uploadPreview.total || 0).toLocaleString()} registros
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tamaño</p>
+                        <p className="text-lg font-black text-slate-800" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                          {uploadPreview.size || "—"}
+                        </p>
+                      </div>
+                    </motion.div>
+
+                    {/* Info destino */}
+                    <div className="flex items-start gap-3 rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                      {uploadPreview.is_cloud
+                        ? <Cloud size={14} className="text-sky-500 mt-0.5 shrink-0" />
+                        : <CloudUpload size={14} className="text-indigo-500 mt-0.5 shrink-0" />}
+                      <div>
+                        <p className="text-xs font-black text-slate-800">
+                          {uploadPreview.is_cloud ? "Modo: sincronización en la nube" : "Destino: tu base de datos en la nube"}
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {uploadPreview.is_cloud
+                            ? "Ya estás conectado a la nube. Al confirmar se optimizará y reindexará todo."
+                            : (presets.some(p => p.url?.startsWith("mongodb+srv"))
+                                ? "Se subirán tus reservas locales a la nube configurada y se fusionarán con las existentes."
+                                : "No hay nube configurada. Se optimizará la base local. Configura una nube abajo para respaldo remoto.")}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Desglose colapsable por colección exacta */}
+                    {uploadPreview.collections && Object.keys(uploadPreview.collections).length > 0 && (
+                      <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                        <button
+                          data-testid="upload-cloud-breakdown-toggle"
+                          onClick={() => setUploadBreakdownOpen((v) => !v)}
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                              <ListChecks size={14} className="text-slate-500" />
+                            </div>
+                            <div className="text-left">
+                              <p className="text-xs font-black text-slate-800">Ver desglose por colección</p>
+                              <p className="text-[10px] text-slate-400">
+                                {Object.keys(uploadPreview.collections).length} colecciones · {Number(uploadPreview.total || 0).toLocaleString()} documentos
+                              </p>
+                            </div>
+                          </div>
+                          <BlockChevron open={uploadBreakdownOpen} />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {uploadBreakdownOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                              className="overflow-hidden border-t border-slate-100">
+                              <div className="p-3 space-y-1.5 max-h-56 overflow-y-auto">
+                                {Object.entries(uploadPreview.collections)
+                                  .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+                                  .map(([name, count], idx) => {
+                                    const total = Number(uploadPreview.total || 0) || 1;
+                                    const pct = Math.min(100, Math.max(2, (Number(count || 0) / total) * 100));
+                                    const label = ({
+                                      reservations: "Reservas",
+                                      socios: "Contactos",
+                                      app_settings: "Configuración",
+                                      appearance_settings: "Apariencia",
+                                      saved_themes: "Temas guardados",
+                                      updates_history: "Historial de versiones",
+                                    }[name]) || name;
+                                    return (
+                                      <motion.div key={name}
+                                        initial={{ opacity: 0, x: -8 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: idx * 0.03 }}
+                                        data-testid={`breakdown-row-${name}`}
+                                        className="relative rounded-xl bg-slate-50 px-3 py-2 overflow-hidden">
+                                        <motion.div
+                                          className="absolute inset-y-0 left-0"
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${pct}%` }}
+                                          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                                          style={{ background: "linear-gradient(90deg, rgba(14,165,233,0.12), rgba(139,92,246,0.12))" }}
+                                        />
+                                        <div className="relative flex items-center justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-black text-slate-800 truncate">{label}</p>
+                                            <p className="text-[9px] font-mono text-slate-400 truncate">{name}</p>
+                                          </div>
+                                          <p className="text-sm font-black text-slate-700 shrink-0"
+                                            style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                                            {Number(count || 0).toLocaleString()}
+                                          </p>
+                                        </div>
+                                      </motion.div>
+                                    );
+                                  })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-400 text-center py-6">No hay datos para mostrar.</p>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-slate-100 flex items-center gap-3 justify-end bg-slate-50/50">
+                <button
+                  data-testid="upload-cloud-cancel"
+                  onClick={() => setUploadModal(false)}
+                  className="px-4 py-2.5 rounded-2xl text-xs font-black text-slate-600 hover:bg-white transition-colors">
+                  Cancelar
+                </button>
+                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                  disabled={uploadPreviewLoading || optimizing}
+                  onClick={confirmUploadToCloud}
+                  data-testid="upload-cloud-confirm"
+                  className="relative overflow-hidden px-5 py-2.5 rounded-2xl text-xs font-black text-white shadow-md disabled:opacity-60 flex items-center gap-2"
+                  style={{ background: "linear-gradient(120deg,#0ea5e9,#6366f1,#8b5cf6)" }}>
+                  <motion.span
+                    className="absolute inset-0 pointer-events-none"
+                    initial={{ x: "-120%" }} animate={{ x: "120%" }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)" }} />
+                  <CloudUpload size={14} />
+                  {optimizing ? "Subiendo…" : "Subir a la nube"}
+                </motion.button>
+              </div>
+
             </motion.div>
           </motion.div>
         )}

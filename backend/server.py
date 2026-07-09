@@ -1973,10 +1973,56 @@ async def get_db_stats():
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {e}")
 
 
+@api_router.get("/settings/database/stats-detailed")
+async def db_stats_detailed():
+    """Contadores por colección para preview de 'subir a la nube'."""
+    try:
+        names = await _all_collections()
+        counts = {}
+        for n in names:
+            try:
+                counts[n] = await db[n].estimated_document_count()
+            except Exception:
+                counts[n] = 0
+        reservations = int(counts.get("reservations", 0))
+        socios = int(counts.get("socios", 0))
+        settings = int(counts.get("app_settings", 0)) + int(counts.get("appearance_settings", 0))
+        themes = int(counts.get("saved_themes", 0))
+        total = sum(int(v) for v in counts.values())
+        # Reutiliza dbStats para tamaño / is_atlas
+        try:
+            current_url = CUSTOM_DB_FILE.read_text().strip() if CUSTOM_DB_FILE.exists() else os.environ['MONGO_URL']
+        except Exception:
+            current_url = ""
+        is_atlas = "mongodb+srv" in (current_url or "") or ".mongodb.net" in (current_url or "")
+        size_str = "—"
+        try:
+            st = await db.command("dbStats")
+            data_size = int(st.get("dataSize", 0))
+            if data_size < 1024:
+                size_str = f"{data_size} B"
+            elif data_size < 1024 * 1024:
+                size_str = f"{data_size/1024:.1f} KB"
+            else:
+                size_str = f"{data_size/(1024*1024):.2f} MB"
+        except Exception:
+            pass
+        return {
+            "reservations": reservations,
+            "socios": socios,
+            "settings": max(settings, 1),
+            "themes": themes,
+            "total": total,
+            "size": size_str,
+            "is_cloud": is_atlas,
+            "collections": counts,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener detalle: {e}")
+
+
 @api_router.post("/settings/database/optimize")
 async def optimize_database():
-    """Compacta y reordena: asegura índices útiles e intenta compactar colecciones.
-    (En Atlas compartido 'compact' no está permitido; se omite sin error.)"""
     result = {"indexed": [], "compacted": [], "skipped": []}
     try:
         # 1) Índices útiles (permitido en Atlas)
