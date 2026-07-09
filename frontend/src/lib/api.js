@@ -206,3 +206,8 @@ export const adminEnableUser  = (pwd, userId)       => api.post(`/admin/users/${
 export const adminRevokePlan  = (pwd, userId)       => api.post(`/admin/users/${userId}/revoke`, {}, adminHeaders(pwd)).then(r => r.data);
 export const adminGrantPlan   = (pwd, userId, plan, months=1) => api.post(`/admin/users/${userId}/grant`, { plan, months }, adminHeaders(pwd)).then(r => r.data);
 export const adminDeleteUser  = (pwd, userId)       => api.delete(`/admin/users/${userId}`, adminHeaders(pwd)).then(r => r.data);
+
+// ─── Admin: PayPal credentials management ───────────────────────────────
+export const adminGetPaypalConfig    = (pwd)          => api.get("/admin/paypal/config", adminHeaders(pwd)).then(r => r.data);
+export const adminUpdatePaypalConfig = (pwd, payload) => api.patch("/admin/paypal/config", payload, adminHeaders(pwd)).then(r => r.data);
+export const adminTestPaypalConfig   = (pwd)          => api.post("/admin/paypal/test", {}, adminHeaders(pwd)).then(r => r.data);

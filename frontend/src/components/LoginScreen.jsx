@@ -1,5 +1,8 @@
-import { CalendarDays, Sparkles, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CalendarDays, Sparkles, ShieldCheck, Mail, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
 import SupportAccessButton from "@/components/SupportAccessButton";
+import { useAuth } from "@/context/AuthContext";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 function startGoogleLogin() {
@@ -8,6 +11,33 @@ function startGoogleLogin() {
 }
 
 export default function LoginScreen() {
+  const { loginWithPassword, registerWithPassword } = useAuth();
+  const [mode, setMode] = useState("login"); // "login" | "register"
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr(null);
+    if (!email.trim() || !password) { setErr("Ingresa correo y contraseña"); return; }
+    if (mode === "register" && password.length < 6) { setErr("La contraseña debe tener al menos 6 caracteres"); return; }
+    setBusy(true);
+    try {
+      if (mode === "register") {
+        await registerWithPassword({ email: email.trim(), password, name: name.trim() });
+      } else {
+        await loginWithPassword({ email: email.trim(), password });
+      }
+      window.location.href = "/dashboard";
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Error de autenticación");
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-6 relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-indigo-50">
       <div className="absolute inset-0 pointer-events-none opacity-70">
@@ -27,12 +57,16 @@ export default function LoginScreen() {
         </div>
 
         <h1 className="text-3xl font-bold text-slate-900 leading-tight mb-2" data-testid="login-title">
-          Ingresa para continuar
+          {mode === "register" ? "Crea tu cuenta" : "Ingresa para continuar"}
         </h1>
-        <p className="text-sm text-slate-600 mb-6">
-          Inicia sesión con tu cuenta de Google. <span className="font-semibold text-indigo-700">Prueba gratis por 3 días</span>, luego elige tu plan.
+        <p className="text-sm text-slate-600 mb-5">
+          {mode === "register"
+            ? <>Empieza gratis por 3 días. <span className="font-semibold text-indigo-700">Sin tarjeta.</span></>
+            : <>Inicia sesión con Google o tu correo. <span className="font-semibold text-indigo-700">Prueba gratis 3 días</span>.</>
+          }
         </p>
 
+        {/* Google button */}
         <button
           type="button"
           onClick={startGoogleLogin}
@@ -48,7 +82,126 @@ export default function LoginScreen() {
           Continuar con Google
         </button>
 
-        <div className="grid grid-cols-3 gap-3 mt-8">
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-slate-200" />
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">o con correo</span>
+          <div className="flex-1 h-px bg-slate-200" />
+        </div>
+
+        {/* Tabs */}
+        <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-2xl mb-4">
+          <button
+            type="button"
+            onClick={() => { setMode("login"); setErr(null); }}
+            data-testid="login-tab-signin"
+            className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${mode === "login" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+          >
+            Iniciar sesión
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode("register"); setErr(null); }}
+            data-testid="login-tab-signup"
+            className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${mode === "register" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+          >
+            Crear cuenta
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <AnimatePresence initial={false}>
+            {mode === "register" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1 block">Nombre</label>
+                <div className="relative">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Tu nombre"
+                    autoComplete="name"
+                    data-testid="signup-name-input"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1 block">Correo</label>
+            <div className="relative">
+              <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="tu@correo.com"
+                autoComplete="email"
+                required
+                data-testid="auth-email-input"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1 block">Contraseña</label>
+            <div className="relative">
+              <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type={showPwd ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={mode === "register" ? "Mínimo 6 caracteres" : "Tu contraseña"}
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
+                required
+                minLength={mode === "register" ? 6 : undefined}
+                data-testid="auth-password-input"
+                className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPwd(v => !v)}
+                tabIndex={-1}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+
+          {err && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+              data-testid="auth-error"
+              className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700"
+            >
+              {err}
+            </motion.div>
+          )}
+
+          <motion.button
+            type="submit"
+            disabled={busy}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            data-testid="auth-submit-btn"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-black shadow-lg hover:shadow-xl transition-all disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : (mode === "register" ? <Sparkles size={16} /> : <Lock size={16} />)}
+            {mode === "register" ? "Crear cuenta y empezar" : "Iniciar sesión"}
+          </motion.button>
+        </form>
+
+        <div className="grid grid-cols-3 gap-3 mt-6">
           <div className="text-center">
             <div className="w-10 h-10 mx-auto rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-1">
               <Sparkles className="w-4 h-4" />

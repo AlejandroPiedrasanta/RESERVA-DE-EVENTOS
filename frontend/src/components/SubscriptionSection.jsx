@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 import { useAuth, authHeaders } from "@/context/AuthContext";
 import { Section } from "@/components/appearance/SectionShell";
+import ProfileCard from "@/components/ProfileCard";
 import {
   Crown, Sparkles, Infinity as InfinityIcon, CheckCircle2,
   Calendar, Zap, ShieldCheck, TrendingUp, Star, Gift, Copy, Check, Users, Share2, Ticket,
@@ -515,6 +516,9 @@ export default function SubscriptionSection() {
       id="subscription"
     >
       <div className="space-y-5" data-testid="subscription-section">
+        {/* User profile: avatar (Google) + editable name + email */}
+        <ProfileCard />
+
         {/* Hero status card */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -579,12 +583,7 @@ export default function SubscriptionSection() {
           )}
         </AnimatePresence>
 
-        {/* Not configured hint */}
-        {config && !config.configured && !isLifetime && !isMonthly && (
-          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-            <strong>PayPal no configurado.</strong> Añade <code>PAYPAL_CLIENT_ID</code> y <code>PAYPAL_SECRET</code> en <code>backend/.env</code> para habilitar los pagos.
-          </div>
-        )}
+        {/* Not configured hint moved to Base de datos → Soporte avanzado → PayPal */}
 
         {/* Plan cards — hide the currently active plan and show only upgrade paths */}
         {!isLifetime && (

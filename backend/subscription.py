@@ -7,13 +7,36 @@ Mounted on the main FastAPI app as an additional router.
 """
 from __future__ import annotations
 import os
+import re
 import uuid
+import hashlib
+import secrets as _secrets_mod
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Cookie, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
+
+
+# ── Password helpers (PBKDF2-HMAC-SHA256) ────────────────────────────
+def _hash_password(password: str) -> str:
+    salt = _secrets_mod.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    return f"pbkdf2_sha256$200000${salt.hex()}${dk.hex()}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, iters, salt_hex, hash_hex = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iters)
+        )
+        return _secrets_mod.compare_digest(dk.hex(), hash_hex)
+    except Exception:
+        return False
 
 # ── DB ────────────────────────────────────────────────────────────────
 _MONGO_URL = os.environ["MONGO_URL"]
@@ -29,6 +52,16 @@ PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox")
 PAYPAL_BASE = "https://api-m.sandbox.paypal.com" if PAYPAL_MODE == "sandbox" else "https://api-m.paypal.com"
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_SECRET = os.environ.get("PAYPAL_SECRET", "")
+
+
+async def _get_paypal_settings() -> dict:
+    """Read PayPal credentials from DB (preferred) or fall back to environment."""
+    doc = await _db.app_settings.find_one({"_id": "paypal"}, {"_id": 0}) or {}
+    client_id = doc.get("client_id") or PAYPAL_CLIENT_ID or ""
+    secret = doc.get("secret") or PAYPAL_SECRET or ""
+    mode = doc.get("mode") or PAYPAL_MODE or "sandbox"
+    base = "https://api-m.sandbox.paypal.com" if mode == "sandbox" else "https://api-m.paypal.com"
+    return {"client_id": client_id, "secret": secret, "mode": mode, "base": base}
 
 PLAN_MONTHLY_PRICE = "1.00"
 PLAN_LIFETIME_PRICE = "20.00"
@@ -47,6 +80,22 @@ def _require_admin(x_admin_password: Optional[str]):
 # ── Models ────────────────────────────────────────────────────────────
 class SessionExchangeReq(BaseModel):
     session_id: str
+
+
+class RegisterReq(BaseModel):
+    email: EmailStr
+    password: str
+    name: Optional[str] = ""
+
+
+class LoginReq(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ProfileUpdateReq(BaseModel):
+    name: Optional[str] = None
+    picture: Optional[str] = None
 
 
 class OrderReq(BaseModel):
@@ -71,7 +120,7 @@ async def _get_user_by_token(token: Optional[str]):
         exp = exp.replace(tzinfo=timezone.utc)
     if exp < datetime.now(timezone.utc):
         return None
-    user = await _db.app_users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+    user = await _db.app_users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
     if user and user.get("disabled"):
         return None
     return user
@@ -124,13 +173,14 @@ def _subscription_state(user: dict) -> dict:
 
 
 async def _paypal_access_token() -> str:
-    if not PAYPAL_CLIENT_ID or not PAYPAL_SECRET:
-        raise HTTPException(500, "PayPal no configurado. Añade PAYPAL_CLIENT_ID y PAYPAL_SECRET en backend/.env")
+    cfg = await _get_paypal_settings()
+    if not cfg["client_id"] or not cfg["secret"]:
+        raise HTTPException(500, "PayPal no configurado. Configúralo desde Base de datos → Soporte avanzado → PayPal")
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(
-            f"{PAYPAL_BASE}/v1/oauth2/token",
+            f"{cfg['base']}/v1/oauth2/token",
             data={"grant_type": "client_credentials"},
-            auth=(PAYPAL_CLIENT_ID, PAYPAL_SECRET),
+            auth=(cfg["client_id"], cfg["secret"]),
             headers={"Accept": "application/json"},
         )
         if r.status_code != 200:
@@ -192,7 +242,7 @@ async def auth_session(body: SessionExchangeReq, response: Response):
         samesite="none",
         path="/",
     )
-    user = await _db.app_users.find_one({"user_id": user_id}, {"_id": 0})
+    user = await _db.app_users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
     return {"user": user, "subscription": _subscription_state(user), "session_token": session_token}
 
 
@@ -221,6 +271,98 @@ async def auth_logout(
     return {"ok": True}
 
 
+# ── Email + Password Auth ─────────────────────────────────────────────
+async def _create_session_for_user(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    session_token = _secrets_mod.token_urlsafe(48)
+    await _db.user_sessions.insert_one({
+        "session_token": session_token,
+        "user_id": user_id,
+        "expires_at": (now + timedelta(days=30)).isoformat(),
+        "created_at": now.isoformat(),
+    })
+    return session_token
+
+
+@router.post("/auth/register")
+async def auth_register(body: RegisterReq):
+    email = body.email.lower().strip()
+    if len(body.password) < 6:
+        raise HTTPException(400, "La contraseña debe tener al menos 6 caracteres")
+    existing = await _db.app_users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(400, "Ya existe una cuenta con este correo. Inicia sesión.")
+    now = datetime.now(timezone.utc)
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    await _db.app_users.insert_one({
+        "user_id": user_id,
+        "email": email,
+        "name": (body.name or "").strip() or email.split("@")[0],
+        "picture": "",
+        "password_hash": _hash_password(body.password),
+        "auth_provider": "password",
+        "trial_start_at": now.isoformat(),
+        "plan": None,
+        "plan_expires_at": None,
+        "created_at": now.isoformat(),
+        "last_login_at": now.isoformat(),
+    })
+    session_token = await _create_session_for_user(user_id)
+    user = await _db.app_users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    return {"user": user, "subscription": _subscription_state(user), "session_token": session_token}
+
+
+@router.post("/auth/login")
+async def auth_login(body: LoginReq):
+    email = body.email.lower().strip()
+    user = await _db.app_users.find_one({"email": email})
+    if not user or not user.get("password_hash"):
+        raise HTTPException(401, "Credenciales inválidas")
+    if not _verify_password(body.password, user["password_hash"]):
+        raise HTTPException(401, "Credenciales inválidas")
+    if user.get("disabled"):
+        raise HTTPException(403, "Esta cuenta ha sido desactivada")
+    now = datetime.now(timezone.utc)
+    await _db.app_users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"last_login_at": now.isoformat()}}
+    )
+    session_token = await _create_session_for_user(user["user_id"])
+    user = await _db.app_users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"user": user, "subscription": _subscription_state(user), "session_token": session_token}
+
+
+@router.patch("/auth/profile")
+async def auth_update_profile(
+    body: ProfileUpdateReq,
+    session_token: Optional[str] = Cookie(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    token = _extract_token(session_token, authorization)
+    user = await _get_user_by_token(token)
+    if not user:
+        raise HTTPException(401, "No autenticado")
+    upd = {}
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "El nombre no puede estar vacío")
+        if len(name) > 80:
+            raise HTTPException(400, "El nombre es demasiado largo (máx 80 caracteres)")
+        upd["name"] = name
+    if body.picture is not None:
+        # Accept only http(s) URLs or data URLs up to a modest limit
+        pic = body.picture.strip()
+        if pic and not re.match(r"^(https?://|data:image/)", pic):
+            raise HTTPException(400, "URL de imagen inválida")
+        upd["picture"] = pic
+    if not upd:
+        raise HTTPException(400, "Nada que actualizar")
+    await _db.app_users.update_one({"user_id": user["user_id"]}, {"$set": upd})
+    user = await _db.app_users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {"ok": True, "user": user, "subscription": _subscription_state(user)}
+
+
 @router.get("/subscription/status")
 async def subscription_status(
     session_token: Optional[str] = Cookie(default=None),
@@ -236,15 +378,79 @@ async def subscription_status(
 # ── PayPal Endpoints ─────────────────────────────────────────────────
 @router.get("/paypal/config")
 async def paypal_config():
+    cfg = await _get_paypal_settings()
     return {
-        "client_id": PAYPAL_CLIENT_ID,
-        "mode": PAYPAL_MODE,
-        "configured": bool(PAYPAL_CLIENT_ID and PAYPAL_SECRET),
+        "client_id": cfg["client_id"],
+        "mode": cfg["mode"],
+        "configured": bool(cfg["client_id"] and cfg["secret"]),
         "plans": {
             "monthly": {"price": PLAN_MONTHLY_PRICE, "currency": "USD", "label": "Mensual"},
             "lifetime": {"price": PLAN_LIFETIME_PRICE, "currency": "USD", "label": "Para siempre"},
         },
     }
+
+
+class PaypalCredsReq(BaseModel):
+    client_id: Optional[str] = None
+    secret: Optional[str] = None
+    mode: Optional[str] = None  # "sandbox" | "live"
+
+
+@router.get("/admin/paypal/config")
+async def admin_paypal_config(x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    _require_admin(x_admin_password)
+    cfg = await _get_paypal_settings()
+    # Mask secret for display
+    secret = cfg["secret"] or ""
+    masked = ("•" * 20 + secret[-4:]) if len(secret) > 4 else ("•" * len(secret))
+    return {
+        "client_id": cfg["client_id"],
+        "secret_masked": masked,
+        "has_secret": bool(secret),
+        "mode": cfg["mode"],
+        "configured": bool(cfg["client_id"] and cfg["secret"]),
+    }
+
+
+@router.patch("/admin/paypal/config")
+async def admin_paypal_config_update(
+    body: PaypalCredsReq,
+    x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password"),
+):
+    _require_admin(x_admin_password)
+    upd = {}
+    if body.client_id is not None:
+        upd["client_id"] = body.client_id.strip()
+    if body.secret is not None and body.secret.strip():
+        upd["secret"] = body.secret.strip()
+    if body.mode is not None:
+        if body.mode not in ("sandbox", "live"):
+            raise HTTPException(400, "Modo inválido — usa 'sandbox' o 'live'")
+        upd["mode"] = body.mode
+    if not upd:
+        raise HTTPException(400, "Nada que actualizar")
+    upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await _db.app_settings.update_one({"_id": "paypal"}, {"$set": upd}, upsert=True)
+    cfg = await _get_paypal_settings()
+    return {
+        "ok": True,
+        "client_id": cfg["client_id"],
+        "mode": cfg["mode"],
+        "configured": bool(cfg["client_id"] and cfg["secret"]),
+    }
+
+
+@router.post("/admin/paypal/test")
+async def admin_paypal_test(x_admin_password: Optional[str] = Header(default=None, alias="X-Admin-Password")):
+    """Verify PayPal credentials by requesting an access token."""
+    _require_admin(x_admin_password)
+    try:
+        tok = await _paypal_access_token()
+        return {"ok": True, "message": "Credenciales válidas ✓", "token_preview": tok[:12] + "..."}
+    except HTTPException as e:
+        return {"ok": False, "error": e.detail}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.post("/paypal/create-order")
@@ -263,9 +469,10 @@ async def paypal_create_order(
     label = "Acceso de por vida" if body.plan == "lifetime" else "Suscripción mensual"
 
     access = await _paypal_access_token()
+    cfg = await _get_paypal_settings()
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.post(
-            f"{PAYPAL_BASE}/v2/checkout/orders",
+            f"{cfg['base']}/v2/checkout/orders",
             headers={"Authorization": f"Bearer {access}", "Content-Type": "application/json"},
             json={
                 "intent": "CAPTURE",
@@ -293,9 +500,10 @@ async def paypal_capture(
         raise HTTPException(401, "No autenticado")
 
     access = await _paypal_access_token()
+    cfg = await _get_paypal_settings()
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.post(
-            f"{PAYPAL_BASE}/v2/checkout/orders/{order_id}/capture",
+            f"{cfg['base']}/v2/checkout/orders/{order_id}/capture",
             headers={"Authorization": f"Bearer {access}", "Content-Type": "application/json"},
         )
     if r.status_code not in (200, 201):

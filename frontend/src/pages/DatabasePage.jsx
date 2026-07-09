@@ -13,7 +13,7 @@ import {
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
   Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
   GitCompare, FilePlus2, FilePenLine, FileMinus2,
-  Users, UserX, Ban, Crown, Gift,
+  Users, UserX, Ban, Crown, Gift, CreditCard,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -39,6 +39,7 @@ import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 import { DesktopAppSection } from "@/components/DesktopAppSection";
+import PaypalConfigPanel from "@/components/PaypalConfigPanel";
 
 const BASE = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL;
 
@@ -2229,12 +2230,13 @@ export default function DatabasePage() {
                 </div>
 
                 {/* ── TABS: Publicar · App Escritorio · Almacenamiento · Herramientas · Usuarios ── */}
-                <div className="flex items-center gap-1 p-1 bg-slate-100/80 rounded-2xl">
+                <div className="flex items-center gap-1 p-1 bg-slate-100/80 rounded-2xl overflow-x-auto">
                   {[
                     { id: "publish",  label: "Publicar",       icon: <CloudUpload size={12} /> },
                     { id: "desktop",  label: "App Escritorio", icon: <Laptop size={12} /> },
                     { id: "storage",  label: "Almacenamiento", icon: <HardDrive size={12} /> },
                     { id: "tools",    label: "Herramientas",   icon: <Wrench size={12} /> },
+                    { id: "paypal",   label: "PayPal",         icon: <CreditCard size={12} /> },
                     { id: "users",    label: "Usuarios",       icon: <Users size={12} /> },
                   ].map(t => (
                     <button
@@ -2809,6 +2811,11 @@ export default function DatabasePage() {
                       </p>
                     </div>
                   </div>
+                )}
+
+                {/* ═══════════ TAB PAYPAL ═══════════ */}
+                {supportTab === "paypal" && (
+                  <PaypalConfigPanel password={SOPORTE_FACTORY_PASSWORD} />
                 )}
 
                 {/* ═══════════ TAB 5: USUARIOS ═══════════ */}
