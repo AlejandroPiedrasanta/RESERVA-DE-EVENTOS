@@ -472,11 +472,7 @@ class DBConnectRequest(BaseModel):
 @api_router.get("/")
 async def root():
     mode = "embedded" if _using_embedded else "mongodb"
-    # `version` = versión REALMENTE en ejecución (horneada en el binario). El
-    # frontend la usa tras una auto-actualización para confirmar que ya está
-    # hablando con el NUEVO exe (versión distinta) y no con el viejo que aún
-    # está muriendo → evita recargar en la "zona muerta" y ver pantalla blanca.
-    return {"message": "Cinema Productions API", "db_mode": mode, "version": _local_version}
+    return {"message": "Cinema Productions API", "db_mode": mode}
 
 
 @api_router.get("/stats")

@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { LayoutDashboard, CalendarDays, List, Menu, X, SlidersHorizontal, Users, Database, Palette, RefreshCw, ArrowRight, Target } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSettings, PRESETS } from "@/context/SettingsContext";
+import { useSettings } from "@/context/SettingsContext";
 import WelcomeTour from "@/components/WelcomeTour";
 import SectionUnlockModal from "@/components/SectionUnlockModal";
 import GithubUpdateNotifier from "@/components/GithubUpdateNotifier";
@@ -11,7 +11,6 @@ import { useAdvancedSecurity } from "@/hooks/useAdvancedSecurity";
 export default function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { tr, preset, logoUrl, logoSize, sidebarCompact, iconSize, sidebarStyle, islandMargins, navConfig } = useSettings();
-  const presetLabel = PRESETS.find(p => p.id === preset)?.name || "Glass Aurora";
   const sidebarLogoH = Math.min(Math.max(logoSize || 40, 24), 80);
 
   // Sidebar sweep (barrido de luz al crear reserva/socio/etc)
@@ -251,12 +250,6 @@ export default function Layout({ children }) {
             </NavLink>
           ))}
         </nav>
-
-        {!compact && (
-          <div className="relative z-10 px-6 py-4 border-t border-white/40">
-            <p className="text-[10px] text-slate-400 font-medium">v1.0 · {presetLabel}</p>
-          </div>
-        )}
       </aside>
 
       {/* Mobile Header */}
