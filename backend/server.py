@@ -3623,6 +3623,116 @@ def _is_newer_version(remote: str, local: str) -> bool:
 
 
 _gh_version_cache_srv: dict = {"ts": 0.0, "version": "", "source_url": ""}
+_gh_manifest_cache_srv: dict = {"ts": 0.0, "manifest": None, "source_url": ""}
+
+
+async def _fetch_github_version_json() -> dict:
+    """SEMÁFORO AUTORITATIVO: lee `version.json` desde la Release en GitHub.
+
+    El manifiesto es la ÚNICA fuente de verdad para el auto-updater. Un
+    cliente SÓLO debe considerar una versión "disponible" cuando existe un
+    version.json publicado que la anuncie — porque publish-manifest.yml
+    genera este archivo DESPUÉS de que todos los .exe/binarios están 100%
+    subidos a la Release. Esto elimina la carrera:
+      version.txt (o tag) anuncia vX.Y.Z antes de que el .exe termine de subir.
+
+    Fuentes en orden de prioridad:
+      1. Asset `version.json` de la Release del tag más nuevo (release "latest").
+      2. `version.json` en la raíz del repo (rama configurada) — fallback.
+
+    Cachea 60 s. Devuelve {manifest, source_url} o {} si no hay manifiesto.
+    """
+    import time as _t
+    if _t.time() - _gh_manifest_cache_srv["ts"] < 60 and _gh_manifest_cache_srv["manifest"]:
+        return {
+            "manifest": _gh_manifest_cache_srv["manifest"],
+            "source_url": _gh_manifest_cache_srv["source_url"],
+        }
+
+    result: dict = {"manifest": None, "source_url": ""}
+    try:
+        cfg = await _get_github_config()
+        owner, repo = _parse_github_url(cfg.get("repo_url", ""))
+        if not owner or not repo:
+            # Fallback al repo del EXE por defecto
+            gh_repo = _github_exe_repo()
+            if "/" in gh_repo:
+                owner, repo = gh_repo.split("/", 1)
+            if not owner or not repo:
+                return result
+
+        branch = cfg.get("branch") or "main"
+        token = cfg.get("token", "") or (os.environ.get("GITHUB_TOKEN") or "").strip()
+        api_headers = {"Accept": "application/vnd.github+json", "User-Agent": "cinema-productions"}
+        raw_headers = {"User-Agent": "cinema-productions"}
+        if token:
+            api_headers["Authorization"] = f"Bearer {token}"
+            raw_headers["Authorization"] = f"Bearer {token}"
+
+        async with httpx.AsyncClient(timeout=10) as http:
+            # ── 1) Buscar version.json en el asset de la Release más nueva ──
+            manifest = None
+            source_url = ""
+            try:
+                r = await http.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=15",
+                    headers=api_headers,
+                )
+                if r.status_code == 200:
+                    for rel in (r.json() or []):
+                        if rel.get("draft"):
+                            continue
+                        for asset in (rel.get("assets") or []):
+                            if (asset.get("name") or "").lower() != "version.json":
+                                continue
+                            url = asset.get("browser_download_url") or ""
+                            if not url:
+                                continue
+                            try:
+                                rv = await http.get(url, headers=raw_headers, follow_redirects=True)
+                                if rv.status_code == 200:
+                                    data = rv.json()
+                                    # Validación mínima del schema
+                                    if isinstance(data, dict) and data.get("version") and isinstance(data.get("assets"), dict):
+                                        manifest = data
+                                        source_url = url
+                                        break
+                            except Exception:
+                                continue
+                        if manifest:
+                            break
+            except Exception as e:
+                logger.warning(f"GitHub releases manifest scan falló: {e}")
+
+            # ── 2) Fallback: version.json en la raíz del repo ─────────────
+            if not manifest:
+                for b in [branch, "main", "master"]:
+                    if not b:
+                        continue
+                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{b}/version.json"
+                    try:
+                        rv = await http.get(raw_url, headers=raw_headers)
+                        if rv.status_code == 200:
+                            try:
+                                data = rv.json()
+                            except Exception:
+                                continue
+                            if isinstance(data, dict) and data.get("version"):
+                                manifest = data
+                                source_url = raw_url
+                                break
+                    except Exception:
+                        continue
+
+        if manifest:
+            result["manifest"] = manifest
+            result["source_url"] = source_url
+            _gh_manifest_cache_srv["ts"] = _t.time()
+            _gh_manifest_cache_srv["manifest"] = manifest
+            _gh_manifest_cache_srv["source_url"] = source_url
+    except Exception as e:
+        logger.warning(f"GitHub version.json fetch failed: {e}")
+    return result
 
 
 async def _fetch_github_version_txt() -> dict:
@@ -3738,21 +3848,49 @@ async def _fetch_github_version_txt() -> dict:
 
 @api_router.get("/updates/check")
 async def check_updates_cloud(refresh: bool = False):
-    """Combina versión GitHub (version.txt del repo) + paquete MongoDB.
-    La app de escritorio compara su version.txt local con la versión de GitHub."""
+    """Combina versión GitHub + paquete MongoDB.
+
+    NUEVO FLUJO (semáforo version.json):
+      1. Prioridad #1 → version.json (manifiesto autoritativo con hashes).
+         Este archivo SÓLO existe cuando todos los binarios están 100% en
+         la Release, por lo que anunciar esta versión es siempre seguro.
+      2. Fallback → version.txt / tags (retrocompatibilidad, para releases
+         antiguas sin manifiesto).
+    La app de escritorio compara su version.txt local con la versión anunciada.
+    """
     if refresh:
         _gh_version_cache_srv["ts"] = 0.0
+        _gh_manifest_cache_srv["ts"] = 0.0
 
     local_version = await _read_local_version()
+
+    # ── 1) Semáforo autoritativo: version.json ─────────────────────────
+    manifest_info = await _fetch_github_version_json()
+    manifest = manifest_info.get("manifest") or None
+    manifest_version = ""
+    manifest_source_url = ""
+    if isinstance(manifest, dict):
+        manifest_version = (manifest.get("version") or "").strip().lstrip("v")
+        manifest_source_url = manifest_info.get("source_url", "")
+
+    # ── 2) Fallback: version.txt + tags ────────────────────────────────
     gh = await _fetch_github_version_txt()
     github_version = gh.get("version", "")
 
     doc = await db.app_updates.find_one({"is_latest": True}, sort=[("created_at", -1)])
     mongo_version = doc.get("version", "") if doc else ""
 
-    # Elegir la más reciente entre GitHub y Mongo como remote_version
-    candidates = [v for v in (github_version, mongo_version) if v]
-    remote_version = max(candidates, key=_version_tuple) if candidates else ""
+    # Prioridad: manifest > mongo > github(txt/tags)
+    if manifest_version:
+        remote_version = manifest_version
+        remote_source = "manifest"
+    else:
+        candidates = [v for v in (github_version, mongo_version) if v]
+        remote_version = max(candidates, key=_version_tuple) if candidates else ""
+        remote_source = "github_txt" if remote_version == github_version and github_version else (
+            "mongo" if remote_version == mongo_version and mongo_version else "none"
+        )
+
     has_update = _is_newer_version(remote_version, local_version) if local_version else False
 
     payload = {
@@ -3763,6 +3901,12 @@ async def check_updates_cloud(refresh: bool = False):
         "github_version": github_version,
         "github_source_url": gh.get("source_url", ""),
         "remote_version": remote_version or None,
+        "remote_source": remote_source,
+        # Manifest info (semáforo)
+        "manifest_available": bool(manifest),
+        "manifest_version": manifest_version or None,
+        "manifest_source_url": manifest_source_url or None,
+        "manifest_assets": (manifest or {}).get("assets") if manifest else None,
     }
     if doc:
         payload.update({
@@ -3773,6 +3917,48 @@ async def check_updates_cloud(refresh: bool = False):
             "mongo_version": mongo_version,
         })
     return payload
+
+
+@api_router.get("/updates/manifest")
+async def get_update_manifest(refresh: bool = False):
+    """Devuelve el manifest version.json completo (semáforo autoritativo).
+
+    El cliente auto-updater debe:
+      1. Llamar a este endpoint (o descargar version.json del release).
+      2. Comparar manifest.version con la versión local.
+      3. Si es más nueva, descargar el asset correspondiente a su plataforma
+         (Windows: assets.windows_installer o windows_portable).
+      4. Validar el SHA256 del archivo descargado contra
+         manifest.assets.<plataforma>.sha256 ANTES de instalar.
+      5. Si el hash NO coincide, abortar y eliminar la descarga.
+      6. Sólo entonces ejecutar el swap seguro (ver backend/updater.py).
+    """
+    if refresh:
+        _gh_manifest_cache_srv["ts"] = 0.0
+    info = await _fetch_github_version_json()
+    manifest = info.get("manifest")
+    local_version = await _read_local_version()
+
+    if not manifest:
+        return {
+            "status": "not_available",
+            "local_version": local_version,
+            "message": (
+                "No hay version.json publicado aún. El auto-updater "
+                "no debería notificar actualizaciones hasta que exista "
+                "un manifiesto con hashes válidos."
+            ),
+        }
+
+    remote = (manifest.get("version") or "").strip().lstrip("v")
+    return {
+        "status": "ready",
+        "local_version": local_version,
+        "remote_version": remote,
+        "has_update": _is_newer_version(remote, local_version) if local_version else False,
+        "source_url": info.get("source_url", ""),
+        "manifest": manifest,
+    }
 
 
 @api_router.get("/updates/github-version")
@@ -5618,6 +5804,41 @@ async def _do_github_push_all(payload: dict):
         for forced in forced_items:
             if (work_dir / forced).exists():
                 await _arun(["git", "add", "-f", forced], cwd=work_dir)
+
+        # ── 3c. FORZAR inclusión de archivos críticos de infraestructura ───
+        # Estos archivos SIEMPRE deben ir al repo si existen en el checkout
+        # local, INDEPENDIENTEMENTE de las categorías marcadas en el modal:
+        #   · bootstrap.sh         (arranque + reconciliación de deps)
+        #   · .github/workflows/*  (CI/CD atómico: build → manifest → tag)
+        #   · backend/updater.py   (auto-updater cliente con validación SHA256)
+        #   · version.json         (semáforo de manifest, si existe local)
+        # Sin esto, un push con `root_files` desmarcado dejaba el repo sin
+        # los fixes de infraestructura y los bugs (deps faltantes, race con
+        # el .exe, etc.) volvían a aparecer en el siguiente clone.
+        _force_paths = [
+            "bootstrap.sh",
+            ".github/workflows/auto-release.yml",
+            ".github/workflows/build-exe.yml",
+            ".github/workflows/refresh-deps.yml",
+            "backend/updater.py",
+            "version.json",
+        ]
+        _forced_count = 0
+        for rel in _force_paths:
+            src_p = ROOT_DIR.parent / rel
+            dst_p = work_dir / rel
+            if not src_p.exists():
+                continue
+            try:
+                dst_p.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src_p), str(dst_p))
+                rc_af, _ = await _arun(["git", "add", "-f", rel], cwd=work_dir)
+                if rc_af == 0:
+                    _forced_count += 1
+            except Exception as e:
+                logger.warning(f"[push-all] no se pudo forzar {rel}: {e}")
+        if _forced_count:
+            logger.info(f"[push-all] {_forced_count} archivo(s) crítico(s) forzado(s) al push")
 
         rc_st, status_out = await _arun(["git", "status", "--porcelain"], cwd=work_dir)
         if not status_out.strip():

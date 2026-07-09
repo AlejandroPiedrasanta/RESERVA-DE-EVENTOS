@@ -89,16 +89,179 @@ jobs:
     secrets: inherit
 
   # ─────────────────────────────────────────────────────────────────────
-  # 3) Sólo si TODOS los builds terminaron OK: commitear version.txt.
-  #    Este es el paso que "coordina" la publicación: hasta que este job
-  #    corre, los binarios instalados no ven la nueva versión (porque
-  #    version.txt en main sigue siendo la anterior y — más importante —
-  #    el backend consulta el release con asset, que ya está publicado).
+  # 3) SEMÁFORO: generar y publicar version.json DESPUÉS de que todos los
+  #    binarios están 100% subidos a la Release. Este manifiesto es la
+  #    ÚNICA fuente de verdad para el cliente auto-updater — hasta que
+  #    version.json existe con hashes válidos, ningún cliente detecta
+  #    la nueva versión ni intenta descargar. Esto elimina la carrera
+  #    "version.txt anuncia vX.Y.Z antes de que el .exe termine de subir".
   # ─────────────────────────────────────────────────────────────────────
-  finalize:
+  publish-manifest:
     needs: [compute-version, build]
     runs-on: ubuntu-latest
     if: success()
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Generar version.json con hashes de todos los assets
+        id: manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ needs.compute-version.outputs.new_version }}
+        run: |
+          set -e
+          TAG="v${NEW_VERSION}"
+          REPO="${GITHUB_REPOSITORY}"
+          API="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+          echo "→ Consultando release ${TAG} para inventariar assets..."
+
+          # Reintenta hasta 12x (60s) porque la Release recién se acaba de crear.
+          REL_JSON=""
+          for i in $(seq 1 12); do
+            REL_JSON=$(curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                            -H "Accept: application/vnd.github+json" "${API}" || true)
+            if echo "${REL_JSON}" | jq -e '.assets | length > 0' >/dev/null 2>&1; then
+              break
+            fi
+            echo "  intento ${i}: release aún sin assets, esperando 5s..."
+            sleep 5
+          done
+          if ! echo "${REL_JSON}" | jq -e '.assets | length > 0' >/dev/null 2>&1; then
+            echo "::error::Release ${TAG} no tiene assets tras 60s"
+            exit 1
+          fi
+
+          PUBLISHED=$(echo "${REL_JSON}" | jq -r '.published_at // .created_at')
+          RELEASE_URL=$(echo "${REL_JSON}" | jq -r '.html_url')
+
+          # Descarga cada .sha256 hermano y arma el diccionario assets{}.
+          mkdir -p /tmp/manifest
+          echo "${REL_JSON}" | jq -c '.assets[]' > /tmp/manifest/assets.jsonl
+
+          declare -A KINDS=(
+            ["CinemaProductions-Setup"]="windows_installer"
+            ["CinemaProductions.exe"]="windows_portable"
+            ["CinemaProductions-linux-x64"]="linux_x64"
+            ["CinemaProductions-linux-arm64"]="linux_arm64"
+            ["CinemaProductions-macos-arm64"]="macos_arm64"
+          )
+
+          echo "{" > /tmp/manifest/assets_obj.json
+          FIRST=1
+          # 1) Mapear cada asset binario a su clave lógica + inyectar sha256
+          while IFS= read -r a; do
+            NAME=$(echo "$a" | jq -r '.name')
+            # Ignora los .sha256 y version.json anteriores
+            case "$NAME" in
+              *.sha256|version.json) continue ;;
+            esac
+            KIND=""
+            for prefix in "${!KINDS[@]}"; do
+              case "$NAME" in
+                "$prefix"*) KIND="${KINDS[$prefix]}"; break ;;
+              esac
+            done
+            [ -z "$KIND" ] && continue
+
+            URL=$(echo "$a" | jq -r '.browser_download_url')
+            SIZE=$(echo "$a" | jq -r '.size')
+            # Recuperar hash del asset hermano .sha256
+            SHA_URL="${URL}.sha256"
+            SHA=""
+            SHA_TXT=$(curl -sSL --max-time 15 "${SHA_URL}" || true)
+            if [ -n "${SHA_TXT}" ]; then
+              SHA=$(echo "${SHA_TXT}" | awk '{print tolower($1)}' | grep -oE '^[a-f0-9]{64}$' || true)
+            fi
+            if [ -z "${SHA}" ]; then
+              echo "  ⚠ sin sha256 para ${NAME}; descargando y calculando..."
+              curl -sSL --max-time 300 -o "/tmp/manifest/${NAME}" "${URL}"
+              SHA=$(sha256sum "/tmp/manifest/${NAME}" | awk '{print $1}')
+              rm -f "/tmp/manifest/${NAME}"
+            fi
+
+            [ $FIRST -eq 0 ] && echo "," >> /tmp/manifest/assets_obj.json
+            FIRST=0
+            printf '  "%s": {"name":"%s","url":"%s","size":%s,"sha256":"%s"}' \
+              "$KIND" "$NAME" "$URL" "$SIZE" "$SHA" >> /tmp/manifest/assets_obj.json
+            echo "  ✓ ${KIND}: ${NAME} (${SIZE} bytes, sha256=${SHA:0:12}…)"
+          done < /tmp/manifest/assets.jsonl
+          echo "" >> /tmp/manifest/assets_obj.json
+          echo "}" >> /tmp/manifest/assets_obj.json
+
+          ASSETS=$(cat /tmp/manifest/assets_obj.json)
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          jq -n \
+            --arg version "${NEW_VERSION}" \
+            --arg release_tag "${TAG}" \
+            --arg published_at "${PUBLISHED}" \
+            --arg manifest_generated_at "${NOW}" \
+            --arg release_url "${RELEASE_URL}" \
+            --arg min_installer_version "1.0.0" \
+            --argjson assets "${ASSETS}" \
+            '{schema_version:"1.0", version:$version, release_tag:$release_tag,
+              published_at:$published_at, manifest_generated_at:$manifest_generated_at,
+              release_url:$release_url, min_installer_version:$min_installer_version,
+              status:"ready", assets:$assets}' > version.json
+
+          echo "── version.json generado ──"
+          cat version.json
+          echo "manifest_ok=1" >> "$GITHUB_OUTPUT"
+
+      - name: Subir version.json como asset del release (semáforo)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.compute-version.outputs.new_version }}
+          files: version.json
+          append_body: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commitear version.json + version.txt en main
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          NEW="${{ needs.compute-version.outputs.new_version }}"
+          CUR=$(tr -d '[:space:]' < version.txt 2>/dev/null || echo "")
+
+          # No retroceder version.txt si main ya está más adelante.
+          if [[ "$CUR" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            LARGER=$(printf '%s\n%s\n' "$CUR" "$NEW" | sort -V | tail -n1)
+            if [ "$LARGER" != "$NEW" ]; then
+              echo "⚠ version.txt en main ($CUR) es más nuevo que candidata ($NEW). Solo subo version.json."
+              git add version.json
+              git commit -m "chore(release): manifest v$NEW [skip ci]" || echo "sin cambios"
+              git push origin "HEAD:${{ github.ref_name }}" || true
+              exit 0
+            fi
+          fi
+
+          echo "$NEW" > version.txt
+          git add version.txt version.json
+          if git diff --cached --quiet; then
+            echo "✓ Nada que commitear"
+          else
+            git commit -m "chore(release): v$NEW manifest + version.txt [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+            echo "✓ version.json + version.txt publicados: v$NEW"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 4) [LEGACY, mantenido por compat] Commitear version.txt bumpeado.
+  #    NOTA: publish-manifest ya lo hace atómicamente junto con version.json.
+  #    Este job queda por si alguien vuelve a activarlo manualmente.
+  # ─────────────────────────────────────────────────────────────────────
+  finalize:
+    needs: [compute-version, build, publish-manifest]
+    runs-on: ubuntu-latest
+    if: false  # deshabilitado — la lógica migró a publish-manifest
     steps:
       - uses: actions/checkout@v4
         with:

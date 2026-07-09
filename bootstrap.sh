@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cinema Productions — bootstrap.sh v4.1 (stream extract, ultrafast)
+# Cinema Productions — bootstrap.sh v4.2 (stream extract + deps reconciliation)
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,6 +75,32 @@ if [ "$NEED_INSTALL" = "1" ]; then
     echo "ℹ All tarballs failed — falling back to yarn install"
   else
     echo "⚡ node_modules ready ($(du -sh frontend/node_modules | cut -f1))"
+  fi
+fi
+
+# ── 4b) RECONCILIACIÓN DE DEPS: si el tarball (deps-latest) está atrasado
+#       respecto al package.json actual, el node_modules extraído no incluirá
+#       las deps nuevas y el build falla con "Module not found". Comparamos
+#       cada dep declarada contra su presencia real en node_modules; si falta
+#       alguna, disparamos yarn install para reconciliar (sin borrar lo que
+#       ya está — yarn hace el diff él solo).
+if [ "$NEED_INSTALL" = "0" ] && [ -d frontend/node_modules ] && [ -f frontend/package.json ]; then
+  MISSING=$(node -e "
+    const fs = require('fs');
+    const path = require('path');
+    const pkg = JSON.parse(fs.readFileSync('frontend/package.json','utf8'));
+    const deps = Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {});
+    const missing = [];
+    for (const name of Object.keys(deps)) {
+      const p = path.join('frontend','node_modules', name, 'package.json');
+      if (!fs.existsSync(p)) missing.push(name);
+    }
+    console.log(missing.join(' '));
+  " 2>/dev/null || echo "")
+  if [ -n "$MISSING" ]; then
+    echo "⚠ Deps faltantes en node_modules (tarball atrasado): $MISSING"
+    echo "  → Reconciliando con yarn install (mantiene lo existente)…"
+    NEED_INSTALL=1  # Forzar el bloque de yarn install más abajo
   fi
 fi
 
