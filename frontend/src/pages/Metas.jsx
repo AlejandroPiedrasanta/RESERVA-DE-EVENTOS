@@ -587,7 +587,7 @@ export default function Metas() {
       if (badge) streakBadgeRef.current.add(`${type}-${year}-badge-${badge.min}`);
 
       setData(p);
-      setAnnualDraft(String(p.annual_goal || ""));
+      setAnnualDraft(String(p.annual_goal_explicit || ""));
     } catch (e) {
       console.error(e);
       toast({ title: "Error al cargar metas", variant: "destructive" });

@@ -1424,7 +1424,7 @@ async def get_stats():
         {"status": {"$nin": ["Cancelado"]}},
         {"total_amount": 1, "advance_paid": 1, "assigned_partners": 1, "_id": 0}
     )
-    active_docs = await active_cursor.to_list(1000)
+    active_docs = await active_cursor.to_list(length=None)
     total_pending = sum(
         max(0, (d.get("total_amount", 0) or 0) - (d.get("advance_paid", 0) or 0))
         for d in active_docs
@@ -1446,7 +1446,7 @@ async def get_stats():
 @api_router.get("/reservations")
 async def list_reservations():
     cursor = db.reservations.find({}, {"receipt_images.data": 0})
-    docs = await cursor.to_list(1000)
+    docs = await cursor.to_list(length=None)
     return [doc_to_dict(d) for d in docs]
 
 
@@ -1479,7 +1479,7 @@ async def update_reservation(reservation_id: str, reservation: ReservationUpdate
         oid = ObjectId(reservation_id)
     except Exception:
         raise HTTPException(status_code=400, detail="ID inválido")
-    update_data = {k: v for k, v in reservation.model_dump().items() if v is not None}
+    update_data = reservation.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No hay datos para actualizar")
     result = await db.reservations.update_one({"_id": oid}, {"$set": update_data})
@@ -1573,7 +1573,7 @@ async def get_calendar_events():
         {"client_name": 1, "client_phone": 1, "event_date": 1, "event_time": 1, "event_type": 1,
          "venue": 1, "total_amount": 1, "advance_paid": 1, "package_type": 1, "status": 1, "_id": 1}
     )
-    docs = await cursor.to_list(1000)
+    docs = await cursor.to_list(length=None)
     return [doc_to_dict(d) for d in docs]
 
 
@@ -1582,7 +1582,7 @@ async def get_calendar_events():
 @api_router.get("/socios")
 async def list_socios():
     cursor = db.socios.find({}, {"photo": 0, "photo_content_type": 0})
-    docs = await cursor.to_list(1000)
+    docs = await cursor.to_list(length=None)
     return [doc_to_dict(d) for d in docs]
 
 
@@ -1785,10 +1785,17 @@ async def metas_progress(year: int, type: str):
 
     months_out = []
     annual_actual = 0.0
-    # Meta mensual derivada de la anual (ventas/ganancias). En gastos NO se auto-deriva.
+    # Meta mensual auto-derivada de la anual (ventas/ganancias). En gastos NO se auto-deriva.
+    # Los meses con meta custom se descuentan de la anual y el remanente se reparte
+    # de forma uniforme entre los meses restantes, de modo que la suma de metas
+    # mensuales reconcilie con la meta anual.
     auto_monthly = 0.0
     if type != "gastos" and annual_goal > 0:
-        auto_monthly = round(annual_goal / 12.0, 2)
+        custom_sum = sum(goal_by_month.get(m, 0.0) for m in range(1, 13))
+        auto_months = [m for m in range(1, 13) if m not in goal_by_month]
+        if auto_months:
+            remaining = max(0.0, annual_goal - custom_sum)
+            auto_monthly = round(remaining / len(auto_months), 2)
 
     for m in range(1, 13):
         act = actual_for(m)
@@ -1810,15 +1817,20 @@ async def metas_progress(year: int, type: str):
             "is_auto": (not is_custom) and goal > 0,
         })
 
-    ann_pct = (annual_actual / annual_goal * 100) if annual_goal > 0 else 0.0
+    # Meta anual efectiva: la explícita si existe, si no la suma de metas mensuales custom.
+    effective_annual_goal = annual_goal if annual_goal > 0 else sum(
+        goal_by_month.get(m, 0.0) for m in range(1, 13)
+    )
+    ann_pct = (annual_actual / effective_annual_goal * 100) if effective_annual_goal > 0 else 0.0
     return {
         "year": year,
         "type": type,
         "months": months_out,
-        "annual_goal": round(annual_goal, 2),
+        "annual_goal": round(effective_annual_goal, 2),
         "annual_actual": round(annual_actual, 2),
         "annual_percent": round(ann_pct, 2),
-        "annual_reached": annual_goal > 0 and annual_actual >= annual_goal,
+        "annual_reached": effective_annual_goal > 0 and annual_actual >= effective_annual_goal,
+        "annual_goal_explicit": round(annual_goal, 2),
         "auto_monthly": auto_monthly,
     }
 
