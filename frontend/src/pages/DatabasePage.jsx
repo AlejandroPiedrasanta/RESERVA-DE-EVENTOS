@@ -39,8 +39,6 @@ import { generateAllReservationsPDF } from "@/lib/generatePDF";
 import { fireEpic } from "@/lib/celebrations";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
 import { DesktopAppSection } from "@/components/DesktopAppSection";
-import PaypalConfigPanel from "@/components/PaypalConfigPanel";
-import GoogleAuthConfigPanel from "@/components/GoogleAuthConfigPanel";
 
 const BASE = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL;
 
@@ -2237,9 +2235,6 @@ export default function DatabasePage() {
                     { id: "desktop",  label: "App Escritorio", icon: <Laptop size={12} /> },
                     { id: "storage",  label: "Almacenamiento", icon: <HardDrive size={12} /> },
                     { id: "tools",    label: "Herramientas",   icon: <Wrench size={12} /> },
-                    { id: "paypal",   label: "PayPal",         icon: <CreditCard size={12} /> },
-                    { id: "google",   label: "Google Sign-In", icon: <KeyRound size={12} /> },
-                    { id: "users",    label: "Usuarios",       icon: <Users size={12} /> },
                   ].map(t => (
                     <button
                       key={t.id}
@@ -2815,18 +2810,8 @@ export default function DatabasePage() {
                   </div>
                 )}
 
-                {/* ═══════════ TAB PAYPAL ═══════════ */}
-                {supportTab === "paypal" && (
-                  <PaypalConfigPanel password={SOPORTE_FACTORY_PASSWORD} />
-                )}
-
-                {/* ═══════════ TAB GOOGLE SIGN-IN ═══════════ */}
-                {supportTab === "google" && (
-                  <GoogleAuthConfigPanel password={SOPORTE_FACTORY_PASSWORD} />
-                )}
-
-                {/* ═══════════ TAB 5: USUARIOS ═══════════ */}
-                {supportTab === "users" && (
+                {/* PayPal / Google Sign-In / Usuarios — eliminados */}
+                {false && supportTab === "users" && (
                   <div className="space-y-3" data-testid="support-panel-users">
                     <div className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
                       <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">

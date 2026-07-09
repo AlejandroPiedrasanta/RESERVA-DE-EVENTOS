@@ -16,7 +16,6 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { Section, SectionSearchBar } from "@/components/appearance/SectionShell";
 import { SectionSearchContext } from "@/lib/sectionSearch";
 import { SecuritySection } from "@/components/SecuritySection";
-import SubscriptionSection from "@/components/SubscriptionSection";
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 
@@ -1780,7 +1779,7 @@ export default function Settings() {
         </Section>
 
         {/* Subscription Section - added below all settings */}
-        <SubscriptionSection />
+        {/* Suscripción eliminada */}
 
       </motion.div>
       </SectionSearchContext.Provider>

@@ -2,7 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
-import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { AuthProvider } from "@/context/AuthContext";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import Reservations from "@/pages/Reservations";
@@ -16,14 +16,8 @@ import AppearancePage from "@/pages/AppearancePage";
 import UpdatesPage from "@/pages/UpdatesPage";
 import { Toaster } from "@/components/ui/toaster";
 import LockScreen from "@/components/LockScreen";
-import LoginScreen from "@/components/LoginScreen";
-import SubscriptionScreen from "@/components/SubscriptionScreen";
-import { GoogleOAuthProvider } from "@react-oauth/google";
-import TrialBanner from "@/components/TrialBanner";
-import { hasSupportAccess } from "@/components/SupportAccessButton";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
-import { getGoogleAuthConfig } from "@/lib/api";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -65,7 +59,7 @@ function AnimatedRoutes() {
           <Route path="/base-de-datos" element={<DatabasePage />} />
           <Route path="/apariencia" element={<AppearancePage />} />
           <Route path="/actualizaciones" element={<UpdatesPage />} />
-          <Route path="/suscripcion" element={<SubscriptionScreen reason="manual" />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
@@ -108,11 +102,9 @@ function ProtectedApp() {
           <div className="blob blob-4" />
         </div>
         <BrowserRouter>
-          <AppWithBanner>
-            <Layout>
-              <AnimatedRoutes />
-            </Layout>
-          </AppWithBanner>
+          <Layout>
+            <AnimatedRoutes />
+          </Layout>
         </BrowserRouter>
         <Toaster />
       </div>
@@ -120,102 +112,13 @@ function ProtectedApp() {
   );
 }
 
-function AppWithBanner({ children }) {
-  const { subscription } = useAuth();
+function App() {
   return (
-    <>
-      <TrialBanner subscription={subscription} />
-      {children}
-    </>
-  );
-}
-
-// AuthGate decides what to render based on auth + subscription state
-function AuthGate() {
-  const { status, subscription } = useAuth();
-
-  // Support bypass: permanent access on this device once the support password was entered
-  if (hasSupportAccess()) {
-    return (
+    <AuthProvider>
       <SettingsProvider>
         <ProtectedApp />
       </SettingsProvider>
-    );
-  }
-
-  if (status === "checking") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50" data-testid="auth-loading">
-        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated") {
-    return <LoginScreen />;
-  }
-
-  // Authenticated
-  if (!subscription?.is_active) {
-    return (
-      <MotionConfig reducedMotion="never">
-        <SubscriptionScreen reason="trial_expired" />
-        <Toaster />
-      </MotionConfig>
-    );
-  }
-
-  return (
-    <SettingsProvider>
-      <ProtectedApp />
-    </SettingsProvider>
-  );
-}
-
-function App() {
-  // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-  // Google Client ID is fetched from backend (admin can update it via
-  // "Base de datos → Soporte avanzado → Google Sign-In"). Falls back to
-  // REACT_APP_GOOGLE_CLIENT_ID only until the backend responds.
-  const [googleClientId, setGoogleClientId] = useState(process.env.REACT_APP_GOOGLE_CLIENT_ID || "");
-  const [googleReady, setGoogleReady] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    getGoogleAuthConfig()
-      .then((cfg) => { if (mounted) setGoogleClientId(cfg?.client_id || ""); })
-      .catch(() => { /* keep env fallback */ })
-      .finally(() => { if (mounted) setGoogleReady(true); });
-    return () => { mounted = false; };
-  }, []);
-
-  // Render without provider until we know the client_id (avoids Google iframe
-  // initialising with a stale value that would need a page reload after admin
-  // saves credentials for the first time).
-  if (!googleReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50" data-testid="boot-loading">
-        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  const content = (
-    <AuthProvider>
-      <AuthGate />
     </AuthProvider>
-  );
-
-  if (!googleClientId) {
-    // Backend not configured yet — render app without Google provider so the
-    // email/password login and support-bypass still work.
-    return content;
-  }
-
-  return (
-    <GoogleOAuthProvider clientId={googleClientId}>
-      {content}
-    </GoogleOAuthProvider>
   );
 }
 

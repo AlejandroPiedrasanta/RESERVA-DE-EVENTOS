@@ -1,95 +1,28 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api } from "@/lib/api";
+// Auth eliminado: la app ya no requiere login, cuentas, suscripciones ni Google.
+// Este contexto se mantiene solo como shim para no romper componentes que
+// aún llaman `useAuth()` (ej. ProfileCard). Devuelve siempre un usuario
+// "local" con suscripción activa.
+import { createContext, useContext } from "react";
 
-const AuthContext = createContext(null);
-const TOKEN_KEY = "cp_session_token";
+const STUB = {
+  user: { name: "Usuario", email: "", picture: "" },
+  subscription: { is_active: true, plan: "local", trial_active: false, trial_days_left: 0 },
+  status: "authenticated",
+  loginWithGoogleCredential: async () => {},
+  loginWithPassword: async () => {},
+  register: async () => {},
+  logout: () => {},
+  refresh: async () => {},
+  updateProfile: async () => {},
+  authHeaders: () => ({}),
+};
 
-function getToken() { try { return localStorage.getItem(TOKEN_KEY) || null; } catch { return null; } }
-function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } }
-
-function authHeaders() {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
+const AuthContext = createContext(STUB);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [subscription, setSubscription] = useState(null);
-  const [status, setStatus] = useState("checking"); // "checking" | "unauthenticated" | "authenticated"
-
-  const refresh = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null); setSubscription(null); setStatus("unauthenticated");
-      return null;
-    }
-    try {
-      const { data } = await api.get("/auth/me", { headers: authHeaders() });
-      setUser(data.user);
-      setSubscription(data.subscription);
-      setStatus("authenticated");
-      return data;
-    } catch {
-      setToken(null);
-      setUser(null); setSubscription(null); setStatus("unauthenticated");
-      return null;
-    }
-  }, []);
-
-  const loginWithGoogleCredential = useCallback(async (credential) => {
-    const { data } = await api.post("/auth/session", { credential });
-    if (data.session_token) setToken(data.session_token);
-    setUser(data.user);
-    setSubscription(data.subscription);
-    setStatus("authenticated");
-    return data;
-  }, []);
-
-  const registerWithPassword = useCallback(async ({ email, password, name }) => {
-    const { data } = await api.post("/auth/register", { email, password, name });
-    if (data.session_token) setToken(data.session_token);
-    setUser(data.user);
-    setSubscription(data.subscription);
-    setStatus("authenticated");
-    return data;
-  }, []);
-
-  const loginWithPassword = useCallback(async ({ email, password }) => {
-    const { data } = await api.post("/auth/login", { email, password });
-    if (data.session_token) setToken(data.session_token);
-    setUser(data.user);
-    setSubscription(data.subscription);
-    setStatus("authenticated");
-    return data;
-  }, []);
-
-  const updateProfile = useCallback(async (patch) => {
-    const { data } = await api.patch("/auth/profile", patch, { headers: authHeaders() });
-    setUser(data.user);
-    if (data.subscription) setSubscription(data.subscription);
-    return data;
-  }, []);
-
-  const logout = useCallback(async () => {
-    try { await api.post("/auth/logout", {}, { headers: authHeaders() }); } catch { /* ignore */ }
-    setToken(null);
-    setUser(null); setSubscription(null); setStatus("unauthenticated");
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return (
-    <AuthContext.Provider value={{ user, subscription, status, refresh, loginWithGoogleCredential, logout, setSubscription, setUser, authHeaders, registerWithPassword, loginWithPassword, updateProfile }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={STUB}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+  return useContext(AuthContext);
 }
-
-export { authHeaders };
