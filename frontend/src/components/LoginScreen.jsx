@@ -10,6 +10,16 @@ import { getGoogleAuthConfig } from "@/lib/api";
 export default function LoginScreen() {
   const { loginWithPassword, registerWithPassword, loginWithGoogleCredential } = useAuth();
   const [googleConfigured, setGoogleConfigured] = useState(false);
+  // Fix "funciona en un navegador y en otro no": Google Identity Services guarda
+  // una cookie `g_state` que tras varios cierres suprime el login en ESE navegador
+  // (cooldown). La borramos al entrar a la pantalla de login para que el boton GSI
+  // funcione siempre, sin depender de limpiar cache manualmente.
+  const clearGoogleState = () => {
+    try {
+      document.cookie = "g_state=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+    } catch (_) {}
+  };
+  useEffect(() => { clearGoogleState(); }, []);
   useEffect(() => {
     let m = true;
     getGoogleAuthConfig()
@@ -84,11 +94,12 @@ export default function LoginScreen() {
                   setErr(e?.response?.data?.detail || "No se pudo iniciar sesión con Google.");
                 }
               }}
-              onError={() => setErr("Error de Google Sign-In. Intenta de nuevo.")}
+              onError={() => { clearGoogleState(); setErr("Error de Google Sign-In. Intenta de nuevo."); }}
               text="continue_with"
               shape="pill"
               size="large"
               width="360"
+              auto_select={false}
             />
           </div>
         ) : (
