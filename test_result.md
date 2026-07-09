@@ -481,7 +481,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: true
 
 test_plan:
@@ -1276,3 +1276,189 @@ agent_communication:
         the backend has been replaced with a new version
       
       Test file: /app/test_version_api.py
+
+
+  - agent: "testing"
+    message: |
+      GOOGLE SIGN-IN CONFIG ENDPOINTS TESTING COMPLETE - ✅ ALL TESTS PASSED (7/7)
+      
+      Tested the NEW Google Sign-In configuration feature in Database page > Soporte avanzado.
+      
+      WHAT WAS TESTED:
+      Three backend endpoints in /app/backend/subscription.py for managing Google OAuth credentials:
+      1. GET /api/auth/google-config (public)
+      2. GET /api/admin/google-login/config (admin)
+      3. PATCH /api/admin/google-login/config (admin)
+      
+      TEST RESULTS:
+      ✅ A) Public endpoint (no password)
+         - Returns 200 with {client_id, configured}
+         - NEVER exposes client_secret (security check passed)
+      
+      ✅ B) Admin GET (correct password "286811")
+         - Returns 200 with {client_id, client_secret_masked, has_client_secret, configured}
+         - All required fields present with correct types
+      
+      ✅ C) Admin GET (wrong password)
+         - Returns 401 Unauthorized (correct)
+         - Not 200 (security) and not 500 (error handling)
+      
+      ✅ D) Admin PATCH (save client_id)
+         - Returns 200 with {ok: true, client_id, configured: true}
+         - Persistence verified with GET
+      
+      ✅ E) Admin PATCH (save client_secret)
+         - Returns 200 with {ok: true, ...}
+         - Persistence verified: has_client_secret=true
+         - client_secret_masked shows "••••••••••••••••••••fake" (20 bullets + last 4 chars)
+      
+      ✅ F) Admin PATCH (empty body)
+         - Returns 400 with detail "Nada que actualizar"
+         - Not 500 (error handling correct)
+      
+      ✅ G) Public endpoint reflects saved data
+         - After saving client_id, public endpoint returns configured=true
+         - client_id matches saved value
+      
+      SECURITY VALIDATION:
+      ✅ Public endpoint never exposes client_secret
+      ✅ Admin endpoints require correct password (401 if wrong)
+      ✅ client_secret properly masked (20 bullets + last 4 chars)
+      
+      CONCLUSION:
+      The Google Sign-In configuration feature is FULLY WORKING. All backend endpoints
+      correctly handle authentication, data persistence, security masking, and error cases.
+      
+      Test file: /app/test_google_auth_config.py
+
+
+  - task: "Google Sign-In configuration endpoints (nueva pestaña en Base de Datos > Soporte avanzado)"
+    implemented: true
+    working: true
+    file: "/app/backend/subscription.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Nueva funcionalidad: pestaña "Google Sign-In" dentro de "Soporte avanzado" en Base de Datos
+          (/app/frontend/src/pages/DatabasePage.jsx) que renderiza GoogleAuthConfigPanel para guardar
+          y leer las credenciales OAuth de Google usadas en el login.
+          
+          ENDPOINTS IMPLEMENTADOS (en /app/backend/subscription.py):
+          1. GET /api/auth/google-config (público, sin contraseña)
+             - Expone SOLO el client_id para que el frontend renderice el botón de Google
+             - NUNCA devuelve el client_secret (seguridad)
+             - Retorna: {client_id: string, configured: boolean}
+          
+          2. GET /api/admin/google-login/config (admin, requiere X-Admin-Password: 286811)
+             - Retorna: {client_id, client_secret_masked, has_client_secret, configured}
+             - client_secret_masked enmascara el secret con "•" (20 bullets + últimos 4 chars)
+          
+          3. PATCH /api/admin/google-login/config (admin, requiere X-Admin-Password: 286811)
+             - Body: {client_id?: string, client_secret?: string}
+             - Guarda en DB (app_settings, _id: "google_login")
+             - Retorna: {ok: true, client_id, configured}
+             - Si body vacío: 400 con detail "Nada que actualizar"
+          
+          AUTENTICACIÓN ADMIN:
+          - Header: X-Admin-Password con valor "286811" (SOPORTE_FACTORY_PASSWORD)
+          - Función _require_admin() valida el password (línea 89-91)
+          - Si password incorrecto o ausente: 401 "Admin no autorizado"
+          
+          FRONTEND:
+          - GoogleAuthConfigPanel usa adminGetGoogleLoginConfig() y adminUpdateGoogleLoginConfig()
+          - Definidos en /app/frontend/src/lib/api.js (líneas 257-259)
+          - Panel permite pegar client_id y client_secret desde Google Cloud Console
+          - Muestra estado "CONFIGURADO" o "PENDIENTE"
+          - Link directo a Google Cloud Console para crear credenciales OAuth
+      
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: Google Sign-In configuration endpoints (nueva pestaña en Base de Datos)
+          
+          TEST RESULTS - ALL TESTS PASSED ✅ (7/7)
+          
+          CONTEXT:
+          Nueva pestaña "Google Sign-In" en DatabasePage.jsx > Soporte avanzado que permite
+          guardar credenciales OAuth de Google (client_id + client_secret) para el login.
+          Los endpoints están en /app/backend/subscription.py (líneas 492-534).
+          Admin password: "286811" (SOPORTE_FACTORY_PASSWORD).
+          
+          ✅ TEST A: GET /api/auth/google-config (público, sin contraseña)
+          - HTTP 200 OK
+          - Retorna: {client_id: "", configured: false} (inicialmente vacío)
+          - Campos requeridos presentes: client_id (string), configured (boolean)
+          - SEGURIDAD: client_secret NO expuesto en endpoint público ✓
+          
+          ✅ TEST B: GET /api/admin/google-login/config (admin, password correcto)
+          - HTTP 200 OK con header X-Admin-Password: 286811
+          - Retorna: {client_id, client_secret_masked, has_client_secret, configured}
+          - Todos los campos requeridos presentes con tipos correctos
+          - client_secret_masked está vacío cuando no hay secret guardado
+          
+          ✅ TEST C: GET /api/admin/google-login/config (admin, password incorrecto)
+          - HTTP 401 Unauthorized (correcto)
+          - Header X-Admin-Password: wrong_password
+          - NO retorna 200 (seguridad) ✓
+          - NO retorna 500 (manejo de errores correcto) ✓
+          
+          ✅ TEST D: PATCH /api/admin/google-login/config (guardar client_id)
+          - HTTP 200 OK
+          - Body: {client_id: "test-fake-id-12345.apps.googleusercontent.com"}
+          - Retorna: {ok: true, client_id: "test-fake-id-12345.apps.googleusercontent.com", configured: true}
+          - PERSISTENCIA VERIFICADA: GET posterior devuelve el mismo client_id ✓
+          
+          ✅ TEST E: PATCH /api/admin/google-login/config (guardar client_secret)
+          - HTTP 200 OK
+          - Body: {client_secret: "GOCSPX-test-secret-fake"}
+          - Retorna: {ok: true, ...}
+          - PERSISTENCIA VERIFICADA con GET:
+            * has_client_secret: true ✓
+            * client_secret_masked: "••••••••••••••••••••fake" (20 bullets + últimos 4 chars) ✓
+            * El secret real NO se expone, solo la versión enmascarada ✓
+          
+          ✅ TEST F: PATCH /api/admin/google-login/config (body vacío)
+          - HTTP 400 Bad Request (correcto)
+          - Body: {}
+          - Retorna: {detail: "Nada que actualizar"}
+          - NO retorna 500 (manejo de errores correcto) ✓
+          
+          ✅ TEST G: GET /api/auth/google-config (verificar persistencia)
+          - HTTP 200 OK
+          - Después de guardar client_id en TEST D:
+            * configured: true ✓
+            * client_id: "test-fake-id-12345.apps.googleusercontent.com" ✓
+          - El endpoint público refleja correctamente los datos guardados
+          
+          SECURITY VALIDATION:
+          ✅ Public endpoint NEVER exposes client_secret
+          ✅ Admin endpoints require correct password (401 if wrong)
+          ✅ client_secret_masked properly masks the secret (20 bullets + last 4 chars)
+          ✅ Empty PATCH body returns 400, not 500
+          
+          DATA PERSISTENCE:
+          ✅ client_id saved and retrieved correctly
+          ✅ client_secret saved and masked correctly
+          ✅ Public endpoint reflects saved configuration
+          
+          IMPLEMENTATION DETAILS:
+          - Endpoints in /app/backend/subscription.py (lines 492-534)
+          - Admin password: "286811" (line 84: ADMIN_PASSWORD)
+          - _require_admin() validates password (lines 89-91)
+          - _get_google_login_settings() reads from DB (lines 57-63)
+          - Data stored in app_settings collection with _id: "google_login"
+          - Masking logic: 20 bullets + last 4 chars (line 505)
+          
+          CONCLUSION:
+          ✅ All 7 backend tests PASSED
+          ✅ Google Sign-In configuration feature is FULLY WORKING
+          ✅ Security measures in place (password protection, secret masking)
+          ✅ Data persistence working correctly
+          ✅ Error handling correct (400 for empty body, 401 for wrong password)
+          ✅ Public endpoint correctly exposes only client_id, never secret
+          
+          Test file: /app/test_google_auth_config.py

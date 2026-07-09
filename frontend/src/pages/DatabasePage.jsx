@@ -2238,6 +2238,7 @@ export default function DatabasePage() {
                     { id: "storage",  label: "Almacenamiento", icon: <HardDrive size={12} /> },
                     { id: "tools",    label: "Herramientas",   icon: <Wrench size={12} /> },
                     { id: "paypal",   label: "PayPal",         icon: <CreditCard size={12} /> },
+                    { id: "google",   label: "Google Sign-In", icon: <KeyRound size={12} /> },
                     { id: "users",    label: "Usuarios",       icon: <Users size={12} /> },
                   ].map(t => (
                     <button
@@ -2817,6 +2818,11 @@ export default function DatabasePage() {
                 {/* ═══════════ TAB PAYPAL ═══════════ */}
                 {supportTab === "paypal" && (
                   <PaypalConfigPanel password={SOPORTE_FACTORY_PASSWORD} />
+                )}
+
+                {/* ═══════════ TAB GOOGLE SIGN-IN ═══════════ */}
+                {supportTab === "google" && (
+                  <GoogleAuthConfigPanel password={SOPORTE_FACTORY_PASSWORD} />
                 )}
 
                 {/* ═══════════ TAB 5: USUARIOS ═══════════ */}
