@@ -6396,9 +6396,7 @@ def _bundle_kind() -> str:
 @api_router.get("/github/check-updates")
 async def check_github_updates():
     cfg = await _get_github_config()
-    repo_url = cfg.get("repo_url", "")
-    if not repo_url:
-        raise HTTPException(status_code=400, detail="No hay repositorio de GitHub configurado")
+    repo_url = cfg.get("repo_url", "") or f"https://github.com/{_github_exe_repo()}"
 
     owner, repo = _parse_github_url(repo_url)
     if not owner:
@@ -6511,9 +6509,13 @@ async def check_github_updates():
     # Si conocemos ambas versiones y son idénticas (normalizadas), NO hay update.
     ln = _normalize_semver(local_version)
     rn = _normalize_semver(remote_version)
-    if ln and rn and ln == rn:
-        has_updates = False
-        new_commits = []
+    if ln and rn:
+        # Fuente de verdad: la versión semántica. Solo hay update si el remoto
+        # es ESTRICTAMENTE más nuevo — evita falsos positivos por SHA divergente
+        # y evita ofrecer un "update" que en realidad sería un downgrade.
+        has_updates = _is_newer_version(rn, ln)
+        if not has_updates:
+            new_commits = []
 
     return {
         "has_updates": has_updates,
@@ -6578,9 +6580,7 @@ async def github_update_progress():
 @api_router.post("/github/apply-update")
 async def apply_github_update(payload: dict = Body(default={})):
     cfg = await _get_github_config()
-    repo_url = cfg.get("repo_url", "")
-    if not repo_url:
-        raise HTTPException(status_code=400, detail="No hay repositorio configurado")
+    repo_url = cfg.get("repo_url", "") or f"https://github.com/{_github_exe_repo()}"
 
     # ── Caso .exe (portable o instalador) ────────────────────────────
     # En Windows empaquetado con PyInstaller no existe .git ni supervisor,
@@ -6610,35 +6610,71 @@ async def apply_github_update(payload: dict = Body(default={})):
                 "installer": installer,
             }
 
-        # ── Instalador en Windows: descarga verificada (SHA256) EN SEGUNDO
-        #    PLANO con progreso consultable, + lanzamiento automático del
-        #    Setup.exe. La request retorna de inmediato con status "installing"
-        #    para que el modal haga polling a /github/update-progress y muestre
-        #    la barra. Best-effort: si algo falla, el estado queda en 'error'.
-        if kind == "installer" and platform.system().lower() == "windows" and asset.get("sha256"):
+        # ── Guard anti-bucle/downgrade: el binario publicado más reciente debe
+        #    ser ESTRICTAMENTE más nuevo que el instalado. `version.txt` en main
+        #    puede ir por delante del último exe publicado (aún compilándose en
+        #    GitHub Actions); sin este guard, se reinstalaría la MISMA versión en
+        #    bucle. Comparamos el tag del asset (vX.Y.Z) contra version.txt local.
+        _local_v = _normalize_semver(await _read_local_version())
+        _asset_v = _normalize_semver(asset.get("tag") or "")
+        if _local_v and _asset_v and not _is_newer_version(_asset_v, _local_v):
+            return {
+                "success": False,
+                "is_desktop": True,
+                "status": "up_to_date",
+                "mode": "desktop_bundle",
+                "bundle_kind": kind,
+                "message": (
+                    f"Ya tienes instalado el binario más reciente (v{_local_v}). "
+                    "La versión anunciada aún se está compilando/publicando en "
+                    "GitHub Releases; vuelve a intentarlo en unos minutos."
+                ),
+                "installed_version": _local_v,
+                "available_exe_version": _asset_v,
+                "portable": portable,
+                "installer": installer,
+            }
+
+        # ── Auto-actualización en Windows: descarga verificada (SHA256) EN
+        #    SEGUNDO PLANO con progreso consultable + instalación automática.
+        #    · installer → lanza Setup.exe /SILENT (Inno Setup: CloseApplications
+        #      force + RestartApplications yes → cierra y relanza la app).
+        #    · portable  → apply_update_windows(): batch DETACHED que espera a que
+        #      el .exe se libere, lo reemplaza y relanza la app.
+        #    La request retorna de inmediato con status "installing" para que el
+        #    modal/página hagan polling a /github/update-progress (barra).
+        if platform.system().lower() == "windows" and asset.get("sha256"):
             import threading
 
             _reset_update_progress(name=asset["name"], total=asset.get("size") or 0)
 
-            def _download_and_install():
+            def _download_and_install(_kind=kind, _asset=asset):
                 try:
-                    from updater import download_and_verify
+                    import sys as _sys
+                    from updater import download_and_verify, apply_update_windows
 
                     def _cb(done, total):
                         _set_update_progress(downloaded=done, total=total, stage="downloading")
 
                     pkg_path = download_and_verify(
-                        asset["url"], asset["sha256"], filename=asset["name"],
+                        _asset["url"], _asset["sha256"], filename=_asset["name"],
                         timeout=600, progress_cb=_cb,
                     )
                     _set_update_progress(stage="installing")
                     time.sleep(0.5)
-                    subprocess.Popen([pkg_path, "/SILENT", "/NORESTART"], close_fds=True)
+                    if _kind == "installer":
+                        # /SILENT muestra progreso del instalador; /NORESTART evita
+                        # reinicio del SO (el relanzado de la app lo hace Inno Setup).
+                        subprocess.Popen([pkg_path, "/SILENT", "/NORESTART"], close_fds=True)
+                    else:
+                        # Portable: reemplazo en caliente vía batch detached.
+                        app_name = os.path.basename(getattr(_sys, "executable", "") or "") or "CinemaProductions.exe"
+                        apply_update_windows(pkg_path, app_name=app_name)
                     _set_update_progress(stage="done")
                     time.sleep(1.0)
                     os._exit(0)
                 except Exception as e:
-                    logger.warning(f"Auto-instalación falló: {e}")
+                    logger.warning(f"Auto-instalación ({_kind}) falló: {e}")
                     _set_update_progress(stage="error", error=str(e))
 
             threading.Thread(target=_download_and_install, daemon=True).start()

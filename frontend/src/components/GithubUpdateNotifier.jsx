@@ -182,8 +182,8 @@ export default function GithubUpdateNotifier() {
           setApplied(false);
           setApplying(false);
         } else {
-          // Nueva versión disponible en modo desktop: dispara la descarga del
-          // .exe/instalador más reciente (portable no puede auto-reemplazarse).
+          // Modo desktop sin reinicio: o hay binario nuevo para descargar, o
+          // el anunciado aún se está publicando (status "up_to_date").
           if (res.download_url) {
             try {
               const a = document.createElement("a");
@@ -194,11 +194,16 @@ export default function GithubUpdateNotifier() {
               a.click();
               a.remove();
             } catch { window.open(res.download_url, "_blank"); }
+            toast({
+              title: "Descargando la nueva versión",
+              description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
+            });
+          } else {
+            toast({
+              title: res.status === "up_to_date" ? "Ya tienes el binario más reciente" : "Sin binario disponible aún",
+              description: res.message || "La nueva versión se está publicando en GitHub. Inténtalo en unos minutos.",
+            });
           }
-          toast({
-            title: "Descargando la nueva versión",
-            description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
-          });
           setApplied(false);
           setApplying(false);
         }

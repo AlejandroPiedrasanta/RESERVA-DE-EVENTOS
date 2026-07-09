@@ -151,7 +151,7 @@ export default function UpdatesPage() {
           });
         }
       } else if (res.is_desktop) {
-        // Nueva versión desktop: dispara la descarga del binario más reciente.
+        // Modo desktop sin reinicio: descarga manual o "aún publicándose".
         if (res.download_url) {
           try {
             const a = document.createElement("a");
@@ -162,12 +162,18 @@ export default function UpdatesPage() {
             a.click();
             a.remove();
           } catch { window.open(res.download_url, "_blank"); }
+          setCheckResult({ status: "desktop_update", message: res.message });
+          toast({
+            title: "Descargando la nueva versión",
+            description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
+          });
+        } else {
+          setCheckResult({ status: "latest", version: res.installed_version });
+          toast({
+            title: res.status === "up_to_date" ? "Ya tienes el binario más reciente" : "Sin binario disponible aún",
+            description: res.message || "La nueva versión se está publicando en GitHub. Inténtalo en unos minutos.",
+          });
         }
-        setCheckResult({ status: "desktop_update", message: res.message });
-        toast({
-          title: "Descargando la nueva versión",
-          description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
-        });
       } else {
         restarting = true;
         setCheckResult({ status: "installed", version: res.new_sha_short });
