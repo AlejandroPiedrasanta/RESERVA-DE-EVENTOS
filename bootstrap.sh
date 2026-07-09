@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
-# Cinema Productions — bootstrap.sh v4.2 (stream extract + deps reconciliation)
+# Cinema Productions — bootstrap.sh v5.0 (no-tarball: cache-aware yarn install)
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 t0=$(date +%s)
 
-# ── 0) Decompresores rápidos (CRÍTICO para arranque veloz) ───────
-# Los pods de Emergent vienen SIN zstd ni pigz. Sin ellos, la extracción
-# del tarball de node_modules (~300MB) usa gzip monohilo = lentísimo.
-#   · pigz  → gzip PARALELO (multi-core), ~5-8x más rápido.
-#   · zstd  → habilita el tarball .zst (descarga más chica + descompresión veloz).
-# Instalación mínima y NO fatal: si falla la red, seguimos con gzip normal.
-if ! command -v zstd >/dev/null 2>&1 || ! command -v pigz >/dev/null 2>&1; then
-  echo "⚙ Instalando decompresores rápidos (zstd, pigz)…"
-  sudo apt-get update -y -qq >/dev/null 2>&1 || true
-  sudo apt-get install -y -qq zstd pigz >/dev/null 2>&1 || true
-fi
+# ── 0) (eliminado) instalación de zstd/pigz — ya no hay tarball ──
+# El tarball de node_modules (~670MB) fue eliminado. Ahora usamos
+# yarn install con caché-awareness (reutiliza node_modules si el hash
+# de package.json no cambió). Sin descargas gigantes ni decompresores.
 
 # ── 1) backend/.env (idempotent) ─────────────────────────────────
 [ -f backend/.env ] || printf 'MONGO_URL="mongodb://localhost:27017"\nDB_NAME="reserva_eventos"\nCORS_ORIGINS="*"\n' > backend/.env
@@ -36,66 +29,10 @@ if [ -d frontend/node_modules ] && [ -f frontend/.pkg_hash ]; then
   [ "$CUR" = "$OLD" ] && NEED_INSTALL=0 && echo "♻ Reusing node_modules (hash match)"
 fi
 
-# ── 4) FAST-PATH: stream extract from GitHub Releases (zstd → gzip)
-# Priority: (a) committed tarball  (b) Releases zstd  (c) Releases gzip
-REPO="AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
-GH_ZST="https://github.com/${REPO}/releases/download/deps-latest/node_modules.tar.zst"
-GH_GZ="https://github.com/${REPO}/releases/download/deps-latest/node_modules.tar.gz"
-
-HAS_ZSTD=0; command -v zstd >/dev/null 2>&1 && HAS_ZSTD=1
-HAS_PIGZ=0; command -v pigz >/dev/null 2>&1 && HAS_PIGZ=1
-GZ_DECOMP="gzip -dc"; [ "$HAS_PIGZ" = "1" ] && GZ_DECOMP="pigz -dc"
-
-try_stream() {
-  local url="$1" decomp="$2" label="$3"
-  echo "⚡ Trying ${label}"
-  local code
-  code=$(curl -sI -o /dev/null -w "%{http_code}" --max-time 3 -L "$url" || echo 000)
-  if [ "$code" != "200" ]; then
-    echo "  ↳ HTTP $code, skip"
-    return 1
-  fi
-  if curl -fsSL --max-time 120 "$url" | eval "$decomp" | tar -xf - -C frontend/ 2>/dev/null; then
-    [ -d frontend/node_modules ] && { echo "  ↳ ✅ extracted from ${label}"; return 0; }
-  fi
-  return 1
-}
-
-if [ "$NEED_INSTALL" = "1" ]; then
-  rm -rf frontend/node_modules
-
-  # (a) committed tarball (offline path)
-  if [ -f frontend/node_modules.tar.zst ] && [ "$HAS_ZSTD" = "1" ]; then
-    echo "⚡ Using committed zstd tarball"
-    zstd -dc frontend/node_modules.tar.zst | tar -xf - -C frontend/ && NEED_INSTALL=0
-  elif [ -f frontend/node_modules.tar.gz ]; then
-    echo "⚡ Using committed gzip tarball"
-    $GZ_DECOMP < frontend/node_modules.tar.gz | tar -xf - -C frontend/ && NEED_INSTALL=0
-  fi
-
-  # (b) GitHub Releases zstd (only if zstd installed)
-  if [ "$NEED_INSTALL" = "1" ] && [ "$HAS_ZSTD" = "1" ]; then
-    try_stream "$GH_ZST" "zstd -dc" "Releases zstd" && NEED_INSTALL=0 || true
-  fi
-
-  # (c) GitHub Releases gzip (default path)
-  if [ "$NEED_INSTALL" = "1" ]; then
-    try_stream "$GH_GZ" "$GZ_DECOMP" "Releases gzip" && NEED_INSTALL=0 || true
-  fi
-
-  if [ "$NEED_INSTALL" = "1" ]; then
-    echo "ℹ All tarballs failed — falling back to yarn install"
-  else
-    echo "⚡ node_modules ready ($(du -sh frontend/node_modules | cut -f1))"
-  fi
-fi
-
-# ── 4b) RECONCILIACIÓN DE DEPS: si el tarball (deps-latest) está atrasado
-#       respecto al package.json actual, el node_modules extraído no incluirá
-#       las deps nuevas y el build falla con "Module not found". Comparamos
-#       cada dep declarada contra su presencia real en node_modules; si falta
-#       alguna, disparamos yarn install para reconciliar (sin borrar lo que
-#       ya está — yarn hace el diff él solo).
+# ── 4) RECONCILIACIÓN DE DEPS (sin tarball) ──────────────────────
+#      Si reutilizamos node_modules por hash-match pero falta alguna dep
+#      declarada (p.ej. instalación previa incompleta), forzamos yarn install.
+#      yarn hace el diff solo, sin re-descargar lo que ya está.
 if [ "$NEED_INSTALL" = "0" ] && [ -d frontend/node_modules ] && [ -f frontend/package.json ]; then
   MISSING=$(node -e "
     const fs = require('fs');
@@ -110,10 +47,16 @@ if [ "$NEED_INSTALL" = "0" ] && [ -d frontend/node_modules ] && [ -f frontend/pa
     console.log(missing.join(' '));
   " 2>/dev/null || echo "")
   if [ -n "$MISSING" ]; then
-    echo "⚠ Deps faltantes en node_modules (tarball atrasado): $MISSING"
-    echo "  → Reconciliando con yarn install (mantiene lo existente)…"
-    NEED_INSTALL=1  # Forzar el bloque de yarn install más abajo
+    echo "⚠ Deps faltantes en node_modules: $MISSING"
+    echo "  → Reconciliando con yarn install…"
+    NEED_INSTALL=1
   fi
+fi
+
+if [ "$NEED_INSTALL" = "1" ]; then
+  echo "📦 node_modules requiere yarn install (sin tarball)"
+else
+  echo "♻ node_modules reutilizado ($(du -sh frontend/node_modules 2>/dev/null | cut -f1)) — 0 descargas"
 fi
 
 # ── 5) Backend + Frontend deps IN PARALLEL + overlapped supervisor ─
