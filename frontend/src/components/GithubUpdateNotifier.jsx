@@ -3,11 +3,11 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   GitCommit, GitBranch, RefreshCw, X, Sparkles, Loader2, CheckCircle2,
-  AlertTriangle, ExternalLink, ChevronDown, Package,
+  AlertTriangle, ExternalLink, ChevronDown, Package, Download,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSettings } from "@/context/SettingsContext";
-import { checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate } from "@/lib/api";
+import { checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate, getUpdateProgress } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -47,7 +47,31 @@ export default function GithubUpdateNotifier() {
   const [expanded, setExpanded] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const progressTimerRef = useRef(null);
   const intervalRef = useRef(null);
+
+  // Polling de la barra de progreso de descarga/instalación (modo desktop).
+  const startProgressPolling = useCallback(() => {
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    progressTimerRef.current = setInterval(async () => {
+      try {
+        const p = await getUpdateProgress();
+        setProgress(p);
+        if (!p?.active && (p?.stage === "done" || p?.stage === "error")) {
+          clearInterval(progressTimerRef.current);
+          progressTimerRef.current = null;
+        }
+      } catch {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    }, 600);
+  }, []);
+
+  const stopProgressPolling = useCallback(() => {
+    if (progressTimerRef.current) { clearInterval(progressTimerRef.current); progressTimerRef.current = null; }
+  }, []);
 
   const readDismissed = () => {
     try { return localStorage.getItem(DISMISSED_KEY) || ""; } catch { return ""; }
@@ -131,12 +155,14 @@ export default function GithubUpdateNotifier() {
       if (res?.is_desktop) {
         if (res.restarted) {
           restarting = true;
+          if (res.status === "installing") startProgressPolling();
           toast({
             title: "Actualización aplicada",
             description: `${res.files_updated || 0} archivos actualizados. Esperando a que la app vuelva a arrancar…`,
           });
           // Poll al backend hasta que vuelva. Solo entonces recargar.
           const ok = await waitBackendReady(120000);
+          stopProgressPolling();
           if (ok) {
             await hardReloadAfterUpdate();
           } else {
@@ -156,10 +182,22 @@ export default function GithubUpdateNotifier() {
           setApplied(false);
           setApplying(false);
         } else {
-          // Fallback: hay nueva versión pero no se pudo reiniciar
+          // Nueva versión disponible en modo desktop: dispara la descarga del
+          // .exe/instalador más reciente (portable no puede auto-reemplazarse).
+          if (res.download_url) {
+            try {
+              const a = document.createElement("a");
+              a.href = res.download_url;
+              a.rel = "noreferrer";
+              a.download = res.download_name || "";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            } catch { window.open(res.download_url, "_blank"); }
+          }
           toast({
-            title: "Hay una versión nueva en GitHub",
-            description: res.message || "Descarga el paquete de nuevo para actualizar.",
+            title: "Descargando la nueva versión",
+            description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
           });
           setApplied(false);
           setApplying(false);
@@ -410,8 +448,37 @@ export default function GithubUpdateNotifier() {
               {/* Footer actions */}
               <div className="px-5 py-4 mt-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2.5">
                 {applied ? (
-                  <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold mx-auto py-1">
-                    <CheckCircle2 size={16} /> Recargando aplicación…
+                  <div className="w-full py-1" data-testid="github-update-progress">
+                    {progress && (progress.stage === "downloading" || progress.stage === "starting") ? (
+                      <>
+                        <div className="flex items-center justify-between mb-1.5 text-xs font-semibold text-slate-600">
+                          <span className="flex items-center gap-1.5">
+                            <Download size={13} className="text-indigo-500" />
+                            Descargando {progress.name || "actualización"}…
+                          </span>
+                          <span data-testid="github-update-progress-percent" className="tabular-nums">{progress.percent || 0}%</span>
+                        </div>
+                        <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                          <motion.div
+                            className="h-full rounded-full"
+                            style={{ background: "linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%)" }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${progress.percent || 0}%` }}
+                            transition={{ ease: "easeOut", duration: 0.3 }}
+                          />
+                        </div>
+                        <p className="mt-1.5 text-[11px] text-slate-400 text-center">
+                          Verificando integridad (SHA256) y preparando la instalación
+                        </p>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold mx-auto py-1 justify-center">
+                        <CheckCircle2 size={16} />
+                        {progress?.stage === "installing"
+                          ? "Instalando la nueva versión…"
+                          : "Recargando aplicación…"}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <>

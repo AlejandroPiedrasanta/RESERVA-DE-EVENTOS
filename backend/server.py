@@ -2856,34 +2856,56 @@ async def _find_latest_exe_asset(kind: str = "portable") -> dict | None:
                 m = re.search(r"\b([a-fA-F0-9]{64})\b", body)
                 if m and kind == "portable":  # evitar mezclar hashes entre kinds
                     sha256 = m.group(1).lower()
+        # Timestamp real del binario subido: preferimos updated_at/created_at
+        # del asset (cambia cada vez que el CI re-sube el .exe a un tag rodante
+        # como 'latest-exe'), con fallback al published_at del release.
+        ts = (exe_asset.get("updated_at") or exe_asset.get("created_at")
+              or rel.get("published_at") or rel.get("created_at") or "")
         return {
             "name": exe_asset["name"], "size": exe_asset.get("size") or 0,
             "url": exe_asset["browser_download_url"],
             "browser_download_url": exe_asset["browser_download_url"],
             "tag": rel.get("tag_name") or "", "published_at": rel.get("published_at") or "",
             "sha256": sha256,
+            "_ts": ts,
         }
 
+    # ── Escanear TODOS los releases (incluye prereleases como 'latest-exe') y
+    #    elegir el asset .exe con el timestamp de subida MÁS RECIENTE. No se
+    #    confía en /releases/latest porque GitHub ignora los prereleases, y el
+    #    workflow_dispatch publica el binario nuevo como prerelease 'latest-exe':
+    #    /releases/latest devolvería un release estable MÁS VIEJO → el usuario
+    #    descargaba un .exe desactualizado. Comparar por _ts corrige el bug.
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-        # 1) Latest release (excluye prereleases y drafts)
+        candidates: list[dict] = []
+        try:
+            r = await client.get(f"https://api.github.com/repos/{repo}/releases?per_page=30", headers=headers)
+            if r.status_code == 200:
+                for rel in r.json() or []:
+                    if rel.get("draft"):
+                        continue
+                    res = await _extract(rel, client)
+                    if res:
+                        candidates.append(res)
+        except Exception as e:
+            logger.warning(f"GitHub releases list falló: {e}")
+
+        if candidates:
+            candidates.sort(key=lambda c: c.get("_ts") or "", reverse=True)
+            best = candidates[0]
+            best.pop("_ts", None)
+            return best
+
+        # Fallback: si la lista falló por completo, probar /releases/latest.
         try:
             r = await client.get(f"https://api.github.com/repos/{repo}/releases/latest", headers=headers)
             if r.status_code == 200:
                 res = await _extract(r.json(), client)
                 if res:
+                    res.pop("_ts", None)
                     return res
         except Exception as e:
             logger.warning(f"GitHub releases/latest falló: {e}")
-        # 2) Fallback: recorrer todos los releases (incluye prereleases como 'latest-exe')
-        try:
-            r = await client.get(f"https://api.github.com/repos/{repo}/releases?per_page=20", headers=headers)
-            if r.status_code == 200:
-                for rel in r.json() or []:
-                    res = await _extract(rel, client)
-                    if res:
-                        return res
-        except Exception as e:
-            logger.warning(f"GitHub releases list falló: {e}")
     return None
 
 
@@ -6508,6 +6530,51 @@ async def check_github_updates():
     }
 
 
+# ── Estado de progreso de descarga/instalación desktop (para barra en el modal)
+import threading as _threading_mod
+_update_progress: dict = {
+    "active": False, "stage": "idle", "downloaded": 0, "total": 0,
+    "percent": 0, "name": "", "error": None,
+}
+_update_progress_lock = _threading_mod.Lock()
+
+
+def _reset_update_progress(name: str = "", total: int = 0):
+    with _update_progress_lock:
+        _update_progress.update({
+            "active": True, "stage": "starting", "downloaded": 0,
+            "total": int(total or 0), "percent": 0, "name": name, "error": None,
+        })
+
+
+def _set_update_progress(downloaded=None, total=None, stage=None, error=None):
+    with _update_progress_lock:
+        if downloaded is not None:
+            _update_progress["downloaded"] = int(downloaded)
+        if total is not None and total:
+            _update_progress["total"] = int(total)
+        if stage is not None:
+            _update_progress["stage"] = stage
+        if error is not None:
+            _update_progress["error"] = error
+            _update_progress["active"] = False
+        if stage in ("done", "error"):
+            _update_progress["active"] = stage != "error"
+        t = _update_progress["total"]
+        d = _update_progress["downloaded"]
+        _update_progress["percent"] = int(d * 100 / t) if t > 0 else (100 if stage == "done" else 0)
+        if stage == "done":
+            _update_progress["percent"] = 100
+            _update_progress["active"] = False
+
+
+@api_router.get("/github/update-progress")
+async def github_update_progress():
+    """Estado actual de la descarga/instalación desktop para la barra del modal."""
+    with _update_progress_lock:
+        return dict(_update_progress)
+
+
 @api_router.post("/github/apply-update")
 async def apply_github_update(payload: dict = Body(default={})):
     cfg = await _get_github_config()
@@ -6521,6 +6588,8 @@ async def apply_github_update(payload: dict = Body(default={})):
     # de los binarios más recientes publicados en GitHub Releases para que
     # la UI muestre el botón "Descargar nueva versión".
     if _is_frozen_bundle():
+        import platform
+        import time
         kind = _bundle_kind()
         portable = await _find_latest_exe_asset("portable")
         installer = await _find_latest_exe_asset("installer")
@@ -6528,6 +6597,7 @@ async def apply_github_update(payload: dict = Body(default={})):
         if not asset:
             return {
                 "success": False,
+                "is_desktop": True,
                 "status": "desktop_update",
                 "mode": "desktop_bundle",
                 "bundle_kind": kind,
@@ -6539,16 +6609,63 @@ async def apply_github_update(payload: dict = Body(default={})):
                 "portable": portable,
                 "installer": installer,
             }
+
+        # ── Instalador en Windows: descarga verificada (SHA256) EN SEGUNDO
+        #    PLANO con progreso consultable, + lanzamiento automático del
+        #    Setup.exe. La request retorna de inmediato con status "installing"
+        #    para que el modal haga polling a /github/update-progress y muestre
+        #    la barra. Best-effort: si algo falla, el estado queda en 'error'.
+        if kind == "installer" and platform.system().lower() == "windows" and asset.get("sha256"):
+            import threading
+
+            _reset_update_progress(name=asset["name"], total=asset.get("size") or 0)
+
+            def _download_and_install():
+                try:
+                    from updater import download_and_verify
+
+                    def _cb(done, total):
+                        _set_update_progress(downloaded=done, total=total, stage="downloading")
+
+                    pkg_path = download_and_verify(
+                        asset["url"], asset["sha256"], filename=asset["name"],
+                        timeout=600, progress_cb=_cb,
+                    )
+                    _set_update_progress(stage="installing")
+                    time.sleep(0.5)
+                    subprocess.Popen([pkg_path, "/SILENT", "/NORESTART"], close_fds=True)
+                    _set_update_progress(stage="done")
+                    time.sleep(1.0)
+                    os._exit(0)
+                except Exception as e:
+                    logger.warning(f"Auto-instalación falló: {e}")
+                    _set_update_progress(stage="error", error=str(e))
+
+            threading.Thread(target=_download_and_install, daemon=True).start()
+            return {
+                "success": True,
+                "is_desktop": True,
+                "restarted": True,
+                "status": "installing",
+                "mode": "desktop_bundle",
+                "bundle_kind": kind,
+                "message": "Descarga verificada. Instalando la nueva versión y reiniciando…",
+                "download_name": asset["name"],
+                "tag": asset.get("tag"),
+            }
+
         friendly = (
             "Estás usando la versión portable: no puede reemplazarse a sí misma "
-            "en caliente. Descarga la nueva versión desde el enlace, cierra la app "
-            "y sustituye el .exe (o instala el instalador para futuras "
+            "en caliente. La descarga de la nueva versión comenzará ahora; cierra "
+            "la app y sustituye el .exe (o instala el instalador para futuras "
             "actualizaciones automáticas)."
             if kind == "portable"
             else "Descarga e inicia el instalador. Se actualizará sobre la instalación actual y reiniciará la app."
         )
         return {
             "success": False,
+            "is_desktop": True,
+            "download_now": True,
             "status": "desktop_update",
             "mode": "desktop_bundle",
             "bundle_kind": kind,

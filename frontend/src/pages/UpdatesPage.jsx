@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
 import { getUpdatesHistory, uploadAppUpdate, deleteUpdate, setLatestUpdate, getUpdateDownloadUrl, checkForUpdates,
   getUpdateManifest,
-  getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate } from "@/lib/api";
+  getGithubConfig, checkGithubUpdates, applyGithubUpdate, waitBackendReady, hardReloadAfterUpdate, getUpdateProgress } from "@/lib/api";
 import { celebrateUpdate } from "@/lib/celebrations";
 
 function formatBytes(bytes) {
@@ -67,6 +67,26 @@ export default function UpdatesPage() {
   const [ghChecking, setGhChecking] = useState(false);
   const [ghApplying, setGhApplying] = useState(false);
   const [ghResult, setGhResult] = useState(null);
+  const [ghProgress, setGhProgress] = useState(null);
+  const ghProgressTimer = useRef(null);
+
+  const startGhProgressPolling = () => {
+    if (ghProgressTimer.current) clearInterval(ghProgressTimer.current);
+    ghProgressTimer.current = setInterval(async () => {
+      try {
+        const p = await getUpdateProgress();
+        setGhProgress(p);
+        if (!p?.active && (p?.stage === "done" || p?.stage === "error")) {
+          clearInterval(ghProgressTimer.current); ghProgressTimer.current = null;
+        }
+      } catch {
+        clearInterval(ghProgressTimer.current); ghProgressTimer.current = null;
+      }
+    }, 600);
+  };
+  const stopGhProgressPolling = () => {
+    if (ghProgressTimer.current) { clearInterval(ghProgressTimer.current); ghProgressTimer.current = null; }
+  };
 
   useEffect(() => {
     (async () => {
@@ -113,6 +133,7 @@ export default function UpdatesPage() {
       if (res.restarted) {
         // App de escritorio: aplicado automáticamente y reiniciando
         restarting = true;
+        if (res.status === "installing") startGhProgressPolling();
         setCheckResult({ status: "installed", message: res.message });
         celebrateUpdate();
         toast({
@@ -120,6 +141,7 @@ export default function UpdatesPage() {
           description: "Esperando a que la app vuelva a arrancar…",
         });
         const ok = await waitBackendReady(res.old_version || null, 120000);
+        stopGhProgressPolling();
         if (ok) await hardReloadAfterUpdate();
         else {
           toast({
@@ -129,11 +151,22 @@ export default function UpdatesPage() {
           });
         }
       } else if (res.is_desktop) {
-        // Fallback (versión antigua): solo indica descargar el paquete
+        // Nueva versión desktop: dispara la descarga del binario más reciente.
+        if (res.download_url) {
+          try {
+            const a = document.createElement("a");
+            a.href = res.download_url;
+            a.rel = "noreferrer";
+            a.download = res.download_name || "";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          } catch { window.open(res.download_url, "_blank"); }
+        }
         setCheckResult({ status: "desktop_update", message: res.message });
         toast({
-          title: "Hay una versión nueva en GitHub",
-          description: res.message || "Descarga el paquete de nuevo para actualizar.",
+          title: "Descargando la nueva versión",
+          description: res.message || "Al terminar, cierra la app e instala/reemplaza el archivo descargado.",
         });
       } else {
         restarting = true;
@@ -415,6 +448,24 @@ export default function UpdatesPage() {
                       ? "El código se actualizó. Reiniciando la app…"
                       : `Tu app está al día con GitHub${checkResult.version ? ` — v${checkResult.version}` : ""}`}
                   </p>
+                  {checkResult.status === "installed" && ghProgress && (ghProgress.stage === "downloading" || ghProgress.stage === "starting") && (
+                    <div className="mt-3" data-testid="updates-page-progress">
+                      <div className="flex items-center justify-between mb-1.5 text-xs font-semibold text-white/90">
+                        <span className="flex items-center gap-1.5">
+                          <Download size={13} /> Descargando {ghProgress.name || "actualización"}…
+                        </span>
+                        <span data-testid="updates-page-progress-percent" className="tabular-nums">{ghProgress.percent || 0}%</span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-full bg-white/25 overflow-hidden">
+                        <motion.div
+                          className="h-full rounded-full bg-white"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${ghProgress.percent || 0}%` }}
+                          transition={{ ease: "easeOut", duration: 0.3 }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <motion.div animate={{ y: [0, -5, 0], rotate: [0, 12, 0] }} transition={{ duration: 1.8, repeat: Infinity }}
                   className="hidden sm:block flex-shrink-0">

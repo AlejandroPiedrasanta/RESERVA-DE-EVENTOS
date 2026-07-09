@@ -142,6 +142,7 @@ export const fixDiagnosticIssue = (id) => api.post("/diagnostic/fix", { id }).th
 export const fixAllDiagnosticIssues = () => api.post("/diagnostic/fix-all").then(r => r.data);
 export const checkGithubUpdates = () => api.get("/github/check-updates").then(r => r.data);
 export const applyGithubUpdate = (force = true) => api.post("/github/apply-update", { force }, { timeout: 600000 }).then(r => r.data);
+export const getUpdateProgress = () => api.get("/github/update-progress").then(r => r.data);
 
 // Ping ligero para detectar cuando el backend vuelve tras una auto-actualización.
 // Usa un cliente sin baseURL para evitar redirects y con timeout corto.
