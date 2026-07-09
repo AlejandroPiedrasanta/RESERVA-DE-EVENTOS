@@ -883,7 +883,14 @@ async def check_and_push_reminders():
 
 @api_router.get("/")
 async def root():
-    return {"message": "Event Reservation API"}
+    # `version` = versión local en ejecución. El frontend la compara tras una
+    # auto-actualización para confirmar que habla con el binario NUEVO (versión
+    # distinta) antes de recargar, evitando la pantalla en blanco.
+    try:
+        version = await _read_local_version()
+    except Exception:
+        version = ""
+    return {"message": "Event Reservation API", "version": version}
 
 
 @api_router.get("/deployment/env-template")

@@ -1106,3 +1106,173 @@ agent_communication:
       
       Test file: /app/test_version_fix.py
 
+
+  - task: "Auto-update blank white screen fix — expose running version at GET /api/"
+    implemented: true
+    working: true
+    file: "app.py / backend/server.py / frontend/src/lib/api.js / frontend/src/pages/UpdatesPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          BUG (user report): after uploading an update, the desktop .exe detects it, but after
+          installing, the app shows a BLANK WHITE SCREEN.
+
+          ROOT CAUSE: race condition in frontend waitBackendReady(). The frozen exe schedules
+          os._exit(0) ~3000ms AFTER responding to /github/apply-update. The old waitBackendReady
+          waited only 1500ms then reloaded as soon as ANY ping succeeded → it hit the OLD server
+          (still alive, dying at 3s) and reloaded the page during the exe-swap dead-zone → blank
+          white screen (index.html failed to load while server was down/swapping).
+
+          FIX APPLIED:
+          1. GET /api/ now returns a `version` field (running/local version) in BOTH app.py
+             (desktop, from _local_version) and backend/server.py (preview, from _read_local_version()).
+          2. waitBackendReady(oldVersion, timeoutMs) rewritten: initial wait raised to 3500ms and it
+             only returns true when the backend reports a version DIFFERENT from the old one (= new
+             binary) OR, as fallback, after it has observed the server go DOWN and come back up (sawDown).
+          3. UpdatesPage passes res.old_version into waitBackendReady so version-change detection works.
+
+          TESTING NEEDED (backend): verify GET /api/ returns HTTP 200 with a non-empty `version`
+          field matching /app/version.txt (currently 1.20.9), and that existing update endpoints
+          (/api/github/check-updates, /api/updates/check) still work (no regression).
+          NOTE: full desktop exe-swap flow cannot be tested in this cloud env; only the /api/ version
+          contract (backbone of the fix) is verifiable here.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          TESTED: Auto-update blank white screen fix - GET /api/ version field (backend API contract)
+          
+          TEST RESULTS - ALL TESTS PASSED ✅ (4/4)
+          
+          BUG CONTEXT:
+          User reported: after uploading an update, the desktop .exe detects it, but after installing,
+          the app shows a BLANK WHITE SCREEN.
+          
+          ROOT CAUSE:
+          Race condition in frontend waitBackendReady(). The frozen exe schedules os._exit(0) ~3000ms
+          AFTER responding to /github/apply-update. The old waitBackendReady waited only 1500ms then
+          reloaded as soon as ANY ping succeeded → it hit the OLD server (still alive, dying at 3s)
+          and reloaded the page during the exe-swap dead-zone → blank white screen.
+          
+          FIX APPLIED:
+          1. GET /api/ now returns a `version` field (running/local version) in BOTH app.py (desktop)
+             and backend/server.py (preview, from _read_local_version() at lines 3486-3493).
+          2. waitBackendReady(oldVersion, timeoutMs) rewritten: initial wait raised to 3500ms and it
+             only returns true when backend reports a version DIFFERENT from the old one (= new binary)
+             OR after it has observed the server go DOWN and come back up (sawDown).
+          3. UpdatesPage passes res.old_version into waitBackendReady so version-change detection works.
+          
+          BACKEND API CONTRACT TESTS (verifiable in cloud environment):
+          
+          ✅ TEST 1: GET /api/ - Version Field Exposure
+          - HTTP 200 OK
+          - Response is valid JSON
+          - "message" field present: "Event Reservation API" ✓
+          - "version" field present: "1.20.9" ✓
+          - "version" field is non-empty ✓
+          - "version" matches /app/version.txt (1.20.9) ✓
+          - Response body: {"message": "Event Reservation API", "version": "1.20.9"}
+          
+          ✅ TEST 2: GET /api/updates/check - Regression Check
+          - HTTP 200 OK
+          - Response is valid JSON
+          - Response keys: checked, has_update, is_cloud, local_version, github_version, 
+            github_source_url, remote_version
+          - No regression detected ✓
+          
+          ✅ TEST 3: GET /api/github/check-updates - Regression Check
+          - HTTP 200 OK
+          - Response is valid JSON
+          - Response keys: has_updates, local_sha, local_sha_short, remote_sha, remote_sha_short,
+            local_version, remote_version, branch, commits_ahead, commits, repo_url
+          - No regression detected ✓
+          
+          ✅ TEST 4: GET /api/stats - Regression Check
+          - HTTP 200 OK
+          - Response is valid JSON
+          - Response keys: total_reservations, upcoming_events, pending_payment, real_income
+          - No regression detected ✓
+          
+          IMPLEMENTATION VERIFIED:
+          - server.py line 884-893: @api_router.get("/") returns {"message": "Event Reservation API", "version": version}
+          - server.py line 890: version = await _read_local_version()
+          - server.py lines 3486-3493: _read_local_version() reads from ROOT_DIR/version.txt or ROOT_DIR.parent/version.txt
+          - /app/version.txt contains "1.20.9"
+          - The version field is correctly exposed and matches the expected value
+          
+          CONCLUSION:
+          ✅ The backend API contract for the auto-update blank white screen fix is WORKING correctly
+          ✅ GET /api/ now exposes the running version as required by the fix
+          ✅ Frontend waitBackendReady() can now detect version changes to avoid blank white screen
+          ✅ All regression tests passed - no existing endpoints were broken
+          ✅ The fix correctly implements the version-change detection mechanism
+          
+          IMPORTANT NOTES:
+          - Cannot test full desktop .exe swap flow in this cloud environment (Linux container)
+          - The backend running here is server.py (web version), not app.py (desktop version)
+          - Both server.py and app.py implement the same version field exposure
+          - The version field is the backbone of the fix - it allows frontend to detect when
+            the backend has been replaced with a new version
+          - This prevents the race condition where frontend reloads while old server is still
+            dying, which caused the blank white screen
+          
+          Test file: /app/test_version_api.py
+
+
+
+  - agent: "testing"
+    message: |
+      AUTO-UPDATE BLANK WHITE SCREEN FIX TESTING COMPLETE - ✅ ALL TESTS PASSED (4/4)
+      
+      Tested the backend API contract for the auto-update blank white screen fix.
+      
+      BUG CONTEXT:
+      User reported: after uploading an update, the desktop .exe detects it, but after installing,
+      the app shows a BLANK WHITE SCREEN.
+      
+      ROOT CAUSE:
+      Race condition in frontend waitBackendReady(). The frozen exe schedules os._exit(0) ~3000ms
+      AFTER responding to /github/apply-update. The old waitBackendReady waited only 1500ms then
+      reloaded as soon as ANY ping succeeded → it hit the OLD server (still alive, dying at 3s)
+      and reloaded the page during the exe-swap dead-zone → blank white screen.
+      
+      FIX APPLIED:
+      1. GET /api/ now returns a `version` field (running/local version)
+      2. waitBackendReady(oldVersion, timeoutMs) rewritten to only return true when backend
+         reports a version DIFFERENT from the old one (= new binary) OR after it has observed
+         the server go DOWN and come back up (sawDown)
+      3. UpdatesPage passes res.old_version into waitBackendReady so version-change detection works
+      
+      TEST RESULTS:
+      ✅ GET /api/
+         - HTTP 200 OK
+         - Returns JSON: {"message": "Event Reservation API", "version": "1.20.9"}
+         - "version" field present and non-empty ✓
+         - "version" matches /app/version.txt (1.20.9) ✓
+      
+      ✅ GET /api/updates/check (regression check)
+         - HTTP 200 OK, no regression
+      
+      ✅ GET /api/github/check-updates (regression check)
+         - HTTP 200 OK, no regression
+      
+      ✅ GET /api/stats (regression check)
+         - HTTP 200 OK, no regression
+      
+      CONCLUSION:
+      ✅ The backend API contract for the fix is WORKING correctly
+      ✅ GET /api/ now exposes the running version as required
+      ✅ Frontend can now detect version changes to avoid blank white screen
+      ✅ All regression tests passed - no existing endpoints broken
+      
+      IMPORTANT NOTES:
+      - Cannot test full desktop .exe swap flow in this cloud environment (Linux container)
+      - The backend running here is server.py (web version), not app.py (desktop version)
+      - Both server.py and app.py implement the same version field exposure
+      - The version field is the backbone of the fix - it allows frontend to detect when
+        the backend has been replaced with a new version
+      
+      Test file: /app/test_version_api.py

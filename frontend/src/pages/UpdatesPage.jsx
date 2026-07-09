@@ -118,7 +118,7 @@ export default function UpdatesPage() {
           title: `Actualización aplicada (${res.files_updated} archivos)`,
           description: "Esperando a que la app vuelva a arrancar…",
         });
-        const ok = await waitBackendReady(120000);
+        const ok = await waitBackendReady(res.old_version || null, 120000);
         if (ok) await hardReloadAfterUpdate();
         else {
           toast({
@@ -139,7 +139,7 @@ export default function UpdatesPage() {
         setCheckResult({ status: "installed", version: res.new_sha_short });
         celebrateUpdate();
         toast({ title: "Versión nueva instalada", description: "Esperando a que la app vuelva a arrancar…" });
-        const ok = await waitBackendReady(60000);
+        const ok = await waitBackendReady(res.old_version || null, 60000);
         if (ok) await hardReloadAfterUpdate();
       }
     } catch (err) {

@@ -145,25 +145,66 @@ export const applyGithubUpdate = (force = true) => api.post("/github/apply-updat
 // Usa un cliente sin baseURL para evitar redirects y con timeout corto.
 export const pingBackend = () => axios.get(`${BASE}/`, { timeout: 2500 }).then(r => r.data);
 
-// Espera hasta que el backend vuelva a responder tras un reinicio por
-// actualización. Devuelve true si respondió antes de `timeoutMs`, false si
-// se agotó el tiempo. Poll cada 500ms.
-export const waitBackendReady = async (timeoutMs = 90000) => {
+// Espera hasta que el backend NUEVO esté arriba tras un reinicio por
+// actualización. Devuelve true si el binario nuevo respondió antes de
+// `timeoutMs`, false si se agotó el tiempo. Poll cada 500ms.
+//
+// BUG HISTÓRICO (pantalla en blanco): el backend viejo no muere de inmediato
+// (programa su salida ~3s después de responder). La versión anterior de esta
+// función esperaba solo 1.5s y luego recargaba en cuanto "algo" respondía →
+// pegaba al servidor VIEJO que estaba a punto de morir, recargaba dentro de la
+// "zona muerta" del swap del .exe y mostraba pantalla en blanco.
+//
+// ARREGLO: no basta con que "algo responda". Solo consideramos listo cuando:
+//   1. El backend reporta una `version` DISTINTA a la vieja (= binario nuevo), o
+//   2. (fallback, si no sabemos la versión) hemos visto caer el servidor
+//      (`sawDown`) y luego volver a responder.
+export const waitBackendReady = async (expectedVersionOrTimeout = null, timeoutMs = 120000) => {
+  // Compatibilidad: si el 1er argumento es un número, es el timeout (firma vieja).
+  let oldVersion = null;
+  if (typeof expectedVersionOrTimeout === "number") {
+    timeoutMs = expectedVersionOrTimeout;
+  } else if (expectedVersionOrTimeout != null) {
+    oldVersion = String(expectedVersionOrTimeout);
+  }
+
   const start = Date.now();
-  // pequeña espera inicial: el proceso todavía está vivo cuando la respuesta
-  // llega al frontend (shutdown se agenda a 3s), no queremos que el primer
-  // ping pegue al backend viejo justo antes de morir.
-  await new Promise(r => setTimeout(r, 1500));
+  let sawDown = false;
+  // Espera inicial > al retardo de apagado del backend (~3s) + margen del swap,
+  // para no pegarle al servidor viejo justo antes de morir.
+  await new Promise(r => setTimeout(r, 3500));
+
   while (Date.now() - start < timeoutMs) {
     try {
-      await pingBackend();
-      // Espera un poco más para dar tiempo a que uvicorn cargue todos los
-      // handlers antes de recargar el frontend.
-      await new Promise(r => setTimeout(r, 400));
-      return true;
+      const data = await pingBackend();
+      const v = data && data.version != null ? String(data.version) : null;
+
+      if (oldVersion != null) {
+        // Sabemos la versión previa: solo aceptamos si cambió (= binario nuevo).
+        if (v && v !== oldVersion) {
+          await new Promise(r => setTimeout(r, 400));
+          return true;
+        }
+        // Respondió pero sigue la versión vieja → servidor viejo aún muriendo.
+        // Si además ya lo vimos caer y volver, aceptamos como fallback.
+        if (sawDown && v) {
+          await new Promise(r => setTimeout(r, 400));
+          return true;
+        }
+      } else {
+        // No sabemos la versión: exigimos haber visto caer el servidor antes de
+        // aceptar, así garantizamos que es el proceso recién reiniciado.
+        if (sawDown) {
+          await new Promise(r => setTimeout(r, 400));
+          return true;
+        }
+      }
     } catch {
-      await new Promise(r => setTimeout(r, 500));
+      // El servidor dejó de responder: el binario viejo murió. A partir de aquí
+      // el próximo ping exitoso será (casi seguro) el binario nuevo.
+      sawDown = true;
     }
+    await new Promise(r => setTimeout(r, 500));
   }
   return false;
 };
