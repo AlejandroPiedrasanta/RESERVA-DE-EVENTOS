@@ -6,6 +6,18 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 t0=$(date +%s)
 
+# ── 0) Decompresores rápidos (CRÍTICO para arranque veloz) ───────
+# Los pods de Emergent vienen SIN zstd ni pigz. Sin ellos, la extracción
+# del tarball de node_modules (~300MB) usa gzip monohilo = lentísimo.
+#   · pigz  → gzip PARALELO (multi-core), ~5-8x más rápido.
+#   · zstd  → habilita el tarball .zst (descarga más chica + descompresión veloz).
+# Instalación mínima y NO fatal: si falla la red, seguimos con gzip normal.
+if ! command -v zstd >/dev/null 2>&1 || ! command -v pigz >/dev/null 2>&1; then
+  echo "⚙ Instalando decompresores rápidos (zstd, pigz)…"
+  sudo apt-get update -y -qq >/dev/null 2>&1 || true
+  sudo apt-get install -y -qq zstd pigz >/dev/null 2>&1 || true
+fi
+
 # ── 1) backend/.env (idempotent) ─────────────────────────────────
 [ -f backend/.env ] || printf 'MONGO_URL="mongodb://localhost:27017"\nDB_NAME="reserva_eventos"\nCORS_ORIGINS="*"\n' > backend/.env
 

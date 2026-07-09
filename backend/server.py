@@ -4722,7 +4722,15 @@ async def github_connect(payload: dict = Body(...)):
     """Conecta con GitHub usando un Personal Access Token.
     Valida el token contra la API de GitHub, obtiene el usuario y guarda todo
     en app_settings.github_config junto con el repo por defecto de fábrica."""
-    import urllib.request, json as _json
+    import urllib.request, json as _json, ssl as _ssl
+    # En el .exe (PyInstaller) urllib no encuentra el store de CAs del sistema y
+    # falla la verificacion SSL contra api.github.com. Usamos el bundle de certifi
+    # (que SI se empaqueta) para tener certificados validos en cualquier entorno.
+    try:
+        import certifi as _certifi
+        _ssl_ctx = _ssl.create_default_context(cafile=_certifi.where())
+    except Exception:
+        _ssl_ctx = _ssl.create_default_context()
 
     token = (payload.get("token") or "").strip()
     repo_url = (payload.get("repo_url") or SUGGESTED_GITHUB_REPO).strip()
@@ -4741,7 +4749,7 @@ async def github_connect(payload: dict = Body(...)):
                 "User-Agent": "cinema-productions",
             },
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as resp:
             user_data = _json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         detail = "Token inválido o expirado" if e.code == 401 else f"GitHub API error: {e.code}"

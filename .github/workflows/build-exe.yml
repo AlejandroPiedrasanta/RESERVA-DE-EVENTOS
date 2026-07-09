@@ -169,6 +169,8 @@ jobs:
             "--hidden-import", "apscheduler.triggers.interval",
             "--hidden-import", "pywebpush",
             "--hidden-import", "PIL",
+            "--hidden-import", "certifi",
+            "--collect-data", "certifi",
             "--collect-submodules", "uvicorn",
             "--collect-submodules", "fastapi"
           ) + $iconArg + @("backend/standalone_app.py")

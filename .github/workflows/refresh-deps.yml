@@ -1,10 +1,20 @@
 name: refresh-deps
 
+# Regenera y publica los tarballs de dependencias en la release "deps-latest".
+# El bootstrap.sh de una cuenta nueva descarga estos tarballs en vez de correr
+# yarn/pip desde cero -> arranque en segundos.
+#
+# Mejoras clave para arranque veloz:
+#   · PODA node_modules (node-prune + borrado de tests/docs/.map/.d.ts) -> tarball chico.
+#   · Publica DOS formatos: .tar.zst (rapido) y .tar.gz (fallback universal).
+#   · pip download resiliente (ignora paquetes internos de Emergent no publicos).
+
 on:
   push:
     branches: [main]
     paths:
       - frontend/yarn.lock
+      - frontend/package.json
       - backend/requirements.txt
       - .github/workflows/refresh-deps.yml
   workflow_dispatch:
@@ -28,8 +38,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install pigz
-        run: sudo apt-get update -y && sudo apt-get install -y pigz
+      - name: Install pigz + zstd (compresores rapidos)
+        run: sudo apt-get update -y && sudo apt-get install -y pigz zstd
 
       - name: yarn install (frozen)
         working-directory: frontend
@@ -37,18 +47,43 @@ jobs:
           npm i -g yarn@1.22.22
           yarn install --frozen-lockfile --network-timeout 600000
 
-      - name: Build node_modules tarball
+      - name: Podar node_modules (reduce tamano de descarga)
+        working-directory: frontend
+        run: |
+          echo "→ Antes de podar: $(du -sh node_modules | cut -f1)"
+          npx --yes node-prune node_modules || true
+          find node_modules \( \
+              -name "*.d.ts" -o -name "*.map" -o -name "*.markdown" -o \
+              -name "AUTHORS" -o -name "CHANGELOG*" -o -name "HISTORY*" -o \
+              -name "*.flow" -o -name "*.tsbuildinfo" \
+            \) -type f -delete 2>/dev/null || true
+          find node_modules -type d \( \
+              -name "test" -o -name "tests" -o -name "__tests__" -o \
+              -name "docs" -o -name "example" -o -name "examples" -o \
+              -name ".github" \
+            \) -exec rm -rf {} + 2>/dev/null || true
+          echo "→ Despues de podar: $(du -sh node_modules | cut -f1)"
+
+      - name: Build node_modules tarballs (zstd + gzip)
         run: |
           mkdir -p artifacts
-          cd frontend && tar --use-compress-program="pigz -6" -cf ../artifacts/node_modules.tar.gz node_modules
+          # gzip (fallback universal) con pigz (paralelo)
+          tar --use-compress-program="pigz -6" -cf artifacts/node_modules.tar.gz -C frontend node_modules
+          # zstd (rapido: descarga + descompresion) — nivel 19 multihilo
+          tar --use-compress-program="zstd -19 -T0" -cf artifacts/node_modules.tar.zst -C frontend node_modules
           sha256sum frontend/yarn.lock | awk '{print $1}' > artifacts/node_modules.sha256
+          echo "→ gzip: $(du -sh artifacts/node_modules.tar.gz | cut -f1) | zstd: $(du -sh artifacts/node_modules.tar.zst | cut -f1)"
 
-      - name: Download pip wheels
+      - name: Download pip wheels (resiliente)
         run: |
           mkdir -p /tmp/wheels
-          pip download --dest /tmp/wheels -r backend/requirements.txt
-          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels
-          sha256sum backend/requirements.txt | awk '{print $1}' > artifacts/pip-wheels.sha256
+          # Quitar paquetes internos de Emergent que NO estan en PyPI:
+          #   · emergentintegrations (paquete interno)
+          #   · litellm @ URL privada
+          grep -vE '^(emergentintegrations|litellm)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
+          pip download --dest /tmp/wheels -r /tmp/req.txt || echo "⚠ algunas wheels no se pudieron bajar (no fatal)"
+          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels || true
+          sha256sum backend/requirements.txt | awk '{print $1}' > $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256
 
       - name: Recreate deps-latest release
         env:
@@ -59,7 +94,8 @@ jobs:
           gh release create deps-latest \
             --title deps-latest \
             --prerelease \
-            --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Target env: linux/aarch64, node 20, python 3.11." \
+            --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Podado + zstd/gzip. Target env: linux/aarch64, node 20, python 3.11." \
+            artifacts/node_modules.tar.zst \
             artifacts/node_modules.tar.gz \
             artifacts/node_modules.sha256 \
             artifacts/pip-wheels.tar.gz \
