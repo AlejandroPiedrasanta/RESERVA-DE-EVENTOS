@@ -62,7 +62,8 @@
   },
   "scripts": {
     "dev": "craco start",
-    "start": "serve -s build -l tcp://0.0.0.0:3000",
+    "start": "craco start",
+    "serve": "serve -s build -l tcp://0.0.0.0:3000",
     "build": "craco build",
     "test": "craco test"
   },
