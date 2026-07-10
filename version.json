@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "version": "1.20.33",
+  "release_tag": "v1.20.33",
+  "published_at": "2026-07-10T06:51:07Z",
+  "manifest_generated_at": "2026-07-10T06:55:27Z",
+  "release_url": "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/tag/v1.20.33",
+  "min_installer_version": "1.0.0",
+  "status": "ready",
+  "assets": {
+    "linux_arm64": {
+      "name": "CinemaProductions-linux-arm64",
+      "url": "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/v1.20.33/CinemaProductions-linux-arm64",
+      "size": 54745240,
+      "sha256": "beb83e5e036c826f6c926fe61b15672748729cc352094f8d36af871359de38fa"
+    },
+    "macos_arm64": {
+      "name": "CinemaProductions-macos-arm64",
+      "url": "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/v1.20.33/CinemaProductions-macos-arm64",
+      "size": 38720592,
+      "sha256": "9c85eb24fe859b0925f0fc9bcb85a5785614f8577a7dbe2e6de5a8f7badf4fd6"
+    },
+    "windows_installer": {
+      "name": "CinemaProductions-Setup.exe",
+      "url": "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/v1.20.33/CinemaProductions-Setup.exe",
+      "size": 43504512,
+      "sha256": "09d475e835d08cbf33bbbcbbd4e8cac804c6cc25c31010937c60b5f249c89ec6"
+    },
+    "windows_portable": {
+      "name": "CinemaProductions.exe",
+      "url": "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/v1.20.33/CinemaProductions.exe",
+      "size": 42219464,
+      "sha256": "f73587ff6c88f9fe24811dd05ad71a816be44777418266034634b86924bce78d"
+    }
+  }
+}
