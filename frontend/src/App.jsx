@@ -21,6 +21,17 @@ import IncidentsNotifier from "@/components/IncidentsNotifier";
 import { installGlobalErrorHandlers } from "@/lib/errorReporter";
 import { useEffect } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -122,12 +133,14 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <SettingsProvider>
-          <ProtectedApp />
-          <IncidentsNotifier />
-        </SettingsProvider>
-      </AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <SettingsProvider>
+            <ProtectedApp />
+            <IncidentsNotifier />
+          </SettingsProvider>
+        </AuthProvider>
+      </QueryClientProvider>
     </ErrorBoundary>
   );
 }
