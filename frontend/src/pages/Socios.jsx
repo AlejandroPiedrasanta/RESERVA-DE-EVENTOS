@@ -163,17 +163,7 @@ export default function Socios() {
     <div className="px-6 py-8 max-w-7xl mx-auto">
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex items-center justify-between mb-8">
         <div>
-          <div className="flex items-center gap-3">
-            <motion.div
-              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
-            >
-              <Users size={22} className="text-white" strokeWidth={2} />
-            </motion.div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Socios</h1>
-          </div>
-          <p className="text-sm text-slate-500 font-medium mt-1.5">{socios.length} socios — arrastra para reordenar</p>
+          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Socios</h1>
         </div>
         <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
           onClick={() => { setEditTarget(null); setShowForm(true); }}

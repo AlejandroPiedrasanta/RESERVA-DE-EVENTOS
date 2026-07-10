@@ -217,23 +217,112 @@ export default function AppearancePage() {
 
   return (
     <div className={`px-6 py-8 ${PANEL_SIZES[panelSize]} mx-auto transition-all duration-300`}>
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
-        <div>
-          <div className="flex items-center gap-3">
+      {/* HERO — Card Panel Style */}
+      <motion.div
+        initial={{ opacity: 0, y: -30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 150, damping: 20 }}
+        className="relative mb-10 overflow-hidden rounded-[2.5rem] p-8 md:p-10 border border-white/70"
+        style={{
+          background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 40%, #dbeafe 100%)",
+          boxShadow: "0 40px 100px -30px rgba(236,72,153,0.35), 0 20px 50px -20px rgba(59,130,246,0.25)",
+        }}
+      >
+        {/* Blobs decorativos */}
+        <motion.div
+          className="absolute -top-24 -right-16 w-80 h-80 rounded-full opacity-60 blur-3xl"
+          style={{ background: "#fbcfe8" }}
+          animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0], scale: [1, 1.2, 0.9, 1] }}
+          transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full opacity-50 blur-3xl"
+          style={{ background: "#bfdbfe" }}
+          animate={{ x: [0, -30, 40, 0], y: [0, 40, -20, 0], scale: [1, 0.85, 1.15, 1] }}
+          transition={{ duration: 22, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+        />
+
+        {/* Cards flotantes decorativas detrás del título */}
+        <div className="absolute top-6 right-6 hidden lg:flex items-center gap-3 pointer-events-none">
+          {[
+            { c1: "#f472b6", c2: "#ec4899", rot: -8, y: 0 },
+            { c1: "#60a5fa", c2: "#3b82f6", rot: 4, y: 12 },
+            { c1: "#fbbf24", c2: "#f59e0b", rot: -3, y: 4 },
+          ].map((c, i) => (
             <motion.div
-              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
+              key={i}
+              initial={{ opacity: 0, y: -20, rotate: c.rot - 20 }}
+              animate={{
+                opacity: 1,
+                y: [c.y, c.y - 8, c.y],
+                rotate: c.rot,
+              }}
+              transition={{
+                opacity: { delay: 0.3 + i * 0.15, duration: 0.6 },
+                y: { duration: 3 + i * 0.5, repeat: Infinity, ease: "easeInOut", delay: i * 0.3 },
+                rotate: { delay: 0.3 + i * 0.15, duration: 0.6 },
+              }}
+              className="w-16 h-24 md:w-20 md:h-28 rounded-2xl shadow-2xl"
+              style={{
+                background: `linear-gradient(135deg, ${c.c1}, ${c.c2})`,
+                boxShadow: `0 20px 40px -10px ${c.c2}80`,
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="relative z-10 flex items-center gap-5">
+          <motion.div
+            animate={{ rotate: [0, -6, 6, 0], y: [0, -4, 0] }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+            className="relative flex-shrink-0"
+          >
+            {/* Halo orbital */}
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-0 rounded-full blur-2xl opacity-70"
+              style={{ background: "conic-gradient(from 0deg, #ec4899, #f59e0b, #3b82f6, #ec4899)" }}
+            />
+            <div
+              className="relative w-16 h-16 md:w-20 md:h-20 rounded-3xl flex items-center justify-center shadow-2xl"
+              style={{
+                background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
+                boxShadow: "0 15px 40px -10px rgba(236,72,153,0.6)",
+              }}
             >
-              <Palette size={22} className="text-white" strokeWidth={2} />
-            </motion.div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+              <Palette size={32} className="text-white" strokeWidth={2.2} />
+            </div>
+          </motion.div>
+
+          <div className="min-w-0">
+            <motion.h1
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2, duration: 0.5 }}
+              className="text-4xl md:text-6xl font-black tracking-tight leading-none"
+              style={{
+                fontFamily: "Cabinet Grotesk, sans-serif",
+                background: "linear-gradient(135deg, #831843 0%, #4c1d95 50%, #1e3a8a 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
               {es ? "Apariencia" : "Appearance"}
-            </h1>
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.5 }}
+              className="text-sm md:text-base font-bold mt-2"
+              style={{ color: "#831843", opacity: 0.75 }}
+            >
+              {es
+                ? "50+ card panels con animaciones para personalizar cada detalle visual"
+                : "50+ animated card panels to customize every visual detail"}
+            </motion.p>
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-1.5">
-            {es ? "50+ opciones para personalizar cada detalle visual" : "50+ options to customize every visual detail"}
-          </p>
         </div>
       </motion.div>
 
@@ -245,7 +334,7 @@ export default function AppearancePage() {
       />
 
       <SectionSearchContext.Provider value={searchQuery}>
-      <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-3">
+      <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-6">
 
         {/* ═══════════════════════════════════════════════════════════════
             NUEVAS SECCIONES: TEMAS · MENÚ · TUTORIAL

@@ -101,18 +101,7 @@ export default function CalendarView() {
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <motion.div animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }} transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0">
-              {viewMode === "list"
-                ? <CalendarCheck size={22} className="text-white" strokeWidth={2} />
-                : <CalendarDays size={22} className="text-white" strokeWidth={2} />}
-            </motion.div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{viewMode === "list" ? tr.nav.reservations : tr.nav.calendar}</h1>
-          </div>
-          <p className="text-sm text-slate-500 font-medium mt-1.5">{viewMode === "list"
-            ? (es ? "Busca por nombre o teléfono y encuéntralo al instante" : "Search by name or phone and find it instantly")
-            : (es ? "Reservas y calendario en un solo lugar" : "Reservations & calendar in one place")}</p>
+          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{viewMode === "list" ? tr.nav.reservations : tr.nav.calendar}</h1>
         </div>
         <div className="flex items-center gap-2">
           {/* View toggle */}

@@ -254,22 +254,12 @@ export default function Dashboard() {
         transition={{ duration: 0.4 }}
         className="mb-8"
       >
-        <div className="flex items-center gap-3">
-          <motion.div
-            animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-            className="w-12 h-12 rounded-2xl btn-primary flex items-center justify-center shadow-lg flex-shrink-0"
-          >
-            <LayoutDashboard size={22} className="text-white" strokeWidth={2} />
-          </motion.div>
-          <h1
-            className="text-5xl font-black gradient-text tracking-tight"
-            style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-          >
-            {tr.nav.dashboard}
-          </h1>
-        </div>
-        <p className="text-sm text-slate-500 font-medium mt-1.5 capitalize">{dateStr}</p>
+        <h1
+          className="text-5xl font-black gradient-text tracking-tight"
+          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+        >
+          {tr.nav.dashboard}
+        </h1>
       </motion.div>
 
       {/* Notificación URGENTE: evento hoy, mañana o dentro de 3 días */}
