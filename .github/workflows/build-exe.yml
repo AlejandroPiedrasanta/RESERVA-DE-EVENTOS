@@ -177,17 +177,23 @@ jobs:
           pyinstaller @pyiArgs
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló con exit $LASTEXITCODE" }
 
-      - name: Smoke test .exe (verify build/index.html is bundled + HTTP works)
+      - name: Smoke test .exe (verify build/index.html is bundled + HTTPS works)
         shell: pwsh
         run: |
           # Ejecutamos el .exe (con --windowed no muestra consola), esperamos que
           # arranque, y validamos: (a) _MEI*/build/index.html existe, (b) el
-          # servidor responde en http://127.0.0.1:8001/api/ con 200.
+          # servidor responde en https://127.0.0.1:8001/api/ con 200.
+          #
+          # NOTA: en el primer arranque el .exe genera un certificado autofirmado
+          # y sirve por HTTPS (mismo comportamiento que ve el usuario final). Por
+          # eso validamos HTTPS con -SkipCertificateCheck (pwsh 7). Si por alguna
+          # razón la generación del cert fallara y cayera a HTTP, reintentamos
+          # también en http:// como red de seguridad.
           $exe = "dist/CinemaProductions.exe"
           if (-not (Test-Path $exe)) { throw "No hay .exe para smoke test" }
           $env:CP_NO_BROWSER = "1"
           $p = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
-          Start-Sleep -Seconds 10  # más tiempo: uvicorn + init DB embebida
+          Start-Sleep -Seconds 10  # más tiempo: uvicorn + init DB embebida + gen cert
 
           # (a) MEI check
           $meiDirs = Get-ChildItem "$env:TEMP" -Directory -Filter "_MEI*" -ErrorAction SilentlyContinue |
@@ -198,18 +204,22 @@ jobs:
           }
           Write-Host "✓ (a) build/index.html empaquetado en $($meiDirs[0].FullName)"
 
-          # (b) HTTP check con reintentos
+          # (b) HTTPS check con reintentos (fallback a HTTP por robustez)
           $ok = $false
-          for ($i = 0; $i -lt 20; $i++) {
-            try {
-              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8001/api/" -TimeoutSec 2 -UseBasicParsing
-              if ($r.StatusCode -eq 200) { $ok = $true; break }
-            } catch { }
+          $scheme = ""
+          for ($i = 0; $i -lt 30; $i++) {
+            foreach ($url in @("https://127.0.0.1:8001/api/", "http://127.0.0.1:8001/api/")) {
+              try {
+                $r = Invoke-WebRequest -Uri $url -TimeoutSec 2 -UseBasicParsing -SkipCertificateCheck
+                if ($r.StatusCode -eq 200) { $ok = $true; $scheme = $url; break }
+              } catch { }
+            }
+            if ($ok) { break }
             Start-Sleep -Milliseconds 500
           }
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-          if (-not $ok) { throw "❌ Smoke test (b): el .exe no respondió en http://127.0.0.1:8001/api/" }
-          Write-Host "✓ (b) HTTP /api/ respondió 200 — arranque OK sin consola"
+          if (-not $ok) { throw "❌ Smoke test (b): el .exe no respondió en https://127.0.0.1:8001/api/ (ni http)" }
+          Write-Host "✓ (b) /api/ respondió 200 en $scheme — arranque OK sin consola"
 
       - name: Firmar .exe (certificado auto-firmado, uso interno)
         shell: pwsh
