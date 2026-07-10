@@ -50,6 +50,12 @@ on:
 permissions:
   contents: write
 
+# Cancela runs en curso del mismo ref al pushear uno nuevo. Evita builds
+# duplicados y la carrera entre los 4 jobs publicando al mismo release.
+concurrency:
+  group: build-exe-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-exe:
     runs-on: windows-latest
@@ -143,7 +149,7 @@ jobs:
             Copy-Item themes/saved_themes.json backend/_bundle/themes/
           }
 
-      - name: Build .exe with PyInstaller
+      - name: Build .exe with PyInstaller (onefile portable + onedir para instalador)
         shell: pwsh
         run: |
           $iconArg = @()
@@ -153,9 +159,10 @@ jobs:
           } else {
             Write-Host "⚠ favicon.ico no existe — construyendo sin icono personalizado"
           }
-          $pyiArgs = @(
-            "--onefile",
+          # Args comunes a ambos modos (onefile y onedir).
+          $commonArgs = @(
             "--windowed",
+            "--noconfirm",
             "--name", "CinemaProductions",
             "--add-data", "backend/_bundle/build;build",
             "--add-data", "backend/_bundle/ai_context_default.py;.",
@@ -164,6 +171,8 @@ jobs:
             "--hidden-import", "motor.motor_asyncio",
             "--hidden-import", "pymongo",
             "--hidden-import", "bson",
+            "--hidden-import", "ssl_bootstrap",
+            "--hidden-import", "openpyxl",
             "--hidden-import", "apscheduler.schedulers.asyncio",
             "--hidden-import", "apscheduler.triggers.cron",
             "--hidden-import", "apscheduler.triggers.interval",
@@ -172,10 +181,31 @@ jobs:
             "--hidden-import", "certifi",
             "--collect-data", "certifi",
             "--collect-submodules", "uvicorn",
-            "--collect-submodules", "fastapi"
+            "--collect-submodules", "fastapi",
+            "--collect-submodules", "openpyxl",
+            "--collect-submodules", "cryptography",
+            "--collect-submodules", "mongomock_motor",
+            "--collect-submodules", "mongomock",
+            "--exclude-module", "tkinter",
+            "--exclude-module", "matplotlib"
           ) + $iconArg + @("backend/standalone_app.py")
-          pyinstaller @pyiArgs
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló con exit $LASTEXITCODE" }
+
+          # (1) PORTABLE: --onefile → dist/CinemaProductions.exe (un solo archivo).
+          Write-Host "→ Build onefile (portable)..."
+          pyinstaller --onefile @commonArgs
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onefile) falló con exit $LASTEXITCODE" }
+          if (-not (Test-Path "dist/CinemaProductions.exe")) { throw "onefile no generó dist/CinemaProductions.exe" }
+
+          # (2) INSTALADOR: --onedir → dist_app/CinemaProductions/ (carpeta con
+          #     _internal/). Arranca instantáneo (sin descomprimir a %TEMP%) y sin
+          #     el warning 'Failed to remove temporary directory _MEIxxx'.
+          Write-Host "→ Build onedir (para instalador)..."
+          pyinstaller --onedir --distpath dist_app --workpath build_app @commonArgs
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onedir) falló con exit $LASTEXITCODE" }
+          if (-not (Test-Path "dist_app/CinemaProductions/CinemaProductions.exe")) {
+            throw "onedir no generó dist_app/CinemaProductions/CinemaProductions.exe"
+          }
+          Write-Host "✓ onefile + onedir generados"
 
       - name: Smoke test .exe (verify build/index.html is bundled + HTTPS works)
         shell: pwsh
@@ -268,6 +298,21 @@ jobs:
           # verify /pa no encadena a una raíz de confianza en un auto-firmado; solo informativo.
           & $signtool verify /pa "dist/CinemaProductions.exe"
           Write-Host "✓ .exe firmado (auto-firmado + timestamp). verify exit=$LASTEXITCODE (self-signed: no encadena, esperado)"
+
+          # Firmar TAMBIÉN el exe interno del build onedir (el que empaqueta el
+          # instalador), para que el acceso directo apunte a un binario firmado.
+          $onedirExe = "dist_app/CinemaProductions/CinemaProductions.exe"
+          if (Test-Path $onedirExe) {
+            $signedDir = $false
+            for ($i = 1; $i -le 5; $i++) {
+              & $signtool sign /f $pfx /p $pass /fd sha256 /tr http://timestamp.digicert.com /td sha256 $onedirExe
+              if ($LASTEXITCODE -eq 0) { $signedDir = $true; break }
+              Write-Host "  (onedir) intento $i falló (exit $LASTEXITCODE), reintentando en 5s..."
+              Start-Sleep -Seconds 5
+            }
+            if (-not $signedDir) { throw "Firma del .exe (onedir) falló tras varios intentos" }
+            Write-Host "✓ .exe (onedir) firmado"
+          }
           exit 0
 
       - name: Verify .exe & compute SHA256
@@ -344,7 +389,19 @@ jobs:
           }
           Copy-Item installer_assets/wizard_big.bmp   dist/wizard_big.bmp   -Force
           Copy-Item installer_assets/wizard_small.bmp dist/wizard_small.bmp -Force
-          Write-Host "✓ installer.iss + favicon.ico + wizard BMPs listos en dist/"
+
+          # Copiar el build --onedir a dist/app/ para que el instalador empaquete
+          # la CARPETA (exe + _internal/) en vez del onefile. El .iss referencia
+          # 'app\*' relativo a dist/.
+          if (-not (Test-Path dist_app/CinemaProductions)) {
+            throw "No existe dist_app/CinemaProductions (build onedir). ¿Falló PyInstaller onedir?"
+          }
+          if (Test-Path dist/app) { Remove-Item -Recurse -Force dist/app }
+          Copy-Item -Recurse -Force dist_app/CinemaProductions dist/app
+          if (-not (Test-Path dist/app/CinemaProductions.exe)) {
+            throw "dist/app/CinemaProductions.exe no existe tras copiar el onedir."
+          }
+          Write-Host "✓ installer.iss + favicon.ico + wizard BMPs + carpeta app/ (onedir) listos en dist/"
 
       - name: Build installer with Inno Setup
         shell: pwsh
@@ -503,6 +560,8 @@ jobs:
             --hidden-import motor.motor_asyncio \
             --hidden-import pymongo \
             --hidden-import bson \
+            --hidden-import ssl_bootstrap \
+            --hidden-import openpyxl \
             --hidden-import apscheduler.schedulers.asyncio \
             --hidden-import apscheduler.triggers.cron \
             --hidden-import apscheduler.triggers.interval \
@@ -510,6 +569,12 @@ jobs:
             --hidden-import PIL \
             --collect-submodules uvicorn \
             --collect-submodules fastapi \
+            --collect-submodules openpyxl \
+            --collect-submodules cryptography \
+            --collect-submodules mongomock_motor \
+            --collect-submodules mongomock \
+            --exclude-module tkinter \
+            --exclude-module matplotlib \
             backend/standalone_app.py
 
       - name: Compute SHA256
@@ -646,6 +711,8 @@ jobs:
             --hidden-import motor.motor_asyncio \
             --hidden-import pymongo \
             --hidden-import bson \
+            --hidden-import ssl_bootstrap \
+            --hidden-import openpyxl \
             --hidden-import apscheduler.schedulers.asyncio \
             --hidden-import apscheduler.triggers.cron \
             --hidden-import apscheduler.triggers.interval \
@@ -653,6 +720,12 @@ jobs:
             --hidden-import PIL \
             --collect-submodules uvicorn \
             --collect-submodules fastapi \
+            --collect-submodules openpyxl \
+            --collect-submodules cryptography \
+            --collect-submodules mongomock_motor \
+            --collect-submodules mongomock \
+            --exclude-module tkinter \
+            --exclude-module matplotlib \
             backend/standalone_app.py
 
       - name: Compute SHA256
@@ -773,6 +846,8 @@ jobs:
             --hidden-import motor.motor_asyncio \
             --hidden-import pymongo \
             --hidden-import bson \
+            --hidden-import ssl_bootstrap \
+            --hidden-import openpyxl \
             --hidden-import apscheduler.schedulers.asyncio \
             --hidden-import apscheduler.triggers.cron \
             --hidden-import apscheduler.triggers.interval \
@@ -780,6 +855,12 @@ jobs:
             --hidden-import PIL \
             --collect-submodules uvicorn \
             --collect-submodules fastapi \
+            --collect-submodules openpyxl \
+            --collect-submodules cryptography \
+            --collect-submodules mongomock_motor \
+            --collect-submodules mongomock \
+            --exclude-module tkinter \
+            --exclude-module matplotlib \
             backend/standalone_app.py
 
       - name: Compute SHA256

@@ -94,8 +94,11 @@ spanish.ClickFinish=Haz clic en Finalizar para abrir Cinema Productions.
 ; El acceso directo de escritorio se crea siempre (ver [Icons]).
 
 [Files]
-Source: "CinemaProductions.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "favicon.ico";           DestDir: "{app}"; Flags: ignoreversion
+; Build --onedir: se empaqueta la CARPETA completa (exe + _internal/) desde
+; dist/app/. Arranca instantáneo (sin descomprimir a %TEMP%) y sin el warning
+; "Failed to remove temporary directory _MEIxxx".
+Source: "app\*";       DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "favicon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Acceso directo en el escritorio (siempre) + entradas en menú Inicio.
