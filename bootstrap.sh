@@ -28,24 +28,46 @@ fi
 # Priority: (a) tarball committed in repo (frontend/node_modules.tar.gz)
 #           (b) GitHub Releases tarball (deps-latest tag)
 # Either avoids yarn install (~180s) -> extract only (~10s).
+# The restored node_modules is VALIDATED before being trusted:
+#   - package.json hash must match frontend/node_modules.tar.gz.sha16 (if present)
+#   - the Vite build tool binary must exist (node_modules/.bin/vite)
+# If validation fails (stale/incompatible tarball), we discard it and yarn install.
 TARBALL_URL="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/deps-latest/node_modules.tar.gz"
+
+validate_node_modules() {
+  # 1) build tool present?
+  [ -x frontend/node_modules/.bin/vite ] || { echo "✗ tarball has no vite binary"; return 1; }
+  # 2) hash matches package.json (only if a committed hash is available)
+  if [ -f frontend/node_modules.tar.gz.sha16 ]; then
+    local expected cur
+    expected=$(cat frontend/node_modules.tar.gz.sha16 2>/dev/null)
+    cur=$(sha256sum frontend/package.json | cut -c1-16)
+    [ "$expected" = "$cur" ] || { echo "✗ tarball stale (package.json changed: $expected != $cur)"; return 1; }
+  fi
+  return 0
+}
+
 if [ "$NEED_INSTALL" = "1" ]; then
   echo "⚡ Trying fast-path (node_modules tarball)..."
   rm -rf frontend/node_modules
   if [ -f frontend/node_modules.tar.gz ]; then
     echo "⚡ Using committed tarball: frontend/node_modules.tar.gz"
-    tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null && \
-    [ -d frontend/node_modules ] && \
-    NEED_INSTALL=0 && \
-    echo "⚡ node_modules restored from committed tarball ($(du -sh frontend/node_modules | cut -f1))"
+    tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null || true
   elif curl -fsSL --max-time 90 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null; then
-    tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null && \
-    [ -d frontend/node_modules ] && \
-    NEED_INSTALL=0 && \
-    echo "⚡ node_modules restored from Releases tarball ($(du -sh frontend/node_modules | cut -f1))"
+    echo "⚡ Using Releases tarball"
+    tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null || true
     rm -f /tmp/nm.tgz
   else
     echo "ℹ Tarball not available — falling back to yarn install"
+  fi
+
+  if [ -d frontend/node_modules ] && validate_node_modules; then
+    NEED_INSTALL=0
+    echo "⚡ node_modules restored & validated ($(du -sh frontend/node_modules | cut -f1))"
+  else
+    echo "ℹ Discarding invalid/absent tarball — will run yarn install"
+    rm -rf frontend/node_modules
+    NEED_INSTALL=1
   fi
 fi
 
