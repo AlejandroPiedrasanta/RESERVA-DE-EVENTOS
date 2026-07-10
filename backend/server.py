@@ -89,9 +89,10 @@ THEMES_JSON_PATH = THEMES_DIR / "saved_themes.json"
 def _ensure_desktop_wheels():
     """Descarga (cacheado por hash de requirements) wheels win_amd64 para instalacion offline del escritorio."""
     import sys as _sys, subprocess as _sp, hashlib as _hl
-    # Hash no criptográfico: solo se usa como clave de caché para invalidar wheels
-    # cuando cambia requirements.txt (no es un uso de seguridad).
-    req_hash = _hl.md5(_REQUIREMENTS.encode("utf-8"), usedforsecurity=False).hexdigest()
+    # Hash SHA-256 como clave de caché para invalidar wheels cuando cambia
+    # requirements.txt (no es un uso de seguridad — reemplazado MD5 → SHA-256
+    # para cumplir con la guía de código y evitar el flag del linter).
+    req_hash = _hl.sha256(_REQUIREMENTS.encode("utf-8")).hexdigest()
     marker = DESKTOP_WHEELS_DIR / ".ok"
     if marker.exists() and marker.read_text().strip() == req_hash and any(DESKTOP_WHEELS_DIR.glob("*.whl")):
         return DESKTOP_WHEELS_DIR

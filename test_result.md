@@ -103,6 +103,229 @@
 #====================================================================================================
 
 #====================================================================================================
+# LATEST FIX (main) — Correcciones críticas de seguridad (code review)
+#====================================================================================================
+backend:
+  - task: "Fixes de seguridad crítica: MD5→SHA-256, hardcoded token→env, innerHTML→removeChild"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/backend/tests/test_github_push_diff.py, /app/frontend/src/components/SubscriptionSection.jsx, /app/frontend/src/components/SubscriptionScreen.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Aplicadas correcciones de la revisión de código:
+
+          1. `server.py:94` — Reemplazado `hashlib.md5()` por `hashlib.sha256()`
+             en `_ensure_desktop_wheels()` (uso como clave de caché, no cripto).
+          2. `backend/tests/test_github_push_diff.py:15` — Removido token hardcodeado
+             `test_sess_55004d33b14548f889168a828085b54f`. Ahora se lee de env
+             `QA_TEST_TOKEN`; si no existe, el test se marca skip.
+          3. `frontend/src/components/SubscriptionSection.jsx:452` — Reemplazado
+             `el.innerHTML = ""` por bucle `while (el.firstChild) el.removeChild(...)`.
+          4. `frontend/src/components/SubscriptionScreen.jsx:76` — Idem.
+
+          Falsos positivos del reviewer (verificados, no requieren cambio):
+          - `server.py:2701` NO es `exec()` sino `asyncio.create_subprocess_exec()`,
+            que es la API segura de subprocess con lista de args (no shell).
+          - "23+ instancias de `is 'string'`" son en comentarios/docstrings,
+            no código ejecutable (verificado con grep).
+
+          Refactorings masivos NO aplicados (recomendados como tareas separadas
+          para evitar regresión en app estable):
+          - Split DatabasePage.jsx (4174 líneas), AppearancePage.jsx, etc.
+          - Reducir cyclomatic complexity de lifespan, _dispatch_reminders, etc.
+          - Split SettingsContext (881 líneas) en múltiples contexts.
+          - Migración localStorage → httpOnly cookies (requiere cambio de auth).
+
+          Verificado:
+          - Sintaxis Python OK (ast.parse ×3)
+          - Backend + frontend supervisor RUNNING
+          - GET /api/ → 200 {"message":"Event Reservation API","version":"1.20.30"}
+          - Lint JS: sin issues nuevos
+
+          Testing agent: verificar que ningún endpoint del backend se rompe y
+          que el frontend sigue renderizando la sección de suscripción sin
+          errores. NO hacer regresión de la funcionalidad de PayPal (los cambios
+          en innerHTML solo afectan el limpiado de contenedor, no el flujo).
+
+
+#====================================================================================================
+# LATEST FIX (main) — Auto-update flow para instaladores Inno Setup
+#====================================================================================================
+backend:
+  - task: "Auto-update para CinemaProductions-Setup.exe (Inno Setup)"
+    implemented: true
+    working: true
+    file: "/app/backend/standalone_app.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Reporte del usuario: "CinemaProductions-Setup.exe en mi pc no se
+          actualiza, no descarga la nueva versión y necesito que se auto-instale
+          sin crasheos ni bugs".
+
+          Root cause identificado:
+          - `_current_asset_name()` en standalone_app.py devolvía siempre
+            "CinemaProductions.exe" (portable) para Windows.
+          - Cuando un usuario instala vía CinemaProductions-Setup.exe (Inno
+            Setup), el auto-updater intentaba swap directo del .exe portable
+            sobre un binario instalado (con registro, uninstaller, AppId).
+            Esto es la causa raíz de:
+              · fallos silenciosos ("no se actualiza")
+              · exe corrompido / crashes post-update
+              · datos de registro desactualizados (Apps & Features)
+
+          Fix aplicado en /app/backend/standalone_app.py:
+          1. Nueva función `_is_inno_installed()`:
+             - Detecta si el binario en ejecución fue instalado con Inno Setup
+               buscando `unins000.exe` en el install_dir, o si el exe vive bajo
+               %LocalAppData%\\CinemaProductions.
+          2. `_current_asset_name()` ahora devuelve:
+             - "CinemaProductions-Setup.exe" si _is_inno_installed()
+             - "CinemaProductions.exe" en otro caso (portable)
+          3. Nueva función `_spawn_inno_installer_silent(setup_exe, current_exe)`:
+             - Genera _cp_setup_apply.bat que:
+               · espera 3s, mata la instancia actual,
+               · ejecuta el Setup.exe con flags:
+                 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL
+                 /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /LOG=...
+               · borra el setup temporal y se auto-elimina.
+             - Combinado con RestartApplications=yes del installer.iss, la app
+               se relanza automáticamente tras el upgrade.
+          4. `_apply_binary_update_frozen()` bifurca según modo:
+             - modo `inno_silent`: descarga Setup.exe → ejecuta silencioso
+             - modo `binary_swap`: descarga .exe portable → swap tradicional
+          5. `new_path` ahora usa `asset_name + ".new"` (no `exe_path.name + ".new"`)
+             para no colisionar entre modos.
+          6. Limpieza defensiva incluye _cp_setup_apply.bat residual.
+
+          Endpoints cloud verificados (no requieren cambios):
+          - GET /api/download/desktop-installer/info → OK (retorna Setup.exe v1.20.30, sha256)
+          - GET /api/updates/check → OK (has_update=false porque ya está en 1.20.30)
+
+          Test manual desde cloud:
+          - curl "$PREVIEW/api/updates/check" → 200 OK
+          - curl "$PREVIEW/api/download/desktop-installer/info" → 200 OK, Setup.exe listo
+
+          El fix NO puede ser validado end-to-end en el entorno cloud (no hay
+          Windows ni el .exe compilado disponible), pero la lógica de detección
+          y bifurcación puede validarse por:
+          - Sintaxis Python OK (ast.parse verificado)
+          - Endpoints cloud siguen respondiendo 200
+          - No hay regresión en /api/updates/check ni /api/download/desktop-installer/info
+
+          Testing agent: verificar endpoints de actualización siguen funcionales
+          (no romper /api/updates/check, /api/updates/manifest,
+          /api/download/desktop-installer/info, /api/download/desktop-exe/info)
+          y que el backend arranca sin errores tras el cambio.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: Auto-update endpoints after Inno Setup fix in standalone_app.py
+          
+          TEST RESULTS - ✅ ALL TESTS PASSED (6/6 endpoints + code verification)
+          
+          CONTEXT:
+          Main agent fixed the auto-update flow for users who installed via 
+          CinemaProductions-Setup.exe (Inno Setup installer). The fix adds detection
+          logic and bifurcates the update process:
+          - Inno Setup users: download Setup.exe → run silent installer
+          - Portable users: download .exe → binary swap
+          
+          CODE VERIFICATION (standalone_app.py):
+          ✅ File compiles successfully (ast.parse)
+          ✅ _is_inno_installed() function present (line 2223)
+             - Detects Inno Setup installation by checking for unins000.exe
+             - Fallback: checks if exe is under %LocalAppData%\CinemaProductions
+          ✅ _current_asset_name() function present (line 2259)
+             - Returns "CinemaProductions-Setup.exe" if _is_inno_installed()
+             - Returns "CinemaProductions.exe" otherwise (portable)
+          ✅ _spawn_inno_installer_silent() function present (line 2349)
+             - Creates .bat script to run Setup.exe with /VERYSILENT flags
+             - Handles process termination, installer execution, cleanup
+          
+          BACKEND ENDPOINTS TESTING (server.py via cloud URL):
+          Base URL: https://event-booking-100.preview.emergentagent.com/api
+          
+          TEST 1: GET /api/ ✅
+          - HTTP 200 OK
+          - version = "1.20.30" (correct)
+          - message = "Event Reservation API" (correct)
+          
+          TEST 2: GET /api/updates/check ✅
+          - HTTP 200 OK
+          - local_version = "1.20.30" (correct)
+          - github_version = "1.20.30" (correct)
+          - remote_version = "1.20.30" (correct)
+          - has_update = false (correct - versions match)
+          - is_cloud = true (correct)
+          - checked = true (correct)
+          - manifest_available = false (correct)
+          - remote_source = "github_txt" (correct)
+          - NO 500 errors
+          
+          TEST 3: GET /api/updates/manifest ✅
+          - HTTP 200 OK
+          - status = "not_available" (correct - no manifest configured)
+          - local_version = "1.20.30" (correct)
+          
+          TEST 4: GET /api/download/desktop-installer/info ✅
+          - HTTP 200 OK
+          - status = "ready" (correct)
+          - name = "CinemaProductions-Setup.exe" (correct - installer, not portable)
+          - size = 43501768 bytes (> 0, correct)
+          - url points to github.com/releases (correct)
+          - sha256 = "ca288e3bfb42d28509e3066188a90eae6d19d382ea5526a1852943c65599c605"
+            (64 hex chars, correct)
+          
+          TEST 5: GET /api/download/desktop-exe/info ✅
+          - HTTP 200 OK
+          - status = "ready" (correct)
+          - name = "CinemaProductions.exe" (correct - portable, no "setup" in name)
+          - size = 42216328 bytes (> 0, correct)
+          - sha256 = "9885613a88dc2d6b3f0866ab5e1e95104548de0d414b2f91d1c03ea90bac656f"
+            (64 hex chars, correct)
+          
+          TEST 6: GET /api/updates/github-version ✅
+          - HTTP 200 OK
+          - local_version = "1.20.30" (correct)
+          - github_version = "1.20.30" (correct)
+          - has_update = false (correct)
+          
+          BACKEND LOGS VERIFICATION:
+          ✅ No errors in /var/log/supervisor/backend.err.log
+          ✅ No tracebacks or exceptions
+          ✅ Server started successfully
+          ✅ All GitHub API calls successful (releases, version.txt, sha256 files)
+          ✅ Scheduler running normally
+          
+          CONCLUSION:
+          ✅ NO REGRESSIONS in cloud backend (server.py)
+          ✅ All 6 update endpoints working correctly
+          ✅ standalone_app.py compiles and contains all 3 new functions
+          ✅ Code structure is correct (detection, bifurcation, silent installer)
+          ✅ Backend logs clean, no errors
+          ✅ The fix is ready for Windows .exe testing (cannot test actual .exe in Linux)
+          
+          IMPORTANT NOTES:
+          - The actual Inno Setup installer flow CANNOT be tested in this Linux cloud
+            environment (requires Windows + compiled .exe)
+          - Code verification confirms the logic is present and syntactically correct
+          - All cloud endpoints that the desktop app will call are working correctly
+          - The fix should resolve the user's issue: "Setup.exe no se actualiza"
+          
+          Test file: /app/backend_test_update_endpoints.py
+
+
+#====================================================================================================
 # LATEST TEST (testing agent) — Auto-update endpoints verification
 #====================================================================================================
 backend:
@@ -198,6 +421,70 @@ backend:
           ✅ Backend remains stable, no crashes or unhandled exceptions
           
           Test file: /app/test_auto_update.py
+
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      INNO SETUP AUTO-UPDATE FIX TESTING COMPLETE - ✅ ALL TESTS PASSED (6/6 endpoints + code verification)
+      
+      Tested the Inno Setup auto-update fix in standalone_app.py to ensure NO regressions
+      in cloud backend (server.py) after adding detection and bifurcation logic.
+      
+      WHAT WAS TESTED:
+      1. Code verification (ast.parse + function presence)
+      2. GET /api/ (root endpoint)
+      3. GET /api/updates/check (main update check)
+      4. GET /api/updates/manifest (manifest endpoint)
+      5. GET /api/download/desktop-installer/info (Setup.exe info)
+      6. GET /api/download/desktop-exe/info (portable .exe info)
+      7. GET /api/updates/github-version (GitHub version check)
+      8. Backend logs verification
+      
+      CODE VERIFICATION RESULTS:
+      ✅ standalone_app.py compiles successfully (ast.parse)
+      ✅ _is_inno_installed() present at line 2223
+         - Detects Inno Setup by checking unins000.exe
+         - Fallback: checks %LocalAppData%\CinemaProductions path
+      ✅ _current_asset_name() present at line 2259
+         - Returns "CinemaProductions-Setup.exe" if Inno installed
+         - Returns "CinemaProductions.exe" for portable
+      ✅ _spawn_inno_installer_silent() present at line 2349
+         - Creates .bat script for silent installer execution
+         - Uses /VERYSILENT /SUPPRESSMSGBOXES /NORESTART flags
+      
+      ENDPOINT TEST RESULTS:
+      ✅ GET /api/ - HTTP 200, version="1.20.30"
+      ✅ GET /api/updates/check - HTTP 200, has_update=false, local_version=1.20.30
+      ✅ GET /api/updates/manifest - HTTP 200, status="not_available"
+      ✅ GET /api/download/desktop-installer/info - HTTP 200
+         - name="CinemaProductions-Setup.exe" (correct - installer)
+         - size=43501768 bytes (> 0)
+         - sha256=64 hex chars (valid)
+         - url points to github.com/releases
+      ✅ GET /api/download/desktop-exe/info - HTTP 200
+         - name="CinemaProductions.exe" (correct - portable, no "setup")
+         - size=42216328 bytes (> 0)
+         - sha256=64 hex chars (valid)
+      ✅ GET /api/updates/github-version - HTTP 200, github_version=1.20.30
+      
+      BACKEND LOGS:
+      ✅ No errors, tracebacks, or exceptions
+      ✅ Server started successfully
+      ✅ All GitHub API calls successful
+      
+      CONCLUSION:
+      ✅ NO REGRESSIONS in cloud backend after Inno Setup fix
+      ✅ All update endpoints working correctly
+      ✅ Code structure is correct and compiles
+      ✅ The fix is ready for Windows .exe testing (cannot test actual .exe in Linux)
+      
+      IMPORTANT NOTE:
+      The actual Inno Setup installer flow CANNOT be tested in this Linux cloud
+      environment. Code verification confirms the logic is present and syntactically
+      correct. All cloud endpoints that the desktop app will call are working.
+      
+      Test file: /app/backend_test_update_endpoints.py
 
 agent_communication:
   - agent: "testing"

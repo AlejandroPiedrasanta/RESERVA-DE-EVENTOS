@@ -449,7 +449,8 @@ export default function SubscriptionSection() {
           const el = document.getElementById(containerId);
           if (!el || rendered.current.has(plan)) return;
           rendered.current.add(plan);
-          el.innerHTML = "";
+          // Limpiar contenedor de forma segura (evita innerHTML flagged por CodeQL).
+          while (el.firstChild) el.removeChild(el.firstChild);
           paypal.Buttons({
             style: { layout: "vertical", color: plan === "lifetime" ? "gold" : "blue", shape: "pill", label: "pay", height: 40 },
             createOrder: async () => {

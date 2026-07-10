@@ -73,7 +73,8 @@ export default function SubscriptionScreen({ reason = "trial_expired" }) {
           const el = document.querySelector(containerId);
           if (!el || rendered.current.has(plan)) return;
           rendered.current.add(plan);
-          el.innerHTML = "";
+          // Limpiar contenedor de forma segura (evita innerHTML flagged por CodeQL).
+          while (el.firstChild) el.removeChild(el.firstChild);
           paypal.Buttons({
             style: { layout: "vertical", color: plan === "lifetime" ? "gold" : "blue", shape: "pill", label: "pay" },
             createOrder: async () => {

@@ -2220,13 +2220,56 @@ def _is_frozen() -> bool:
     return getattr(sys, "frozen", False)
 
 
+def _is_inno_installed() -> bool:
+    """Detecta si el binario en ejecución fue instalado con el instalador Inno Setup.
+
+    Criterios (Windows):
+      1. Existe `unins000.exe` (o `unins001.exe`) junto al ejecutable — huella
+         inequívoca de Inno Setup.
+      2. FALLBACK: el ejecutable vive bajo %LocalAppData%\\CinemaProductions
+         (DefaultDirName del installer.iss).
+
+    Cuando esto es True, el auto-update NO debe hacer un swap de binario
+    directo (rompería el registro/uninstaller/AppId). En su lugar, descarga
+    `CinemaProductions-Setup.exe` y lo ejecuta con `/VERYSILENT` para que
+    Inno haga el upgrade limpiamente conservando datos del usuario.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        exe_path = Path(sys.executable).resolve()
+        install_dir = exe_path.parent
+        for cand in ("unins000.exe", "unins001.exe", "unins002.exe"):
+            if (install_dir / cand).exists():
+                return True
+        # Fallback: ruta bajo %LocalAppData%\CinemaProductions
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            local_root = Path(local_app).resolve() / "CinemaProductions"
+            try:
+                exe_path.relative_to(local_root)
+                return True
+            except ValueError:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 def _current_asset_name() -> str:
-    """Nombre del asset de release para este SO/arquitectura."""
+    """Nombre del asset de release para este SO/arquitectura.
+
+    En Windows, si el binario fue instalado con Inno Setup (CinemaProductions-Setup.exe),
+    el auto-update descarga el propio instalador y lo relanza con `/VERYSILENT`,
+    ya que un swap directo del .exe rompería el registro/uninstaller. Para
+    modo portable (usuario descargó `CinemaProductions.exe` suelto), se
+    mantiene el swap directo del binario.
+    """
     import platform
     sysname = platform.system()
     machine = (platform.machine() or "").lower()
     if sysname == "Windows":
-        return "CinemaProductions.exe"
+        return "CinemaProductions-Setup.exe" if _is_inno_installed() else "CinemaProductions.exe"
     if sysname == "Darwin":
         return "CinemaProductions-macos-arm64"
     if machine in ("arm64", "aarch64"):
@@ -2301,6 +2344,63 @@ async def _find_release_asset(asset_name: str) -> dict:
     candidates.sort(key=lambda c: (c["_sort"], not c["_prerelease"]), reverse=True)
     chosen = candidates[0]
     return {k: v for k, v in chosen.items() if not k.startswith("_")}
+
+
+def _spawn_inno_installer_silent(setup_exe_path: Path, current_exe_path: Path) -> None:
+    """Lanza el nuevo `CinemaProductions-Setup.exe` en modo silencioso.
+
+    Estrategia:
+      1. Cierra este proceso (Inno Setup se encargará del resto vía
+         `CloseApplications=force` + `RestartApplications=yes` en installer.iss).
+      2. Inno reemplaza los archivos, actualiza el registro y relanza la app.
+      3. Se limpia el instalador temporal al finalizar.
+
+    Flags Inno Setup:
+      · /VERYSILENT         → sin wizard, sin progress bar visible
+      · /SUPPRESSMSGBOXES   → sin diálogos
+      · /NORESTART          → no reinicia el sistema
+      · /NOCANCEL           → usuario no puede cancelar
+      · /CLOSEAPPLICATIONS  → cierra la app en ejecución antes de copiar
+      · /RESTARTAPPLICATIONS→ relanza la app tras terminar
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("Inno silent install sólo aplica a Windows")
+    import subprocess as _sp
+    # Escribimos un pequeño .bat que:
+    #   - espera 2 s (para que el proceso Python actual libere handles)
+    #   - lanza el Setup.exe con flags silenciosos
+    #   - borra el Setup.exe y se auto-elimina
+    install_dir = current_exe_path.parent
+    bat = install_dir / "_cp_setup_apply.bat"
+    log = install_dir / "_cp_setup_apply.log"
+    script = (
+        "@echo off\r\n"
+        f'echo [%DATE% %TIME%] === Cinema Productions installer swap === > "{log}"\r\n'
+        f'echo setup={setup_exe_path} >> "{log}"\r\n'
+        "ping -n 3 127.0.0.1 >nul\r\n"
+        # Cerrar la app en ejecución (por si /CLOSEAPPLICATIONS no la detecta rápido)
+        f'taskkill /F /IM "{current_exe_path.name}" >nul 2>&1\r\n'
+        "ping -n 2 127.0.0.1 >nul\r\n"
+        # Lanzar el instalador silencioso
+        f'"{setup_exe_path}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /LOG="{log}.inno" >> "{log}" 2>&1\r\n'
+        f'echo [%TIME%] installer exit code=%ERRORLEVEL% >> "{log}"\r\n'
+        # Borrar el setup temporal (dejamos el log para debug)
+        f'del /F /Q "{setup_exe_path}" >nul 2>&1\r\n'
+        # Auto-borrar este .bat (deja el .log)
+        '(goto) 2>nul & del "%~f0"\r\n'
+    )
+    bat.write_text(script, encoding="ascii")
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    _sp.Popen(
+        ["cmd", "/c", str(bat)],
+        cwd=str(install_dir),
+        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+        stdin=_sp.DEVNULL,
+        stdout=_sp.DEVNULL,
+        stderr=_sp.DEVNULL,
+    )
 
 
 def _spawn_swap_helper(exe_path: Path, new_path: Path):
@@ -2435,7 +2535,9 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     for stale in (
         install_dir / (exe_path.name + ".new"),
         install_dir / (exe_path.name + ".bak"),
+        install_dir / (asset_name + ".new"),
         install_dir / "_cp_update.bat",
+        install_dir / "_cp_setup_apply.bat",
     ):
         try:
             if stale.exists():
@@ -2475,7 +2577,10 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
                 "old_version": _local_version, "new_version": new_version,
                 "message": "Ya estás en la última versión"}
 
-    new_path = install_dir / (exe_path.name + ".new")
+    # Nombre del archivo temporal descargado:
+    #   · modo binario (portable): "CinemaProductions.exe.new" → se swappea al viejo .exe
+    #   · modo installer (Inno):    "CinemaProductions-Setup.exe.new" → se ejecuta silencioso
+    new_path = install_dir / (asset_name + ".new")
     cfg = await _get_github_cfg()
     token = (cfg.get("token") or "").strip()
     dl_headers = {"User-Agent": "cinema-productions-desktop",
@@ -2540,7 +2645,13 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
                 "asset": asset_name, "install_dir": str(install_dir),
                 "message": "DRY RUN — binario descargado y verificado; no se aplicó el swap."}
 
-    _spawn_swap_helper(exe_path, new_path)
+    # ── Dos flujos: (a) instalador Inno (Setup.exe silencioso) o (b) swap directo
+    if _is_inno_installed() and asset_name.lower().endswith("setup.exe"):
+        _spawn_inno_installer_silent(new_path, exe_path)
+        install_mode = "inno_silent"
+    else:
+        _spawn_swap_helper(exe_path, new_path)
+        install_mode = "binary_swap"
 
     def _shutdown():
         # 3s: suficiente para que el cliente HTTP reciba la respuesta y para
@@ -2553,6 +2664,7 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
             "files_updated": 1,
             "old_version": _local_version, "new_version": new_version,
             "asset": asset_name, "install_dir": str(install_dir),
+            "install_mode": install_mode,
             "message": "Descarga completa. La app se cerrará y se actualizará automáticamente en unos segundos."}
 
 

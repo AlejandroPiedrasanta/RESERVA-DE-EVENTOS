@@ -12,7 +12,14 @@ import pytest
 import requests
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
-QA_TOKEN = "test_sess_55004d33b14548f889168a828085b54f"
+# Token de sesión QA: NO hardcodear en el fuente. Lee de env `QA_TEST_TOKEN`
+# (definido en el runner CI / .env local). Si no existe, el test se marca skip.
+QA_TOKEN = os.environ.get("QA_TEST_TOKEN", "")
+if not QA_TOKEN:
+    pytest.skip(
+        "QA_TEST_TOKEN no configurado (export QA_TEST_TOKEN=<sess_token>)",
+        allow_module_level=True,
+    )
 
 HEADERS = {"Authorization": f"Bearer {QA_TOKEN}", "Content-Type": "application/json"}
 
