@@ -12,6 +12,7 @@ import { useSettings } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
 import Reservations from "@/pages/Reservations";
 import { getEventConfig } from "@/lib/eventConfig";
+import PageHeader from "@/components/PageHeader";
 
 const EVENT_HEX = {
   "Boda":              { fg: "#be185d", bg: "#fdf2f8", border: "#fbcfe8" },
@@ -99,31 +100,33 @@ export default function CalendarView() {
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex items-center justify-between mb-6 flex-wrap gap-4">
-        <div>
-          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{viewMode === "list" ? tr.nav.reservations : tr.nav.calendar}</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex items-center gap-1 glass rounded-full p-1" data-testid="calendar-view-toggle">
-            {[{ id: "month", icon: LayoutGrid, label: es ? "Mes" : "Month" }, { id: "list", icon: List, label: es ? "Lista" : "List" }].map(v => (
-              <motion.button key={v.id} whileTap={{ scale: 0.94 }} onClick={() => setViewMode(v.id)} data-testid={`view-${v.id}-btn`}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${viewMode === v.id ? "btn-primary text-white shadow" : "text-slate-500 hover:text-slate-700"}`}>
-                <v.icon size={13} /> {v.label}
-              </motion.button>
-            ))}
-          </div>
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => setViewMode(v => v === "list" ? "month" : "list")} data-testid="calendar-search-toggle"
-            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-xs font-bold transition-all ${viewMode === "list" ? "btn-primary text-white shadow" : "glass text-slate-600 hover:bg-white/50"}`}>
-            <Search size={14} /> {es ? "Buscar" : "Search"}
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowForm(true)} data-testid="new-event-btn"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
-            <Plus size={16} /> {tr.common.newReservation}
-          </motion.button>
-        </div>
-      </motion.div>
+      <PageHeader
+        icon={viewMode === "list" ? CalendarCheck : CalendarDays}
+        title={viewMode === "list" ? tr.nav.reservations : tr.nav.calendar}
+        subtitle={`${tr.months[month]} ${year} · ${monthEvents.length} ${es ? (monthEvents.length === 1 ? "evento" : "eventos") : (monthEvents.length === 1 ? "event" : "events")}`}
+        gradient="linear-gradient(135deg,#f97316,#ec4899,#8b5cf6)"
+        right={(
+          <>
+            <div className="flex items-center gap-1 glass rounded-full p-1" data-testid="calendar-view-toggle">
+              {[{ id: "month", icon: LayoutGrid, label: es ? "Mes" : "Month" }, { id: "list", icon: List, label: es ? "Lista" : "List" }].map(v => (
+                <motion.button key={v.id} whileTap={{ scale: 0.94 }} onClick={() => setViewMode(v.id)} data-testid={`view-${v.id}-btn`}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${viewMode === v.id ? "btn-primary text-white shadow" : "text-slate-500 hover:text-slate-700"}`}>
+                  <v.icon size={13} /> {v.label}
+                </motion.button>
+              ))}
+            </div>
+            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={() => setViewMode(v => v === "list" ? "month" : "list")} data-testid="calendar-search-toggle"
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-xs font-bold transition-all ${viewMode === "list" ? "btn-primary text-white shadow" : "glass text-slate-600 hover:bg-white/50"}`}>
+              <Search size={14} /> {es ? "Buscar" : "Search"}
+            </motion.button>
+            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowForm(true)} data-testid="new-event-btn"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
+              <Plus size={16} /> {tr.common.newReservation}
+            </motion.button>
+          </>
+        )}
+      />
 
       {/* Notificación GLOBAL sticky si el evento es hoy o mañana */}
       <AnimatePresence>

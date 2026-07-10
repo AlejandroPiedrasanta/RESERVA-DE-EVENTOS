@@ -6,6 +6,7 @@ import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import SocioForm from "@/components/SocioForm";
 import PartnerDebtBanner from "@/components/PartnerDebtBanner";
+import PageHeader from "@/components/PageHeader";
 
 const ROLE_ICONS   = { "Fotógrafo": Camera, "Videógrafo": Video, "Asistente": Users };
 const ROLE_COLORS  = {
@@ -161,16 +162,19 @@ export default function Socios() {
 
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Socios</h1>
-        </div>
-        <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-          onClick={() => { setEditTarget(null); setShowForm(true); }}
-          data-testid="new-socio-btn" className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
-          <Plus size={16} /> Nuevo Socio
-        </motion.button>
-      </motion.div>
+      <PageHeader
+        icon={Users}
+        title="Socios"
+        subtitle={`${socios.length} ${socios.length === 1 ? "socio registrado" : "socios registrados"}`}
+        gradient="linear-gradient(135deg,#8b5cf6,#a855f7,#ec4899)"
+        right={(
+          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={() => { setEditTarget(null); setShowForm(true); }}
+            data-testid="new-socio-btn" className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
+            <Plus size={16} /> Nuevo Socio
+          </motion.button>
+        )}
+      />
 
       {/* Dynamic banner — pending payments to partners */}
       <PartnerDebtBanner

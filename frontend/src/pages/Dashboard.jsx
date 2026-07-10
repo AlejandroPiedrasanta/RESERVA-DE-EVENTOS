@@ -10,6 +10,7 @@ import MonthlyEventsBanner from "@/components/MonthlyEventsBanner";
 import EventNotificationPopup from "@/components/EventNotificationPopup";
 import NextEventReminderPopup from "@/components/NextEventReminderPopup";
 import AnimatedEventTypeCard from "@/components/AnimatedEventTypeCard";
+import PageHeader from "@/components/PageHeader";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
@@ -154,6 +155,7 @@ export default function Dashboard() {
   const [socios, setSocios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("month"); // "month" | "year" | "all"
   const navigate = useNavigate();
   const { tr, formatCurrency, language, activeStatuses, swapNameEventType, dashboardWidgets, dashboardRecentStyle } = useSettings();
   const d = tr.dashboard;
@@ -218,6 +220,24 @@ export default function Dashboard() {
   }, {});
   const typeEntries = Object.entries(typeData).sort((a, b) => b[1] - a[1]);
 
+  // Filtered event types by period (month / year / all)
+  const _tfNow = new Date();
+  const _tfMonth = _tfNow.getMonth();
+  const _tfYear = _tfNow.getFullYear();
+  const activeForTypes = active.filter(r => {
+    if (typeFilter === "all") return true;
+    if (!r.event_date) return false;
+    const d = new Date(r.event_date + "T00:00:00");
+    if (isNaN(d)) return false;
+    // month (default)
+    return d.getMonth() === _tfMonth && d.getFullYear() === _tfYear;
+  });
+  const typeDataFiltered = activeForTypes.reduce((acc, r) => {
+    acc[r.event_type || "Otro"] = (acc[r.event_type || "Otro"] || 0) + 1;
+    return acc;
+  }, {});
+  const typeEntriesFiltered = Object.entries(typeDataFiltered).sort((a, b) => b[1] - a[1]);
+
   // Build ordered, enabled widget list
   const WIDGET_DATA = {
     upcoming:      { icon: CalendarDays, label: d.upcoming,                                                value: recent.length,                  sub: currentMonthName,                                                   gradient: STAT_GRADIENTS[0] },
@@ -248,19 +268,12 @@ export default function Dashboard() {
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="mb-8"
-      >
-        <h1
-          className="text-5xl font-black gradient-text tracking-tight"
-          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-        >
-          {tr.nav.dashboard}
-        </h1>
-      </motion.div>
+      <PageHeader
+        icon={LayoutDashboard}
+        title={tr.nav.dashboard}
+        subtitle={dateStr}
+        gradient="linear-gradient(135deg,#6366f1,#8b5cf6,#ec4899)"
+      />
 
       {/* Notificación URGENTE: evento hoy, mañana o dentro de 3 días */}
       <AnimatePresence>
@@ -852,7 +865,7 @@ export default function Dashboard() {
           />
 
           {/* Header */}
-          <div className="relative z-10 flex items-center gap-4 mb-6">
+          <div className="relative z-10 flex flex-wrap items-center gap-4 mb-6">
             <motion.div
               initial={{ scale: 0, rotate: -20 }}
               animate={{ scale: 1, rotate: 0 }}
@@ -865,7 +878,7 @@ export default function Dashboard() {
             >
               <BarChart2 size={18} className="text-white relative" strokeWidth={2.2} />
             </motion.div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-[180px]">
               <h2
                 className="text-xl font-black text-slate-900 leading-tight"
                 style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
@@ -878,41 +891,74 @@ export default function Dashboard() {
                   animate={{ opacity: [1, 0.3, 1], scale: [1, 1.3, 1] }}
                   transition={{ duration: 1.6, repeat: Infinity }}
                 />
-                {active.length} {language === "es" ? "reservas activas" : "active reservations"}
+                {activeForTypes.length} {language === "es" ? "reservas" : "reservations"}
                 <span className="text-slate-300 mx-1">·</span>
-                {typeEntries.length} {language === "es" ? "categorías" : "categories"}
+                {typeEntriesFiltered.length} {language === "es" ? "categorías" : "categories"}
+                <span className="text-slate-300 mx-1">·</span>
+                <span className="text-slate-500">
+                  {typeFilter === "all"
+                    ? (language === "es" ? "Todos" : "All")
+                    : (language === "es" ? `Mes: ${currentMonthName}` : `Month: ${currentMonthName}`)}
+                </span>
               </p>
             </div>
-            <motion.div
-              initial={{ opacity: 0, scale: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.9, type: "spring", stiffness: 220, damping: 14 }}
-              className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full"
-              style={{
-                background: "linear-gradient(135deg,rgba(236,72,153,0.12),rgba(168,85,247,0.12))",
-                border: "1px solid rgba(168,85,247,0.2)",
-              }}
+
+            {/* Segmented filter: Mes / Año / Todos */}
+            <div
+              className="flex items-center gap-1 p-1 rounded-full bg-white/70 border border-slate-200/70 backdrop-blur-sm shadow-sm"
+              data-testid="event-types-filter"
             >
-              <span className="text-[10px] uppercase tracking-widest font-black text-slate-500">
-                {language === "es" ? "Top" : "Top"}
-              </span>
-              <span className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                {typeEntries[0]?.[0]}
-              </span>
-            </motion.div>
+              {[
+                { key: "month", label: language === "es" ? "Mes" : "Month" },
+                { key: "all",   label: language === "es" ? "Todos" : "All"  },
+              ].map(opt => {
+                const isActive = typeFilter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setTypeFilter(opt.key)}
+                    data-testid={`event-types-filter-${opt.key}`}
+                    className={`relative px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-full transition-colors ${
+                      isActive ? "text-white" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="event-types-filter-pill"
+                        className="absolute inset-0 rounded-full"
+                        style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
+                        transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10">{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Grid of animated cards */}
-          <motion.div
-            variants={container}
-            initial="hidden"
-            animate="show"
-            className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-          >
-            {typeEntries.map(([type, count], idx) => (
-              <AnimatedEventTypeCard key={type} type={type} count={count} total={active.length} index={idx} />
-            ))}
-          </motion.div>
+          {typeEntriesFiltered.length > 0 ? (
+            <motion.div
+              key={typeFilter}
+              variants={container}
+              initial="hidden"
+              animate="show"
+              className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
+              {typeEntriesFiltered.map(([type, count], idx) => (
+                <AnimatedEventTypeCard key={type} type={type} count={count} total={activeForTypes.length} index={idx} />
+              ))}
+            </motion.div>
+          ) : (
+            <div className="relative z-10 py-10 text-center text-sm text-slate-500 font-semibold">
+              {language === "es"
+                ? "No hay reservas para este periodo."
+                : "No reservations for this period."}
+            </div>
+          )}
         </motion.div>
       )}
 

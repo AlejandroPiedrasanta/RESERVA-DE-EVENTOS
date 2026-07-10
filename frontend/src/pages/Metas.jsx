@@ -6,6 +6,7 @@ import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, Che
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { celebrateGoalReached, fireConfetti, triggerSidebarSweep } from "@/lib/celebrations";
+import PageHeader from "@/components/PageHeader";
 
 const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const MONTHS_SHORT = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
@@ -687,47 +688,37 @@ export default function Metas() {
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto" data-testid="metas-page">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="flex flex-wrap items-center justify-between gap-4 mb-6"
-      >
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <motion.div
-              animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${typeCfg.grad} flex items-center justify-center shadow-lg`}
-            >
-              <Target size={22} className="text-white" strokeWidth={2} />
-            </motion.div>
-            <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Metas</h1>
+      <PageHeader
+        icon={Target}
+        title="Metas"
+        subtitle={isGastos
+          ? `${typeCfg.desc} · Total del año: ${formatCurrency(totalActual)}`
+          : `${typeCfg.desc} · ${reachedCount} de 12 meses conquistados`}
+        gradient={
+          typeCfg.key === "ventas"
+            ? "linear-gradient(135deg,#10b981,#14b8a6,#0d9488)"
+            : typeCfg.key === "ganancias"
+              ? "linear-gradient(135deg,#8b5cf6,#a855f7,#ec4899)"
+              : "linear-gradient(135deg,#f59e0b,#f97316,#f43f5e)"
+        }
+        right={(
+          <div className="flex items-center gap-2 glass rounded-full px-2 py-1.5">
+            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+              onClick={() => setYear(y => y - 1)} data-testid="year-prev-btn"
+              className="p-1.5 rounded-full hover:bg-white/60 transition-colors">
+              <ChevronLeft size={14} className="text-slate-600" />
+            </motion.button>
+            <div className="min-w-[64px] text-center">
+              <p className="text-xl font-black text-slate-900 tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="year-display">{year}</p>
+            </div>
+            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+              onClick={() => setYear(y => y + 1)} data-testid="year-next-btn"
+              className="p-1.5 rounded-full hover:bg-white/60 transition-colors">
+              <ChevronRight size={14} className="text-slate-600" />
+            </motion.button>
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-1 ml-1">
-            {isGastos
-              ? `${typeCfg.desc} · Total del año: ${formatCurrency(totalActual)}`
-              : `${typeCfg.desc} · ${reachedCount} de 12 meses conquistados`}
-          </p>
-        </div>
-
-        {/* Year selector */}
-        <div className="flex items-center gap-2 glass rounded-full px-2 py-1.5">
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-            onClick={() => setYear(y => y - 1)} data-testid="year-prev-btn"
-            className="p-1.5 rounded-full hover:bg-white/60 transition-colors">
-            <ChevronLeft size={14} className="text-slate-600" />
-          </motion.button>
-          <div className="min-w-[64px] text-center">
-            <p className="text-xl font-black text-slate-900 tracking-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }} data-testid="year-display">{year}</p>
-          </div>
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-            onClick={() => setYear(y => y + 1)} data-testid="year-next-btn"
-            className="p-1.5 rounded-full hover:bg-white/60 transition-colors">
-            <ChevronRight size={14} className="text-slate-600" />
-          </motion.button>
-        </div>
-      </motion.div>
+        )}
+      />
 
       {/* Type switcher */}
       <motion.div

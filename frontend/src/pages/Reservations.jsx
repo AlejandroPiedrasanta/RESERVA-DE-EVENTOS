@@ -8,6 +8,7 @@ import ReservationForm from "@/components/ReservationForm";
 import { useToast } from "@/hooks/use-toast";
 import { generateReservationPDF } from "@/lib/generatePDF";
 import { getEventConfig, getEventTypeName } from "@/lib/eventConfig";
+import PageHeader from "@/components/PageHeader";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
@@ -98,15 +99,18 @@ export default function Reservations({ embedded = false }) {
   return (
     <div className={embedded ? "" : "px-6 py-8 max-w-7xl mx-auto"}>
       {!embedded && (
-      <motion.div initial={{ opacity:0, y:-16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }} className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-5xl font-black gradient-text tracking-tight" style={{ fontFamily:'Cabinet Grotesk, sans-serif' }}>{tr.nav.reservations}</h1>
-        </div>
-        <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }} onClick={() => setShowForm(true)} data-testid="new-reservation-btn"
-          className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
-          <Plus size={16} /> {tr.common.newReservation}
-        </motion.button>
-      </motion.div>
+      <PageHeader
+        icon={CalendarCheck}
+        title={tr.nav.reservations}
+        subtitle={es ? `${filtered.length} en total` : `${filtered.length} total`}
+        gradient="linear-gradient(135deg,#0ea5e9,#6366f1,#8b5cf6)"
+        right={(
+          <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }} onClick={() => setShowForm(true)} data-testid="new-reservation-btn"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full btn-primary text-white text-sm font-bold">
+            <Plus size={16} /> {tr.common.newReservation}
+          </motion.button>
+        )}
+      />
       )}
 
       <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.35, delay:0.1 }} className="flex flex-col gap-3 mb-5">
