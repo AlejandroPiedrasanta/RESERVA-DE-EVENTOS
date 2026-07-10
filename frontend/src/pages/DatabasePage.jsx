@@ -169,6 +169,18 @@ export default function DatabasePage() {
   // Divulgación progresiva: ocultar las opciones avanzadas de conexión por defecto
   const [showAdvancedConn, setShowAdvancedConn] = useState(false);
 
+  // ── Modo avanzado: oculta bloques avanzados (Soporte/GitHub + Zona de peligro) ──
+  const [advancedMode, setAdvancedMode] = useState(() => {
+    try { return localStorage.getItem("cp_db_advanced_mode") === "true"; } catch { return false; }
+  });
+  const toggleAdvancedMode = () => {
+    setAdvancedMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem("cp_db_advanced_mode", String(next)); } catch {}
+      return next;
+    });
+  };
+
   // Unified "Soporte avanzado" internal tabs: "publish" | "desktop" | "storage" | "tools" | "users"
   const [supportTab, setSupportTab] = useState("publish");
   const [copiedRepo, setCopiedRepo] = useState(false);
@@ -1186,7 +1198,8 @@ export default function DatabasePage() {
 
       {/* ── Header ── */}
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="mb-8">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
           <motion.div
             animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.05, 1] }}
             transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
@@ -1197,8 +1210,31 @@ export default function DatabasePage() {
           <h1 className="text-5xl font-black gradient-text" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
             Base de Datos
           </h1>
+          </div>
+
+          {/* Toggle Modo avanzado */}
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={toggleAdvancedMode}
+            data-testid="db-advanced-mode-toggle"
+            aria-pressed={advancedMode}
+            title={advancedMode ? "Ocultar herramientas avanzadas" : "Mostrar herramientas avanzadas (Soporte y Zona de peligro)"}
+            className={`flex items-center gap-2.5 pl-3 pr-4 py-2 rounded-2xl border text-xs font-black transition-all duration-300 ${
+              advancedMode
+                ? "bg-slate-900 text-white border-slate-900 shadow-lg"
+                : "bg-white/70 text-slate-500 border-white/70 hover:bg-white"
+            }`}>
+            <motion.span animate={{ rotate: advancedMode ? 90 : 0 }} transition={{ duration: 0.3 }}>
+              {advancedMode ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+            </motion.span>
+            {advancedMode ? "Modo avanzado" : "Vista simple"}
+          </motion.button>
         </div>
-        <p className="text-sm text-slate-500 font-medium mt-1.5">Respaldos y conexión a la base de datos en la nube</p>
+        <p className="text-sm text-slate-500 font-medium mt-1.5">
+          {advancedMode
+            ? "Respaldos, conexión y herramientas avanzadas (soporte, diagnóstico y zona de peligro)"
+            : "Respaldos y conexión a la base de datos en la nube"}
+        </p>
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
@@ -2139,7 +2175,7 @@ export default function DatabasePage() {
 
 
         {/* ── GITHUB & CONTEXTO IA ── */}
-        <motion.div variants={fadeUp}>
+        <motion.div variants={fadeUp} style={{ display: advancedMode ? undefined : "none" }} data-testid="db-advanced-block-github">
           <div className={`glass rounded-3xl overflow-hidden transition-all duration-300 ${ghConfig.repo_url ? "ring-2 ring-slate-800/30" : ""}`}
             style={{ background: ghConfig.repo_url ? "linear-gradient(135deg,rgba(30,41,59,0.05),rgba(15,23,42,0.03))" : undefined }}>
 
@@ -3013,7 +3049,7 @@ export default function DatabasePage() {
         </motion.div>
 
         {/* ── ZONA DE PELIGRO ── */}
-        <motion.div variants={fadeUp}>
+        <motion.div variants={fadeUp} style={{ display: advancedMode ? undefined : "none" }} data-testid="db-advanced-block-danger">
           <div className="rounded-3xl border-2 border-dashed border-red-200/80 bg-red-50/20 overflow-hidden">
             <div onClick={() => toggleBlock("danger")} data-testid="db-block-toggle-danger"
               className="flex items-center gap-3 px-5 py-4 border-b border-red-100/60 cursor-pointer select-none">

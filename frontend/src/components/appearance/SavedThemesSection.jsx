@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Bookmark, Save, Trash2, Play, RotateCcw, Cloud, CloudOff, Loader2,
@@ -68,6 +68,21 @@ export function SavedThemesSection() {
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [pending, setPending] = useState(null); // Confirmation modal state
+
+  // Drag-to-scroll para el carrusel de temas (desktop)
+  const carRef = useRef(null);
+  const drag = useRef({ down: false, startX: 0, startScroll: 0, moved: false });
+  const onCarDown = (e) => {
+    if (!carRef.current) return;
+    drag.current = { down: true, startX: e.pageX, startScroll: carRef.current.scrollLeft, moved: false };
+  };
+  const onCarMove = (e) => {
+    if (!drag.current.down || !carRef.current) return;
+    const dx = e.pageX - drag.current.startX;
+    if (Math.abs(dx) > 4) drag.current.moved = true;
+    carRef.current.scrollLeft = drag.current.startScroll - dx;
+  };
+  const onCarUp = () => { drag.current.down = false; };
 
   const load = async () => {
     try { setThemes(await getSavedThemes()); } catch (_) { /* noop */ }
@@ -329,76 +344,92 @@ export function SavedThemesSection() {
               <p className="text-xs text-slate-400 font-medium">{es ? "Aún no tienes temas guardados" : "No saved themes yet"}</p>
             </div>
           ) : (
-            <div className="space-y-2" data-testid="saved-themes-list">
-              {themes.map(t => (
-                <div
+            <div className="relative" data-testid="saved-themes-list">
+              <div
+                ref={carRef}
+                onMouseDown={onCarDown}
+                onMouseMove={onCarMove}
+                onMouseUp={onCarUp}
+                onMouseLeave={onCarUp}
+                className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory no-scrollbar theme-carousel"
+                style={{ scrollBehavior: "smooth" }}
+              >
+              {themes.map((t, idx) => {
+                const grad = `linear-gradient(135deg, ${(t.snapshot?.custom_accent) || "#8b5cf6"}, ${(t.snapshot?.custom_accent_to) || "#ec4899"})`;
+                return (
+                <motion.div
                   key={t.id}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-2xl border transition-colors ${
-                    t.is_default ? "bg-amber-50/60 border-amber-200" : "bg-white/70 border-white/70"
+                  initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ delay: idx * 0.07, type: "spring", stiffness: 200, damping: 22 }}
+                  whileHover={{ y: -6 }}
+                  className={`theme-card snap-center shrink-0 w-[210px] rounded-3xl overflow-hidden border relative ${
+                    t.is_default ? "border-amber-300" : "border-white/70"
                   }`}
                   data-testid={`theme-row-${t.id}`}
                 >
-                  <div
-                    className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${(t.snapshot?.custom_accent) || "var(--t-from)"}, var(--t-to))` }}
-                  >
-                    {t.is_default ? <Star size={14} className="text-white fill-white" /> : <CheckCircle2 size={14} className="text-white" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-black text-slate-800 truncate">{t.name}</p>
-                      {t.is_default && (
-                        <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-200 text-amber-800" data-testid={`default-badge-${t.id}`}>
-                          {es ? "Por defecto" : "Default"}
-                        </span>
-                      )}
+                  {/* Cabecera con gradiente del tema (glass 3D) */}
+                  <div className="relative h-24 flex items-center justify-center" style={{ background: grad }}>
+                    <div className="absolute inset-0 opacity-40" style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.5), transparent 60%)" }} />
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center backdrop-blur-md bg-white/25 border border-white/40 relative">
+                      {t.is_default ? <Star size={22} className="text-white fill-white" /> : <CheckCircle2 size={22} className="text-white" />}
                     </div>
-                    <p className="text-[10px] text-slate-400">
+                    {t.is_default && (
+                      <span className="absolute top-2 right-2 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/90 text-amber-700" data-testid={`default-badge-${t.id}`}>
+                        {es ? "Por defecto" : "Default"}
+                      </span>
+                    )}
+                  </div>
+                  {/* Cuerpo */}
+                  <div className="p-3 bg-white/85 backdrop-blur-xl">
+                    <p className="text-sm font-black text-slate-800 truncate">{t.name}</p>
+                    <p className="text-[10px] text-slate-400 mb-2.5 truncate">
                       {t.updated_at && t.updated_at !== t.created_at
-                        ? (es ? `Actualizado: ${fmt(t.updated_at)}` : `Updated: ${fmt(t.updated_at)}`)
+                        ? (es ? `Act: ${fmt(t.updated_at)}` : `Upd: ${fmt(t.updated_at)}`)
                         : (es ? `Creado: ${fmt(t.created_at)}` : `Created: ${fmt(t.created_at)}`)}
                     </p>
-                  </div>
-
-                  {/* Set default */}
-                  {!t.is_default && (
-                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                      onClick={() => handleSetDefault(t)} disabled={settingDefault === t.id}
-                      data-testid={`set-default-btn-${t.id}`}
-                      title={es ? "Marcar como tema por defecto" : "Set as default"}
-                      className="p-2 rounded-xl hover:bg-amber-100 text-slate-300 hover:text-amber-500 transition-colors disabled:opacity-50">
-                      {settingDefault === t.id ? <Loader2 size={13} className="animate-spin" /> : <Star size={13} />}
+                    {/* Acción principal: Aplicar */}
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      onClick={() => askApply(t)} disabled={applying === t.id}
+                      data-testid={`apply-theme-btn-${t.id}`}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl btn-primary text-white text-[11px] font-black transition-colors disabled:opacity-50 mb-2">
+                      {applying === t.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                      {es ? "Aplicar" : "Apply"}
                     </motion.button>
-                  )}
-
-                  {/* Update / Reguardar */}
-                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                    onClick={() => askUpdate(t)} disabled={updating === t.id}
-                    data-testid={`update-theme-btn-${t.id}`}
-                    title={es ? "Sobreescribir con la apariencia actual" : "Overwrite with current appearance"}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-600 text-[10px] font-black transition-colors disabled:opacity-50">
-                    {updating === t.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-                    {es ? "Reguardar" : "Update"}
-                  </motion.button>
-
-                  {/* Apply */}
-                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                    onClick={() => askApply(t)} disabled={applying === t.id}
-                    data-testid={`apply-theme-btn-${t.id}`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black transition-colors disabled:opacity-50">
-                    {applying === t.id ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
-                    {es ? "Aplicar" : "Apply"}
-                  </motion.button>
-
-                  {/* Delete */}
-                  <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                    onClick={() => askDelete(t)}
-                    data-testid={`delete-theme-btn-${t.id}`}
-                    className="p-2 rounded-xl hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors">
-                    <Trash2 size={13} />
-                  </motion.button>
-                </div>
-              ))}
+                    {/* Acciones secundarias */}
+                    <div className="flex items-center justify-between gap-1">
+                      {!t.is_default && (
+                        <motion.button whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.9 }}
+                          onClick={() => handleSetDefault(t)} disabled={settingDefault === t.id}
+                          data-testid={`set-default-btn-${t.id}`}
+                          title={es ? "Marcar por defecto" : "Set as default"}
+                          className="p-1.5 rounded-lg hover:bg-amber-100 text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-50">
+                          {settingDefault === t.id ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
+                        </motion.button>
+                      )}
+                      <motion.button whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.9 }}
+                        onClick={() => askUpdate(t)} disabled={updating === t.id}
+                        data-testid={`update-theme-btn-${t.id}`}
+                        title={es ? "Reguardar" : "Update"}
+                        className="p-1.5 rounded-lg hover:bg-amber-100 text-slate-400 hover:text-amber-600 transition-colors disabled:opacity-50">
+                        {updating === t.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.9 }}
+                        onClick={() => askDelete(t)}
+                        data-testid={`delete-theme-btn-${t.id}`}
+                        title={es ? "Eliminar" : "Delete"}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors ml-auto">
+                        <Trash2 size={12} />
+                      </motion.button>
+                    </div>
+                  </div>
+                </motion.div>
+                );
+              })}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                {es ? "Desliza para ver más temas →" : "Swipe to see more themes →"}
+              </p>
             </div>
           )}
 

@@ -87,17 +87,17 @@ export default function Layout({ children }) {
     : sidebarWidth;
 
   const NAV_DEFS = {
-    "/dashboard":       { label: tr.nav.dashboard,                   icon: LayoutDashboard },
-    "/calendario":      { label: tr.nav.reservations,                icon: CalendarDays },
-    "/socios":          { label: tr.nav.socios || "Socios",          icon: Users },
-    "/metas":           { label: tr.nav.metas || "Metas",            icon: Target },
-    "/base-de-datos":   { label: tr.nav.database || "Base de Datos", icon: Database },
-    "/apariencia":      { label: tr.nav.appearance || "Apariencia",  icon: Palette },
-    "/ajustes":         { label: tr.nav.settings,                    icon: SlidersHorizontal },
-    "/actualizaciones": { label: "Actualizaciones",                  icon: RefreshCw },
+    "/dashboard":       { label: tr.nav.dashboard,                   icon: LayoutDashboard,    tile: "linear-gradient(135deg,#818cf8,#6366f1)" },
+    "/calendario":      { label: tr.nav.reservations,                icon: CalendarDays,       tile: "linear-gradient(135deg,#34d399,#059669)" },
+    "/socios":          { label: tr.nav.socios || "Socios",          icon: Users,              tile: "linear-gradient(135deg,#f472b6,#db2777)" },
+    "/metas":           { label: tr.nav.metas || "Metas",            icon: Target,             tile: "linear-gradient(135deg,#fbbf24,#f59e0b)" },
+    "/base-de-datos":   { label: tr.nav.database || "Base de Datos", icon: Database,           tile: "linear-gradient(135deg,#22d3ee,#0891b2)" },
+    "/apariencia":      { label: tr.nav.appearance || "Apariencia",  icon: Palette,            tile: "linear-gradient(135deg,#a78bfa,#7c3aed)" },
+    "/ajustes":         { label: tr.nav.settings,                    icon: SlidersHorizontal,  tile: "linear-gradient(135deg,#94a3b8,#475569)" },
+    "/actualizaciones": { label: "Actualizaciones",                  icon: RefreshCw,          tile: "linear-gradient(135deg,#fb7185,#e11d48)" },
   };
   const navItems = (navConfig || Object.keys(NAV_DEFS).map(p => ({ path: p, custom: "" })))
-    .map(c => NAV_DEFS[c.path] ? { path: c.path, label: c.custom || NAV_DEFS[c.path].label, icon: NAV_DEFS[c.path].icon } : null)
+    .map(c => NAV_DEFS[c.path] ? { path: c.path, label: c.custom || NAV_DEFS[c.path].label, icon: NAV_DEFS[c.path].icon, tile: NAV_DEFS[c.path].tile } : null)
     .filter(Boolean);
 
   return (
@@ -172,16 +172,21 @@ export default function Layout({ children }) {
           )}
         </div>
 
-        <nav className={`relative z-10 flex-1 py-5 space-y-1 transition-all duration-300 ${compact ? "px-2" : "px-3"}`}>
-          {navItems.map(({ path, label, icon: Icon }, idx) => (
-            <NavLink
+        <nav className={`relative z-10 flex-1 py-5 space-y-1.5 transition-all duration-300 ${compact ? "px-2" : "px-3"}`}>
+          {navItems.map(({ path, label, icon: Icon, tile }, idx) => (
+            <motion.div
               key={path}
+              initial={{ opacity: 0, x: -18, filter: "blur(6px)" }}
+              animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+              transition={{ delay: 0.05 + idx * 0.06, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            >
+            <NavLink
               to={path}
               data-testid={`nav-${path.replace("/", "")}`}
               title={compact ? label : undefined}
               className={({ isActive }) =>
-                `menu-item-anim group relative flex items-center gap-3 py-2.5 rounded-2xl text-sm font-semibold overflow-hidden transition-all duration-300 ${
-                  compact ? "px-0 justify-center" : "px-4"
+                `menu-item-anim group relative flex items-center gap-3 py-2 rounded-2xl text-sm font-semibold overflow-hidden transition-all duration-300 ${
+                  compact ? "px-0 justify-center" : "px-3"
                 } ${
                   isActive ? "nav-active is-active menu-item-active-glow" : "text-slate-600 hover:bg-white/50 hover:text-slate-900"
                 }`
@@ -199,29 +204,27 @@ export default function Layout({ children }) {
                     />
                   )}
 
-                  {/* Icono con animaciones múltiples */}
+                  {/* Icono en tile de vidrio con color de acento (glassmorphism) */}
                   <motion.span
-                    className="relative flex-shrink-0 menu-icon-glow"
-                    animate={isActive
-                      ? { scale: [1.08, 1.18, 1.08], rotate: [0, 3, -3, 0] }
-                      : { scale: 1, rotate: 0 }}
-                    transition={isActive
-                      ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" }
-                      : { duration: 0.2 }}
-                    whileHover={{
-                      rotate: [0, -12, 12, -6, 6, 0],
-                      scale: 1.3,
-                      transition: { duration: 0.6, ease: "easeInOut" }
+                    className="nav-tile relative flex-shrink-0 flex items-center justify-center"
+                    style={{
+                      "--tile": tile,
+                      width: compact ? 38 : 34,
+                      height: compact ? 38 : 34,
                     }}
+                    data-active={isActive ? "true" : "false"}
+                    animate={isActive ? { y: [0, -2, 0] } : { y: 0 }}
+                    transition={isActive ? { duration: 2.6, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+                    whileHover={{ scale: 1.12, rotate: -4 }}
                   >
-                    <Icon size={compact ? iconPx : iconPxInline} strokeWidth={isActive ? 2.4 : 1.6} />
+                    <Icon size={compact ? iconPx : iconPxInline} strokeWidth={isActive ? 2.4 : 2} />
                     {/* Punto pulsante para el ítem activo */}
                     {isActive && !compact && (
                       <motion.span
-                        className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
+                        className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400"
                         animate={{ scale: [1, 1.5, 1], opacity: [0.6, 1, 0.6] }}
                         transition={{ duration: 1.5, repeat: Infinity }}
-                        style={{ boxShadow: "0 0 8px rgba(52, 211, 153, 0.8)" }}
+                        style={{ boxShadow: "0 0 8px rgba(52, 211, 153, 0.9)" }}
                       />
                     )}
                   </motion.span>
@@ -244,12 +247,13 @@ export default function Layout({ children }) {
                       whileHover={{ x: 0 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <ArrowRight size={12} className="text-slate-400" />
+                      <ArrowRight size={13} className="text-slate-400" />
                     </motion.span>
                   )}
                 </>
               )}
             </NavLink>
+            </motion.div>
           ))}
         </nav>
       </aside>
@@ -274,14 +278,27 @@ export default function Layout({ children }) {
       <AnimatePresence>
         {mobileOpen && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="md:hidden fixed inset-0 z-20 glass-strong pt-16">
-            <nav className="px-4 py-4 space-y-1">
-              {navItems.map(({ path, label, icon: Icon }) => (
-                <NavLink key={path} to={path} onClick={() => setMobileOpen(false)}
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all duration-200 ${isActive ? "nav-active" : "text-slate-600 hover:bg-white/60"}`}
+            <nav className="px-4 py-4 space-y-1.5">
+              {navItems.map(({ path, label, icon: Icon, tile }, idx) => (
+                <motion.div
+                  key={path}
+                  initial={{ opacity: 0, x: -16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.05, duration: 0.35 }}
                 >
-                  <Icon size={18} strokeWidth={1.5} />
-                  {label}
+                <NavLink to={path} onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-200 ${isActive ? "nav-active" : "text-slate-600 hover:bg-white/60"}`}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className="nav-tile flex items-center justify-center flex-shrink-0" style={{ "--tile": tile, width: 36, height: 36 }} data-active={isActive ? "true" : "false"}>
+                        <Icon size={18} strokeWidth={2} />
+                      </span>
+                      {label}
+                    </>
+                  )}
                 </NavLink>
+                </motion.div>
               ))}
             </nav>
           </motion.div>

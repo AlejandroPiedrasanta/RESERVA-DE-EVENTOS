@@ -1028,6 +1028,54 @@ body.app-blur-unfocus::after {
   transform: scale(1.15) rotate(-3deg);
 }
 
+/* ── Glass icon tiles (glassmorphism nav) ── */
+.nav-tile {
+  border-radius: 12px;
+  color: #fff;
+  background: var(--tile);
+  box-shadow: 0 6px 16px -6px rgba(15,23,42,0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+  border: 1px solid rgba(255,255,255,0.35);
+  transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.35s ease, filter 0.35s ease;
+  position: relative;
+  overflow: hidden;
+}
+/* frosted glass sheen */
+.nav-tile::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.45) 0%, transparent 55%);
+  pointer-events: none;
+}
+/* inactive: softer, semi-transparent tile so it reads as glass */
+.nav-tile[data-active="false"] {
+  filter: saturate(0.9);
+  opacity: 0.92;
+}
+.menu-item-anim:hover .nav-tile {
+  box-shadow: 0 10px 24px -6px rgba(15,23,42,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+  filter: saturate(1.15) brightness(1.05);
+}
+.nav-tile[data-active="true"] {
+  background: rgba(255,255,255,0.22);
+  border-color: rgba(255,255,255,0.5);
+  box-shadow: 0 8px 22px -6px rgba(15,23,42,0.35), inset 0 1px 0 rgba(255,255,255,0.6);
+  backdrop-filter: blur(6px);
+  color: #fff;
+}
+[data-dark="true"] .nav-tile { border-color: rgba(255,255,255,0.18); }
+
+/* ── Themes carousel ── */
+.theme-carousel { cursor: grab; -webkit-overflow-scrolling: touch; }
+.theme-carousel:active { cursor: grabbing; }
+.theme-card {
+  box-shadow: 0 12px 30px -14px rgba(15,23,42,0.35), 0 4px 12px -6px rgba(15,23,42,0.15);
+  transition: box-shadow 0.35s ease, transform 0.35s cubic-bezier(0.22,1,0.36,1);
+}
+.theme-card:hover {
+  box-shadow: 0 22px 46px -16px rgba(15,23,42,0.45), 0 8px 20px -8px rgba(139,92,246,0.25);
+}
+[data-dark="true"] .theme-card .bg-white\/85 { background: rgba(26,28,46,0.9) !important; }
+
 /* Ripple al click (para botones/tarjetas) */
 @keyframes ripple {
   0%   { transform: scale(0); opacity: 0.6; }
