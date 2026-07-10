@@ -6,6 +6,7 @@ import { useSettings } from "@/context/SettingsContext";
 import WelcomeTour from "@/components/WelcomeTour";
 import SectionUnlockModal from "@/components/SectionUnlockModal";
 import GithubUpdateNotifier from "@/components/GithubUpdateNotifier";
+import FloatingDecor from "@/components/FloatingDecor";
 import { useAdvancedSecurity } from "@/hooks/useAdvancedSecurity";
 
 export default function Layout({ children }) {
@@ -101,6 +102,7 @@ export default function Layout({ children }) {
 
   return (
     <div className="flex min-h-screen" style={{ position: "relative", zIndex: 1 }}>
+      <FloatingDecor />
       <GithubUpdateNotifier />
       <WelcomeTour />
       {/* Desktop Sidebar */}
@@ -288,7 +290,7 @@ export default function Layout({ children }) {
 
       <main
         className="flex-1 min-h-screen transition-all duration-300"
-        style={{ marginLeft: mainMarginLeft }}
+        style={{ marginLeft: mainMarginLeft, position: "relative", zIndex: 10 }}
       >
         <div className="pt-16 md:pt-0 min-h-screen">{children}</div>
       </main>

@@ -37,25 +37,35 @@ export default function PageHeader({
             transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.05 }}
             className="relative shrink-0"
           >
-            {/* Pulsing halo */}
+            {/* Pulsing halo — opacity 0 en ambos extremos del loop para que el
+                reinicio del ping sea invisible (evita el parpadeo/destello). */}
             <motion.span
               className="absolute inset-0 rounded-2xl"
-              style={{ background: gradient }}
-              animate={{ scale: [1, 1.35], opacity: [0.35, 0] }}
-              transition={{ duration: 2.2, repeat: Infinity, ease: "easeOut" }}
+              style={{ background: gradient, willChange: "transform, opacity" }}
+              animate={{ scale: [1, 1.3, 1.6], opacity: [0, 0.35, 0] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: "easeOut" }}
             />
             {/* Icon tile */}
             <motion.div
               animate={{ y: [0, -3, 0] }}
               transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
               whileHover={{ rotate: [0, -8, 8, 0], scale: 1.06 }}
-              className="relative w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg"
+              className="relative w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg overflow-hidden"
               style={{
                 background: gradient,
                 boxShadow: "0 10px 26px -10px rgba(99,102,241,0.55)",
               }}
             >
-              <Icon size={20} className="text-white" strokeWidth={2.2} />
+              <Icon size={20} className="text-white relative z-10" strokeWidth={2.2} />
+              {/* Barrido de luz sobre el icono */}
+              <motion.span
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background: "linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.75) 50%, transparent 70%)",
+                }}
+                animate={{ x: ["-120%", "120%"] }}
+                transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 2.4, ease: "easeInOut" }}
+              />
             </motion.div>
             {/* Sparkle chip */}
             <motion.span
@@ -77,10 +87,20 @@ export default function PageHeader({
             initial={{ opacity: 0, x: -12, filter: "blur(4px)" }}
             animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
             transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="text-4xl sm:text-5xl font-black gradient-text tracking-tight leading-none"
+            className="relative text-4xl sm:text-5xl font-black gradient-text tracking-tight leading-none overflow-hidden"
             style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
           >
             {title}
+            {/* Barrido de luz sobre el título */}
+            <motion.span
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: "linear-gradient(110deg, transparent 35%, rgba(255,255,255,0.65) 50%, transparent 65%)",
+                mixBlendMode: "screen",
+              }}
+              animate={{ x: ["-110%", "150%"] }}
+              transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 3.5, ease: "easeInOut", delay: 0.8 }}
+            />
           </motion.h1>
 
           {/* Animated underline accent */}
