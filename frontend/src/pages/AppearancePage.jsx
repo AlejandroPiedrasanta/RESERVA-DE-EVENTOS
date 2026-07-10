@@ -136,7 +136,7 @@ export default function AppearancePage() {
     bgImage, changeBgImage,
     advancedStyle, changeAdvancedStyle,
     eventConfigs, updateEventTypeConfig, resetEventTypeConfig,
-    logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, updateLogoSettings,
+    logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, logoHidden, updateLogoSettings,
     customLabels, changeCustomLabel, resetCustomLabels,
     customStatuses, activeStatuses,
     changeStatusLabel, changeStatusColor, addCustomStatus, removeCustomStatus, resetCustomStatuses,
@@ -435,114 +435,8 @@ export default function AppearancePage() {
         </Section>
 
         {/* ═══════════════════════════════════════════════════════════════
-            2. TIPOGRAFÍA E ICONOS
+            4. FORMAS Y BORDES  (eliminado por el usuario)
         ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={Type} title={es ? "Tipografía e Iconos" : "Typography & Icons"} desc={es ? "Fuente, tamaño, espacio entre letras y más" : "Font, size, letter spacing and more"}>
-          <div className="space-y-5">
-
-            <div>
-              <p className="text-xs font-black text-slate-600 mb-2.5">{es ? "Familia de fuente" : "Font Family"}</p>
-              <div className="flex flex-wrap gap-2">
-                {[{ id:"satoshi",label:"Satoshi"},{id:"cabinet",label:"Cabinet"},{id:"outfit",label:"Outfit"},{id:"space",label:"Space Grotesk"},{id:"poppins",label:"Poppins"},{id:"sora",label:"Sora"},{id:"dmsans",label:"DM Sans"},{id:"mono",label:"Monospace"}].map(f => (
-                  <motion.button key={f.id} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} data-testid={`font-${f.id}`}
-                    onClick={() => { changeFontFamily(f.id); toast({ title: `Fuente: ${f.label}` }); }}
-                    className={`px-3.5 py-2 rounded-xl border-2 text-xs font-bold transition-all ${fontFamily === f.id ? "border-[var(--t-from)] bg-white/80 text-[var(--t-from)]" : "border-slate-200/70 bg-white/40 text-slate-600 hover:bg-white/60"}`}>
-                    {f.label}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-
-            <OptionRow label={es ? "Tamaño de texto" : "Text Size"} testPrefix="fontscale" current={fontScale} onChange={v => { changeFontScale(v); toast({ title: `Texto: ${v}` }); }} cols={3} defaultValue="md"
-              options={[{id:"compact",label:es?"Compacto":"Compact",hint:"88%"},{id:"normal",label:es?"Normal":"Normal",hint:"100%"},{id:"large",label:es?"Grande":"Large",hint:"110%"}]} />
-
-            <OptionRow label={es ? "Tamaño de iconos (sidebar)" : "Icon Size (sidebar)"} testPrefix="icon-size"
-              current={iconSize} onChange={v => { changeIconSize(v); toast({ title: `Iconos: ${v}` }); }} cols={3}
-              options={[
-                { id:"small",  label:es?"Pequeño":"Small",  preview: <Type size={12} className="text-slate-400" /> },
-                { id:"medium", label:es?"Normal":"Normal",  preview: <Type size={18} className="text-slate-400" /> },
-                { id:"large",  label:es?"Grande":"Large",   preview: <Type size={22} className="text-slate-400" /> },
-              ]} />
-
-            <OptionRow label={es ? "Espacio entre letras" : "Letter Spacing"} testPrefix="letter-spacing"
-              current={as.letterSpacing || "normal"} onChange={v => cs("letterSpacing", v)} cols={4}
-              options={[
-                { id:"tight",  label:es?"Apretado":"Tight",  preview: <span className="text-[9px] font-bold" style={{letterSpacing:"-0.04em"}}>Aa</span> },
-                { id:"normal", label:es?"Normal":"Normal",   preview: <span className="text-[9px] font-bold">Aa</span> },
-                { id:"wide",   label:es?"Amplio":"Wide",     preview: <span className="text-[9px] font-bold" style={{letterSpacing:"0.08em"}}>Aa</span> },
-                { id:"wider",  label:es?"Más":"Wider",      preview: <span className="text-[9px] font-bold" style={{letterSpacing:"0.15em"}}>Aa</span> },
-              ]} />
-
-            <OptionRow label={es ? "Altura de línea" : "Line Height"} testPrefix="line-height"
-              current={as.lineHeight || "normal"} onChange={v => cs("lineHeight", v)} cols={4}
-              options={[
-                { id:"tight",   label:es?"Compacto":"Tight",   preview: <div className="flex flex-col gap-0 w-8">{[1,2,3].map(i=><div key={i} className="h-1 bg-slate-400 rounded"/>)}</div> },
-                { id:"normal",  label:es?"Normal":"Normal",    preview: <div className="flex flex-col gap-0.5 w-8">{[1,2,3].map(i=><div key={i} className="h-1 bg-slate-400 rounded"/>)}</div> },
-                { id:"relaxed", label:es?"Suelto":"Relaxed",   preview: <div className="flex flex-col gap-1 w-8">{[1,2,3].map(i=><div key={i} className="h-1 bg-slate-400 rounded"/>)}</div> },
-                { id:"loose",   label:es?"Amplio":"Loose",     preview: <div className="flex flex-col gap-1.5 w-8">{[1,2,3].map(i=><div key={i} className="h-1 bg-slate-400 rounded"/>)}</div> },
-              ]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            4. FORMAS Y BORDES
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={Layers} title={es ? "Formas y Bordes" : "Shapes & Borders"} desc={es ? "Bordes, tarjetas, botones, separadores" : "Borders, cards, buttons, dividers"}>
-          <div className="space-y-5">
-
-            <OptionRow label={es ? "Estilo de bordes" : "Border Style"} testPrefix="radius" current={radius} onChange={changeRadius} cols={3}
-              options={[
-                { id:"rounded", label:es?"Suaves":"Soft",   preview: <div className="w-10 h-6 rounded-xl border-2 border-slate-300 bg-white/60" /> },
-                { id:"medium",  label:es?"Medios":"Medium", preview: <div className="w-10 h-6 rounded-md border-2 border-slate-300 bg-white/60" /> },
-                { id:"sharp",   label:es?"Rectos":"Sharp",  preview: <div className="w-10 h-6 rounded-sm border-2 border-slate-300 bg-white/60" /> },
-              ]} />
-
-            <div>
-              <p className="text-xs font-black text-slate-600 mb-2.5">{es ? "Estilo de tarjetas" : "Card Style"}</p>
-              <div className="grid grid-cols-5 gap-2">
-                {[{id:"glass",label:es?"Vidrio":"Glass"},{id:"solid",label:es?"Sólido":"Solid"},{id:"minimal",label:es?"Mínimal":"Minimal"},{id:"neon",label:"Neon"},{id:"frosted",label:es?"Escarcha":"Frosted"}].map(c => (
-                  <motion.button key={c.id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} data-testid={`card-${c.id}`}
-                    onClick={() => { changeCardStyle(c.id); toast({ title: `Tarjetas: ${c.label}` }); }}
-                    className={`flex flex-col items-center py-3 rounded-2xl border-2 transition-all gap-1.5 ${cardStyle === c.id ? "border-[var(--t-from)] bg-white/80" : "border-slate-200/70 bg-white/30 hover:bg-white/60"}`}>
-                    <div className={`w-8 h-5 rounded-lg border ${c.id==="glass"?"bg-white/60 backdrop-blur-sm border-white/60":c.id==="solid"?"bg-white border-slate-200":c.id==="minimal"?"bg-transparent border-dashed border-slate-300":c.id==="neon"?"bg-slate-800 border-indigo-500":"bg-white/20 backdrop-blur border-white/80"}`} />
-                    <span className={`text-[9px] font-black ${cardStyle === c.id ? "text-[var(--t-from)]" : "text-slate-600"}`}>{c.label}</span>
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-
-            <OptionRow label={es ? "Estilo de botones" : "Button Style"} testPrefix="btn-corner" current={btnCorner} onChange={changeBtnCorner} cols={3} defaultValue="rounded"
-              options={[
-                { id:"rounded", label:es?"Redondeado":"Rounded", preview: <div className="w-12 h-4 rounded-xl btn-primary" /> },
-                { id:"pill",    label:"Pill",                    preview: <div className="w-12 h-4 rounded-full btn-primary" /> },
-                { id:"sharp",   label:es?"Angular":"Sharp",      preview: <div className="w-12 h-4 rounded-sm btn-primary" /> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo de separadores" : "Divider Style"} testPrefix="divider"
-              current={as.dividerStyle || "solid"} onChange={v => cs("dividerStyle", v)} cols={5}
-              options={[
-                { id:"solid",    label:es?"Sólido":"Solid",    preview: <div className="w-10 h-px bg-slate-400" /> },
-                { id:"dashed",   label:"Dashed",               preview: <div className="w-10 h-px border-t border-dashed border-slate-400" /> },
-                { id:"dotted",   label:"Dotted",               preview: <div className="w-10 h-px border-t border-dotted border-slate-400" /> },
-                { id:"gradient", label:es?"Degradado":"Grad",  preview: <div className="w-10 h-px" style={{background:"linear-gradient(90deg,transparent,var(--t-from),transparent)"}} /> },
-                { id:"none",     label:es?"Ninguno":"None",    preview: <div className="w-10 h-px" /> },
-              ]} />
-
-            <OptionRow label={es ? "Forma de etiquetas/badges" : "Badge Shape"} testPrefix="badge-shape"
-              current={as.badgeShape || "pill"} onChange={v => cs("badgeShape", v)} cols={3}
-              options={[
-                { id:"pill",   label:"Pill",   preview: <div className="px-2 py-0.5 rounded-full text-[8px] bg-[var(--t-from)] text-white font-bold">Tag</div> },
-                { id:"chip",   label:"Chip",   preview: <div className="px-2 py-0.5 rounded-md text-[8px] bg-[var(--t-from)] text-white font-bold">Tag</div> },
-                { id:"square", label:es?"Cuadrado":"Square", preview: <div className="px-2 py-0.5 rounded-sm text-[8px] bg-[var(--t-from)] text-white font-bold">Tag</div> },
-              ]} />
-
-            <OptionRow label={es ? "Espacio entre tarjetas" : "Card Gap"} testPrefix="card-gap"
-              current={as.cardGap || "normal"} onChange={v => cs("cardGap", v)} cols={4}
-              options={[{id:"tight",label:es?"Apretado":"Tight"},{id:"normal",label:es?"Normal":"Normal"},{id:"loose",label:es?"Suelto":"Loose"},{id:"xl",label:"XL"}]} />
-
-          </div>
-        </Section>
 
         {/* ═══════════════════════════════════════════════════════════════
             6. INTERFAZ Y ESPACIO
@@ -754,161 +648,9 @@ export default function AppearancePage() {
         </Section>
 
         {/* ═══════════════════════════════════════════════════════════════
-            7. TIPOGRAFÍA AVANZADA  ★ NUEVO
+            7. TIPOGRAFÍA AVANZADA / 9. FORMULARIOS E INPUTS / 11. DASHBOARD Y WIDGETS
+            (eliminadas por el usuario)
         ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={FileText} isNew title={es ? "Tipografía Avanzada" : "Advanced Typography"} desc={es ? "Peso, mayúsculas, sombra de texto, alineación" : "Weight, case, text shadow, alignment"}>
-          <div className="space-y-5">
-
-            <OptionRow label={es ? "Peso de titulares" : "Heading Weight"} testPrefix="heading-weight"
-              current={as.headingWeight || "800"} onChange={v => cs("headingWeight", v)} cols={4}
-              options={[
-                { id:"600", label:"Semibold", preview: <span className="text-xs font-semibold text-slate-700">Aa</span> },
-                { id:"700", label:"Bold",     preview: <span className="text-xs font-bold text-slate-700">Aa</span> },
-                { id:"800", label:"ExtraBold",preview: <span className="text-xs font-extrabold text-slate-700">Aa</span> },
-                { id:"900", label:"Black",    preview: <span className="text-xs font-black text-slate-700">Aa</span> },
-              ]} />
-
-            <OptionRow label={es ? "Mayúsculas de titulares" : "Heading Case"} testPrefix="heading-case"
-              current={as.headingCase || "normal"} onChange={v => cs("headingCase", v)} cols={3}
-              options={[
-                { id:"normal",    label:es?"Normal":"Normal",       preview: <span className="text-xs font-bold text-slate-700">Título</span> },
-                { id:"uppercase", label:es?"MAYÚSCULAS":"UPPER",    preview: <span className="text-[9px] font-bold text-slate-700 uppercase">Título</span> },
-                { id:"capitalize",label:es?"Capitalizar":"Capitalize",preview:<span className="text-xs font-bold text-slate-700 capitalize">título ejemplo</span>},
-              ]} />
-
-            <OptionRow label={es ? "Sombra del texto" : "Text Shadow"} testPrefix="text-shadow"
-              current={as.textShadow || "none"} onChange={v => cs("textShadow", v)} cols={3}
-              options={[
-                { id:"none",   label:es?"Ninguna":"None",   preview: <span className="text-xs font-bold text-slate-700">Aa</span> },
-                { id:"subtle", label:es?"Sutil":"Subtle",   preview: <span className="text-xs font-bold text-slate-700" style={{textShadow:"0 1px 3px rgba(0,0,0,0.2)"}}>Aa</span> },
-                { id:"glow",   label:"Glow",                preview: <span className="text-xs font-bold" style={{color:"var(--t-from)",textShadow:"0 0 10px var(--t-from)"}}>Aa</span> },
-              ]} />
-
-            <OptionRow label={es ? "Alineación del texto" : "Text Alignment"} testPrefix="body-align"
-              current={as.bodyAlign || "left"} onChange={v => cs("bodyAlign", v)} cols={3}
-              options={[
-                { id:"left",    label:es?"Izquierda":"Left",  preview: <div className="space-y-0.5 w-10">{[10,8,10,7].map((w,i)=><div key={i} className="h-0.5 bg-slate-400 rounded" style={{width:`${w*4}px`}} />)}</div> },
-                { id:"center",  label:es?"Centrado":"Center", preview: <div className="space-y-0.5 w-10 flex flex-col items-center">{[10,8,10,7].map((w,i)=><div key={i} className="h-0.5 bg-slate-400 rounded" style={{width:`${w*3.5}px`}} />)}</div> },
-                { id:"justify", label:es?"Justificado":"Justify",preview:<div className="space-y-0.5 w-10">{[10,10,10,6].map((w,i)=><div key={i} className="h-0.5 bg-slate-400 rounded" style={{width:i<3?"100%":`${w*4}px`}} />)}</div> },
-              ]} />
-
-            <OptionRow label={es ? "Decoración de enlaces" : "Link Decoration"} testPrefix="link-decor"
-              current={as.linkDecoration || "hover"} onChange={v => cs("linkDecoration", v)} cols={4}
-              options={[
-                { id:"underline",preview:<span className="text-xs font-bold text-[var(--t-from)] underline">link</span>,label:es?"Subrayado":"Underline"},
-                { id:"hover",    preview:<span className="text-xs font-bold text-[var(--t-from)]">link</span>,label:es?"Al pasar":"On hover"},
-                { id:"none",     preview:<span className="text-xs font-bold text-[var(--t-from)]">link</span>,label:es?"Ninguno":"None"},
-                { id:"colored",  preview:<span className="text-xs font-bold text-[var(--t-from)] bg-[var(--t-from)]/10 px-1 rounded">link</span>,label:es?"Con fondo":"Bg"},
-              ]} />
-
-            <OptionRow label={es ? "Fuente monoespaciada" : "Monospace Font"} testPrefix="mono-font"
-              current={as.monoFont || "default"} onChange={v => cs("monoFont", v)} cols={4}
-              options={[{id:"default",label:"Default"},{id:"jetbrains",label:"JetBrains"},{id:"fira",label:"Fira Code"},{id:"cascadia",label:"Cascadia"}]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            9. FORMULARIOS E INPUTS  ★ NUEVO
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={Columns} isNew title={es ? "Formularios e Inputs" : "Forms & Inputs"} desc={es ? "Estilo, tamaño y animación de campos de entrada" : "Input style, size and animations"}>
-          <div className="space-y-5">
-
-            <OptionRow label={es ? "Estilo de campos de entrada" : "Input Style"} testPrefix="input-style"
-              current={as.inputStyle || "box"} onChange={v => cs("inputStyle", v)} cols={4}
-              options={[
-                { id:"box",      label:es?"Caja":"Box",      preview: <div className="w-12 h-5 rounded-lg border-2 border-slate-300 bg-white" /> },
-                { id:"line",     label:es?"Línea":"Line",    preview: <div className="w-12 h-5 border-b-2 border-slate-300" /> },
-                { id:"glass",    label:es?"Vidrio":"Glass",  preview: <div className="w-12 h-5 rounded-lg border border-white/60 bg-white/50 backdrop-blur-sm" /> },
-                { id:"flat",     label:es?"Plano":"Flat",    preview: <div className="w-12 h-5 rounded-lg bg-slate-100" /> },
-              ]} />
-
-            <OptionRow label={es ? "Tamaño de inputs" : "Input Size"} testPrefix="input-size"
-              current={as.inputSize || "normal"} onChange={v => cs("inputSize", v)} cols={3}
-              options={[
-                { id:"compact", label:es?"Compacto":"Compact", preview: <div className="w-12 h-4 rounded border border-slate-300 bg-white" /> },
-                { id:"normal",  label:es?"Normal":"Normal",   preview: <div className="w-12 h-6 rounded border border-slate-300 bg-white" /> },
-                { id:"large",   label:es?"Grande":"Large",    preview: <div className="w-12 h-8 rounded border border-slate-300 bg-white" /> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo del anillo de foco" : "Focus Ring Style"} testPrefix="focus-ring"
-              current={as.focusRing || "glow"} onChange={v => cs("focusRing", v)} cols={4}
-              options={[
-                { id:"glow",      label:"Glow",      preview: <div className="w-12 h-5 rounded-lg border border-slate-300 bg-white" style={{boxShadow:"0 0 0 3px var(--t-from)44"}} /> },
-                { id:"solid",     label:"Solid",     preview: <div className="w-12 h-5 rounded-lg bg-white" style={{boxShadow:"0 0 0 2px var(--t-from)"}} /> },
-                { id:"underline", label:es?"Subrayado":"Underline",preview:<div className="w-12 h-5 rounded-t-lg border-b-2 border-[var(--t-from)] bg-white" /> },
-                { id:"none",      label:es?"Ninguno":"None",preview:<div className="w-12 h-5 rounded-lg border border-slate-200 bg-white" /> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo de checkboxes y radios" : "Checkbox & Radio Style"} testPrefix="checkbox-style"
-              current={as.checkboxStyle || "default"} onChange={v => cs("checkboxStyle", v)} cols={4}
-              options={[
-                { id:"default",preview:<div className="w-4 h-4 rounded border-2 border-slate-400" />,label:"Default"},
-                { id:"circle", preview:<div className="w-4 h-4 rounded-full border-2 border-[var(--t-from)] flex items-center justify-center"><div className="w-2 h-2 rounded-full btn-primary" /></div>,label:es?"Círculo":"Circle"},
-                { id:"square", preview:<div className="w-4 h-4 rounded-sm btn-primary flex items-center justify-center"><CheckCircle size={9} className="text-white" /></div>,label:es?"Relleno":"Filled"},
-                { id:"minimal",preview:<div className="w-4 h-4 rounded border border-slate-300" />,label:"Minimal"},
-              ]} />
-
-            <OptionRow label={es ? "Layout de formularios" : "Form Layout"} testPrefix="form-layout"
-              current={as.formLayout || "stacked"} onChange={v => cs("formLayout", v)} cols={3}
-              options={[
-                { id:"stacked",  label:es?"Apilado":"Stacked",   preview: <div className="space-y-1 w-10"><div className="h-1 w-full bg-slate-300 rounded" /><div className="h-3 w-full rounded border border-slate-300" /></div> },
-                { id:"floating", label:es?"Flotante":"Floating",  preview: <div className="relative w-10 h-6 rounded border border-slate-300"><div className="absolute -top-1.5 left-1 text-[6px] font-bold text-[var(--t-from)] bg-white px-0.5">Label</div></div> },
-                { id:"inline",   label:es?"En línea":"Inline",   preview: <div className="flex items-center gap-1 w-10"><div className="h-1 w-3 bg-slate-300 rounded" /><div className="flex-1 h-3 rounded border border-slate-300" /></div> },
-              ]} />
-
-            <OptionRow label={es ? "Estilo de selectores (dropdowns)" : "Select/Dropdown Style"} testPrefix="select-style"
-              current={as.selectStyle || "custom"} onChange={v => cs("selectStyle", v)} cols={3}
-              options={[{id:"native",label:"Native"},{id:"custom",label:"Custom"},{id:"glass",label:"Glass"}]} />
-
-          </div>
-        </Section>
-
-        {/* ═══════════════════════════════════════════════════════════════
-            11. DASHBOARD Y WIDGETS  ★ NUEVO
-        ═══════════════════════════════════════════════════════════════ */}
-        <Section icon={LayoutGrid} isNew title={es ? "Dashboard y Widgets" : "Dashboard & Widgets"} desc={es ? "Gráficos, tarjetas de métricas y disposición" : "Charts, metric cards and layout"}>
-          <div className="space-y-5">
-
-            <OptionRow label={es ? "Tipo de gráfico preferido" : "Default Chart Type"} testPrefix="chart-type"
-              current={as.chartType || "bar"} onChange={v => cs("chartType", v)} cols={4}
-              options={[
-                { id:"bar",   label:es?"Barras":"Bar",     preview: <div className="flex items-end gap-0.5 h-5">{[2,4,3,5,3].map((h,i)=><div key={i} className="w-1.5 rounded-t btn-primary" style={{height:`${h*4}px`}}/>)}</div> },
-                { id:"line",  label:es?"Líneas":"Line",    preview: <svg width="20" height="16" viewBox="0 0 20 16"><polyline points="0,14 5,8 10,10 15,4 20,6" fill="none" stroke="var(--t-from)" strokeWidth="2"/></svg> },
-                { id:"area",  label:es?"Área":"Area",      preview: <svg width="20" height="16" viewBox="0 0 20 16"><polygon points="0,16 0,12 5,7 10,9 15,3 20,5 20,16" fill="var(--t-from)" fillOpacity="0.4" stroke="var(--t-from)" strokeWidth="1.5"/></svg> },
-                { id:"donut", label:es?"Dona":"Donut",     preview: <div className="w-5 h-5 rounded-full border-4 border-[var(--t-from)]" style={{borderRightColor:"var(--t-to)"}} /> },
-              ]} />
-
-            <OptionRow label={es ? "Tamaño de estadísticas" : "Stats Size"} testPrefix="stats-size"
-              current={as.statsSize || "normal"} onChange={v => cs("statsSize", v)} cols={3}
-              options={[
-                { id:"normal", label:es?"Normal":"Normal", preview: <span className="text-sm font-black text-slate-700">1,234</span> },
-                { id:"large",  label:es?"Grande":"Large",  preview: <span className="text-base font-black text-slate-700">1,234</span> },
-                { id:"xl",     label:"XL",                 preview: <span className="text-xl font-black text-slate-700">1,234</span> },
-              ]} />
-
-            <OptionRow label={es ? "Disposición de tarjetas" : "Card Grid Layout"} testPrefix="card-layout"
-              current={as.cardLayout || "grid"} onChange={v => cs("cardLayout", v)} cols={3}
-              options={[
-                { id:"grid",    label:es?"Cuadrícula":"Grid",  preview: <div className="grid grid-cols-2 gap-0.5 w-10">{[1,2,3,4].map(i=><div key={i} className="h-3 bg-slate-300 rounded" />)}</div> },
-                { id:"list",    label:es?"Lista":"List",       preview: <div className="flex flex-col gap-0.5 w-10">{[1,2,3].map(i=><div key={i} className="h-2 bg-slate-300 rounded w-full" />)}</div> },
-                { id:"compact", label:es?"Compacto":"Compact", preview: <div className="flex flex-col gap-0.5 w-10">{[1,2,3,4].map(i=><div key={i} className="h-1.5 bg-slate-300 rounded w-full" />)}</div> },
-              ]} />
-
-            <OptionRow label={es ? "Estado vacío (sin datos)" : "Empty State Style"} testPrefix="empty-state"
-              current={as.emptyState || "icon"} onChange={v => cs("emptyState", v)} cols={4}
-              options={[{id:"icon",label:es?"Solo icono":"Icon Only"},{id:"illustration",label:es?"Ilustración":"Illustration"},{id:"text",label:es?"Solo texto":"Text Only"},{id:"animated",label:es?"Animado":"Animated"}]} />
-
-            <OptionRow label={es ? "Bordes de widgets" : "Widget Corner Style"} testPrefix="widget-corner"
-              current={as.widgetCorner || "round"} onChange={v => cs("widgetCorner", v)} cols={3}
-              options={[
-                { id:"round",  label:es?"Redondo":"Round", preview: <div className="w-10 h-6 rounded-2xl bg-slate-200" /> },
-                { id:"sharp",  label:es?"Angular":"Sharp", preview: <div className="w-10 h-6 rounded-sm bg-slate-200" /> },
-                { id:"pill",   label:"Pill",               preview: <div className="w-10 h-6 rounded-full bg-slate-200" /> },
-              ]} />
-
-          </div>
-        </Section>
 
         {/* ═══════════════════════════════════════════════════════════════
             13. TIPOS DE EVENTO
@@ -1040,15 +782,30 @@ export default function AppearancePage() {
         ═══════════════════════════════════════════════════════════════ */}
         <Section icon={ImageIcon} title={es ? "Logo y Marca" : "Logo & Branding"} desc={es ? "Logo para la app y documentos PDF" : "App logo and PDF documents"}>
           <div className="space-y-4">
+            <div className="flex items-center justify-between p-3 bg-white/60 rounded-2xl border border-white/60">
+              <div>
+                <p className="text-xs font-bold text-slate-700">{es?"Ocultar logo del menú":"Hide logo in menu"}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">{es?"El menú se ajusta automáticamente":"The menu adjusts automatically"}</p>
+              </div>
+              <Switch checked={logoHidden} onCheckedChange={val=>{ updateLogoSettings({hidden:val}); toast({title: val ? (es?"Logo oculto ✓":"Logo hidden ✓") : (es?"Logo visible ✓":"Logo visible ✓")}); }} data-testid="logo-hidden-toggle" />
+            </div>
             <div>
               <p className="text-xs font-bold text-slate-600 mb-2">{es?"Logo de la app (sidebar)":"App logo (sidebar)"}</p>
               {logoUrl ? (
-                <div className="flex items-center gap-3 p-3 bg-white/60 rounded-2xl border border-white/60">
-                  <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain max-w-[120px] rounded-xl" />
-                  <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700">{es?"Logo cargado":"Logo loaded"}</p><p className="text-[10px] text-slate-400 mt-0.5">{es?"Aparece en sidebar":"Shown in sidebar"}</p></div>
-                  <div className="flex gap-2">
-                    <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={()=>logoInputRef.current?.click()} data-testid="logo-change-btn" className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"><Upload size={13} className="text-slate-600"/></motion.button>
-                    <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={()=>updateLogoSettings({url:null})} data-testid="logo-remove-btn" className="p-2 rounded-xl bg-red-50 hover:bg-red-100 transition-colors"><Trash2 size={13} className="text-red-500"/></motion.button>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 p-3 bg-white/60 rounded-2xl border border-white/60">
+                    <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain max-w-[120px] rounded-xl" />
+                    <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-700">{es?"Logo cargado":"Logo loaded"}</p><p className="text-[10px] text-slate-400 mt-0.5">{es?"Aparece en sidebar":"Shown in sidebar"}</p></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={()=>logoInputRef.current?.click()} data-testid="logo-change-btn"
+                      className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors">
+                      <Upload size={13}/>{es?"Cambiar logo":"Change logo"}
+                    </motion.button>
+                    <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={()=>{updateLogoSettings({url:null}); toast({title:es?"Logo eliminado ✓":"Logo removed ✓"});}} data-testid="logo-remove-btn"
+                      className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold transition-colors">
+                      <Trash2 size={13}/>{es?"Quitar por completo":"Remove completely"}
+                    </motion.button>
                   </div>
                 </div>
               ) : (

@@ -13,7 +13,7 @@ export const APPEARANCE_KEYS = [
   "reservation_form_design", "socio_form_design", "swap_name_event_type",
   "form_fields_visibility", "socio_fields_visibility", "dashboard_widgets", "dashboard_recent_style",
   "island_margins", "cp_event_configs", "cp_logo_url", "cp_pdf_logo_url", "cp_logo_size",
-  "cp_use_pdf_logo", "cp_custom_pdf_logo", "nav_config",
+  "cp_use_pdf_logo", "cp_custom_pdf_logo", "cp_logo_hidden", "nav_config",
 ];
 
 export const THEMES = {
@@ -821,6 +821,7 @@ export function SettingsProvider({ children }) {
   const [logoSize,         setLogoSize]         = useState(() => parseInt(localStorage.getItem("cp_logo_size") || "80", 10));
   const [usePdfLogo,       setUsePdfLogo]       = useState(() => (localStorage.getItem("cp_use_pdf_logo") ?? "true") !== "false");
   const [useCustomPdfLogo, setUseCustomPdfLogo] = useState(() => localStorage.getItem("cp_custom_pdf_logo") === "true");
+  const [logoHidden,       setLogoHidden]       = useState(() => localStorage.getItem("cp_logo_hidden") === "true");
 
   const updateLogoSettings = (updates) => {
     if ("url"           in updates) { setLogoUrl(updates.url);                   updates.url           ? localStorage.setItem("cp_logo_url",        updates.url)           : localStorage.removeItem("cp_logo_url"); }
@@ -828,6 +829,7 @@ export function SettingsProvider({ children }) {
     if ("size"          in updates) { setLogoSize(updates.size);                 localStorage.setItem("cp_logo_size",       String(updates.size)); }
     if ("usePdf"        in updates) { setUsePdfLogo(updates.usePdf);             localStorage.setItem("cp_use_pdf_logo",    String(updates.usePdf)); }
     if ("useCustomPdf"  in updates) { setUseCustomPdfLogo(updates.useCustomPdf); localStorage.setItem("cp_custom_pdf_logo", String(updates.useCustomPdf)); }
+    if ("hidden"        in updates) { setLogoHidden(!!updates.hidden);           localStorage.setItem("cp_logo_hidden",     String(!!updates.hidden)); }
   };
 
   // ── Appearance cloud sync ────────────────────────────────────────────────
@@ -897,7 +899,7 @@ export function SettingsProvider({ children }) {
     }, 2000);
     return () => clearTimeout(pushTimerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme, preset, animations, radius, pdfTheme, darkMode, fontScale, bgIntensity, sidebarCompact, dateFormat, fontFamily, cardStyle, animSpeed, shadowDepth, pageWidth, btnCorner, scrollbar, customBgEnabled, bgColor1, bgColor2, customAccent, saturation, hoverEffect, glassBlur, layoutDensity, pageTransition, iconSize, sidebarStyle, bgImage, advancedStyle, customLabels, customStatuses, reservationFormDesign, socioFormDesign, swapNameEventType, formFieldsVisibility, socioFieldsVisibility, dashboardWidgets, dashboardRecentStyle, islandMargins, eventConfigs, logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, navConfig]);
+  }, [theme, preset, animations, radius, pdfTheme, darkMode, fontScale, bgIntensity, sidebarCompact, dateFormat, fontFamily, cardStyle, animSpeed, shadowDepth, pageWidth, btnCorner, scrollbar, customBgEnabled, bgColor1, bgColor2, customAccent, saturation, hoverEffect, glassBlur, layoutDensity, pageTransition, iconSize, sidebarStyle, bgImage, advancedStyle, customLabels, customStatuses, reservationFormDesign, socioFormDesign, swapNameEventType, formFieldsVisibility, socioFieldsVisibility, dashboardWidgets, dashboardRecentStyle, islandMargins, eventConfigs, logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, logoHidden, navConfig]);
 
   // ── App security (password lock + page protection) ─────────────────────────
   const [security, setSecurity] = useState({
@@ -1095,7 +1097,7 @@ export function SettingsProvider({ children }) {
       advancedStyle, changeAdvancedStyle,
       // Event & logo
       eventConfigs, updateEventTypeConfig, resetEventTypeConfig,
-      logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, updateLogoSettings,
+      logoUrl, pdfLogoUrl, logoSize, usePdfLogo, useCustomPdfLogo, logoHidden, updateLogoSettings,
       // Custom labels
       customLabels, changeCustomLabel, resetCustomLabels,
       // Custom statuses

@@ -11,7 +11,7 @@ import { useAdvancedSecurity } from "@/hooks/useAdvancedSecurity";
 
 export default function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { tr, preset, logoUrl, logoSize, sidebarCompact, iconSize, sidebarStyle, islandMargins, navConfig } = useSettings();
+  const { tr, preset, logoUrl, logoSize, logoHidden, sidebarCompact, iconSize, sidebarStyle, islandMargins, navConfig } = useSettings();
   const sidebarLogoH = Math.min(Math.max(logoSize || 40, 24), 80);
 
   // Sidebar sweep (barrido de luz al crear reserva/socio/etc)
@@ -152,14 +152,14 @@ export default function Layout({ children }) {
         </AnimatePresence>
 
         {/* Logo area */}
-        <div className={`relative z-10 border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6"}`}>
-          {compact ? (
-            <div className="w-9 h-9 rounded-xl btn-primary flex items-center justify-center text-white font-black text-base">
-              C
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2.5">
+        {!logoHidden && (
+          <div className={`relative z-10 border-b border-white/40 transition-all duration-300 ${compact ? "px-3 py-5 flex justify-center" : "px-6 py-6 flex justify-center"}`}>
+            {compact ? (
+              <div className="w-9 h-9 rounded-xl btn-primary flex items-center justify-center text-white font-black text-base">
+                C
+              </div>
+            ) : (
+              <div className="flex items-center justify-center">
                 <img
                   src={logoUrl || "/logo.png"}
                   alt="Cinema Productions"
@@ -167,10 +167,9 @@ export default function Layout({ children }) {
                   style={{ height: `${sidebarLogoH}px`, maxWidth: "140px" }}
                 />
               </div>
-              <p className="text-[10px] text-slate-400 font-medium mt-1.5 pl-0.5">{tr.nav.tagline}</p>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         <nav className={`relative z-10 flex-1 py-5 space-y-1.5 transition-all duration-300 ${compact ? "px-2" : "px-3"}`}>
           {navItems.map(({ path, label, icon: Icon, tile }, idx) => (
@@ -261,14 +260,16 @@ export default function Layout({ children }) {
       {/* Mobile Header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 glass border-b border-white/50">
         <div className="flex items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-2.5">
-            <img
-              src={logoUrl || "/logo.png"}
-              alt="Cinema Productions"
-              className="w-auto rounded-lg object-contain"
-              style={{ height: "28px", maxWidth: "90px" }}
-            />
-          </div>
+          {!logoHidden ? (
+            <div className="flex items-center gap-2.5">
+              <img
+                src={logoUrl || "/logo.png"}
+                alt="Cinema Productions"
+                className="w-auto rounded-lg object-contain"
+                style={{ height: "28px", maxWidth: "90px" }}
+              />
+            </div>
+          ) : <div />}
           <button onClick={() => setMobileOpen(!mobileOpen)} data-testid="mobile-menu-toggle" className="p-2 rounded-2xl text-slate-600 hover:bg-white/50 transition-all">
             {mobileOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
