@@ -4516,7 +4516,20 @@ BUILD_DIR = _resolve_build_dir()
 if BUILD_DIR is not None:
     _static_dir = BUILD_DIR / "static"
     if _static_dir.is_dir():
-        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+        # Assets con hash en el nombre (main.abc123.js, main.def456.css, etc.).
+        # Como el nombre cambia en cada build, podemos servirlos con caché
+        # AGRESIVA e inmutable → segunda visita = 0 requests de red, carga
+        # instantánea desde el disco del navegador.
+        class _ImmutableStatic(StaticFiles):
+            async def get_response(self, path, scope):
+                resp = await super().get_response(path, scope)
+                try:
+                    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                except Exception:
+                    pass
+                return resp
+
+        app.mount("/static", _ImmutableStatic(directory=str(_static_dir)), name="static")
 
     @app.get("/favicon.ico")
     async def favicon():
