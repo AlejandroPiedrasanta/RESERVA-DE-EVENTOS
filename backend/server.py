@@ -6844,6 +6844,258 @@ async def reset_ai_context():
     )
     return {"success": True, "content": DEFAULT_AI_CONTEXT}
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 15.  Error Reporting  ·  logs visibles + reporte automático a GitHub Issues
+# ───────────────────────────────────────────────────────────────────────────
+#  Objetivo: que NADA falle en silencio. Todo error (backend, frontend, exe de
+#  escritorio o actualización) queda:
+#    1. Registrado en el log del servidor (logger.error).
+#    2. Guardado en la colección `error_reports` (dedup por fingerprint).
+#    3. Reportado como GitHub Issue en el repo del usuario (si hay token y el
+#       auto-reporte está activo) para poder repararlo.
+#    4. Visible para el usuario vía /api/errors (panel "Incidencias").
+# ═══════════════════════════════════════════════════════════════════════════
+ERROR_LOG_FILE = ROOT_DIR / "error_reports.log"
+
+
+def _error_fingerprint(source: str, message: str, stack: str) -> str:
+    """Huella estable para deduplicar el mismo error (ignora rutas/números)."""
+    first_line = ""
+    if stack:
+        for ln in str(stack).splitlines():
+            ln = ln.strip()
+            if ln:
+                first_line = ln
+                break
+    base = f"{source}|{(message or '')[:200]}|{first_line[:200]}"
+    return hashlib.sha256(base.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+async def _get_error_settings() -> dict:
+    doc = await db.app_settings.find_one({}, {"error_reporting": 1}) or {}
+    cfg = doc.get("error_reporting") or {}
+    return {
+        "auto_report_github": cfg.get("auto_report_github", True),
+        "notify_user": cfg.get("notify_user", True),
+    }
+
+
+async def _create_github_issue(title: str, body: str, labels: list[str]) -> Optional[str]:
+    """Crea un GitHub Issue en el repo configurado. Devuelve la URL o None."""
+    token, repo_url, _branch = await _resolve_github_creds()
+    if not token:
+        return None
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        return None
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cinema-productions-app",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(url, headers=headers, json={"title": title[:250], "body": body[:60000], "labels": labels})
+        if r.status_code in (200, 201):
+            return r.json().get("html_url")
+        logger.warning(f"[errors] GitHub issue no creado: HTTP {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        logger.warning(f"[errors] GitHub issue error: {e}")
+    return None
+
+
+async def _persist_error_report(payload: dict, request_meta: dict | None = None) -> dict:
+    """Guarda/deduplica un error y (opcional) crea GitHub Issue. Core reutilizable."""
+    now = datetime.now(timezone.utc)
+    source = (payload.get("source") or "unknown").strip()[:60]
+    message = (payload.get("message") or "Error desconocido").strip()[:2000]
+    stack = (payload.get("stack") or "")[:8000]
+    level = (payload.get("level") or "error").strip()[:20]
+    context = payload.get("context") or {}
+    version = str(payload.get("version") or "")[:40]
+    platform_info = str(payload.get("platform") or "")[:120]
+    fingerprint = _error_fingerprint(source, message, stack)
+
+    # Log en archivo + consola (siempre, aunque falle GitHub / Mongo)
+    logger.error(f"[error_report] source={source} fp={fingerprint} :: {message}")
+    try:
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{now.isoformat()} [{level}] {source} ({fingerprint}) {message}\n")
+            if stack:
+                f.write(stack[:4000] + "\n")
+    except Exception:
+        pass
+
+    settings = await _get_error_settings()
+    existing = await db.error_reports.find_one({"fingerprint": fingerprint, "resolved": {"$ne": True}})
+
+    if existing:
+        await db.error_reports.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"last_seen": now.isoformat(), "version": version or existing.get("version", "")},
+             "$inc": {"count": 1}},
+        )
+        doc = await db.error_reports.find_one({"_id": existing["_id"]})
+        return {"id": str(doc["_id"]), "fingerprint": fingerprint, "count": doc.get("count", 1),
+                "github_issue_url": doc.get("github_issue_url"), "deduped": True,
+                "notify_user": settings["notify_user"]}
+
+    record = {
+        "source": source, "message": message, "stack": stack, "level": level,
+        "context": context, "version": version, "platform": platform_info,
+        "fingerprint": fingerprint, "count": 1, "resolved": False,
+        "first_seen": now.isoformat(), "last_seen": now.isoformat(),
+        "created_at": now.isoformat(), "github_issue_url": None,
+        "request": request_meta or {},
+    }
+    res = await db.error_reports.insert_one(record)
+    rid = str(res.inserted_id)
+
+    issue_url = None
+    if settings["auto_report_github"]:
+        title = f"[{source}] {message[:120]}"
+        body_lines = [
+            f"**Reporte automático de error** · `{fingerprint}`",
+            "",
+            f"- **Origen:** {source}",
+            f"- **Nivel:** {level}",
+            f"- **Versión app:** {version or 'n/a'}",
+            f"- **Plataforma:** {platform_info or 'n/a'}",
+            f"- **Fecha (UTC):** {now.isoformat()}",
+            "",
+            "### Mensaje", "```", message, "```",
+        ]
+        if stack:
+            body_lines += ["### Stack trace", "```", stack[:6000], "```"]
+        if context:
+            try:
+                body_lines += ["### Contexto", "```json", json.dumps(context, indent=2, ensure_ascii=False, default=_json_safe)[:3000], "```"]
+            except Exception:
+                pass
+        body_lines += ["", "_Generado automáticamente por CinemaProductions para poder reparar el error._"]
+        issue_url = await _create_github_issue(title, "\n".join(body_lines), ["bug", "auto-report", f"src:{source}"])
+        if issue_url:
+            await db.error_reports.update_one({"_id": res.inserted_id}, {"$set": {"github_issue_url": issue_url}})
+
+    return {"id": rid, "fingerprint": fingerprint, "count": 1, "github_issue_url": issue_url,
+            "deduped": False, "notify_user": settings["notify_user"]}
+
+
+@api_router.post("/errors/report")
+async def report_error(payload: dict = Body(...), request: Request = None):
+    """Recibe un error del frontend / exe / updater y lo procesa."""
+    meta = {}
+    try:
+        if request is not None:
+            meta = {"ua": request.headers.get("user-agent", "")[:200],
+                    "ip": (request.client.host if request.client else "")}
+    except Exception:
+        pass
+    result = await _persist_error_report(payload, meta)
+    return {"success": True, **result}
+
+
+@api_router.get("/updates/last-result")
+async def updates_last_result(clear: bool = False):
+    """En el servidor de preview no hay swap de .exe; siempre 'sin fallo'.
+    (El exe de escritorio implementa la versión real que lee el flag de fallo.)"""
+    return {"failed": False}
+
+
+@api_router.get("/errors")
+async def list_errors(limit: int = 50, include_resolved: bool = False):
+    """Lista de incidencias para que el usuario VEA qué falló (no fallos silenciosos)."""
+    q = {} if include_resolved else {"resolved": {"$ne": True}}
+    cur = db.error_reports.find(q).sort("last_seen", -1).limit(min(max(limit, 1), 200))
+    items = [doc_to_dict(d) async for d in cur]
+    open_count = await db.error_reports.count_documents({"resolved": {"$ne": True}})
+    return {"items": items, "open_count": open_count}
+
+
+@api_router.get("/errors/settings")
+async def get_error_settings():
+    return await _get_error_settings()
+
+
+@api_router.put("/errors/settings")
+async def update_error_settings(payload: dict = Body(...)):
+    update = {}
+    if "auto_report_github" in payload:
+        update["error_reporting.auto_report_github"] = bool(payload["auto_report_github"])
+    if "notify_user" in payload:
+        update["error_reporting.notify_user"] = bool(payload["notify_user"])
+    if update:
+        await db.app_settings.update_one({}, {"$set": update}, upsert=True)
+    return await _get_error_settings()
+
+
+@api_router.post("/errors/{error_id}/resolve")
+async def resolve_error(error_id: str):
+    try:
+        oid = ObjectId(error_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    r = await db.error_reports.update_one({"_id": oid}, {"$set": {"resolved": True, "resolved_at": datetime.now(timezone.utc).isoformat()}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
+    return {"success": True}
+
+
+@api_router.delete("/errors/{error_id}")
+async def delete_error(error_id: str):
+    try:
+        oid = ObjectId(error_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    await db.error_reports.delete_one({"_id": oid})
+    return {"success": True}
+
+
+@api_router.post("/errors/clear-resolved")
+async def clear_resolved_errors():
+    r = await db.error_reports.delete_many({"resolved": True})
+    return {"success": True, "deleted": r.deleted_count}
+
+
+# ── Global exception handler: ningún 500 pasa desapercibido ──────────────
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    """Captura CUALQUIER excepción no controlada: la registra, la reporta y
+    devuelve un mensaje CLARO al usuario (nunca un fallo silencioso)."""
+    import traceback as _tb
+    stack = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+    try:
+        result = await _persist_error_report({
+            "source": "backend",
+            "message": f"{type(exc).__name__}: {exc}",
+            "stack": stack,
+            "level": "error",
+            "context": {"path": str(request.url.path), "method": request.method},
+        }, {"ua": request.headers.get("user-agent", "")[:200]})
+        ref = result.get("fingerprint")
+        issue = result.get("github_issue_url")
+    except Exception:
+        ref, issue = None, None
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "detail": f"Ocurrió un error en el servidor: {type(exc).__name__}",
+            "message": str(exc)[:500],
+            "reference": ref,
+            "github_issue_url": issue,
+            "reported": bool(ref),
+        },
+    )
+
+
+
 
 app.include_router(api_router)
 

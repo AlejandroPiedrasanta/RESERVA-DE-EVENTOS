@@ -16,6 +16,9 @@ import AppearancePage from "@/pages/AppearancePage";
 import UpdatesPage from "@/pages/UpdatesPage";
 import { Toaster } from "@/components/ui/toaster";
 import LockScreen from "@/components/LockScreen";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import IncidentsNotifier from "@/components/IncidentsNotifier";
+import { installGlobalErrorHandlers } from "@/lib/errorReporter";
 import { useEffect } from "react";
 import { useNotifications } from "@/hooks/useNotifications";
 
@@ -113,12 +116,19 @@ function ProtectedApp() {
 }
 
 function App() {
+  useEffect(() => {
+    installGlobalErrorHandlers();
+  }, []);
+
   return (
-    <AuthProvider>
-      <SettingsProvider>
-        <ProtectedApp />
-      </SettingsProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <SettingsProvider>
+          <ProtectedApp />
+          <IncidentsNotifier />
+        </SettingsProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

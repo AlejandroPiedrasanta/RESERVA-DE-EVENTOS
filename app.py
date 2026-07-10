@@ -2419,19 +2419,39 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
     if platform.system() == "Windows":
         bat = install_dir / "_cp_update.bat"
         log = install_dir / "_cp_update.log"
+        fail_flag = install_dir / "_cp_update_failed.flag"
         exe_name = exe_path.name
         old = str(exe_path)
         new = str(new_path)
         bak = old + ".bak"
+        # NOTA sobre el bug "abre un cmd, se cierra y no pasa nada":
+        # antes el helper corría DETACHED (sin ventana) y, si el relanzamiento
+        # fallaba, se auto-borraba en SILENCIO → el usuario no veía nada ni sabía
+        # por qué. Ahora:
+        #   · La ventana es VISIBLE (CREATE_NEW_CONSOLE) y muestra el progreso.
+        #   · El relanzamiento es más robusto (verifica y reintenta hasta 4 veces).
+        #   · Si algo falla, se escribe un FLAG de error + se hace PAUSE para que
+        #     el usuario LEA el motivo (no cierre silencioso). La app, al volver a
+        #     arrancar, lee el flag y lo reporta como incidencia.
         script = (
             "@echo off\r\n"
             "setlocal enabledelayedexpansion\r\n"
+            "title Actualizando Cinema Productions...\r\n"
             f'set "LOG={log}"\r\n'
+            f'set "FAILFLAG={fail_flag}"\r\n'
+            f'del "{fail_flag}" >nul 2>&1\r\n'
             'echo [%DATE% %TIME%] === Cinema Productions auto-update start === > "!LOG!"\r\n'
             f'echo old={old} >> "!LOG!"\r\n'
             f'echo new={new} >> "!LOG!"\r\n'
             f'echo bak={bak} >> "!LOG!"\r\n'
-            # Esperar a que el proceso libere el .exe (hasta 60s de espera suave)
+            "echo.\r\n"
+            "echo   ============================================\r\n"
+            "echo    Actualizando Cinema Productions\r\n"
+            "echo    No cierres esta ventana. Tardara unos segundos.\r\n"
+            "echo   ============================================\r\n"
+            "echo.\r\n"
+            "echo   Esperando a que la app se cierre...\r\n"
+            # Esperar a que el proceso libere el .exe (hasta ~90s de espera suave)
             "set TRIES=0\r\n"
             ":waitloop\r\n"
             "set /a TRIES+=1\r\n"
@@ -2444,68 +2464,94 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             f'    taskkill /F /IM "{exe_name}" >nul 2>&1\r\n'
             "  )\r\n"
             "  if !TRIES! GEQ 90 (\r\n"
-            f'    echo [!TIME!] ABORT: no se liberó el .exe tras 90 intentos >> "!LOG!"\r\n'
-            "    exit /b 1\r\n"
+            f'    echo [!TIME!] ABORT: no se libero el .exe tras 90 intentos >> "!LOG!"\r\n'
+            '    echo timeout: el .exe no se libero (otra ventana abierta?) > "!FAILFLAG!"\r\n'
+            "    goto :fail\r\n"
             "  )\r\n"
             "  goto waitloop\r\n"
             ")\r\n"
             f'echo [!TIME!] .exe liberado, aplicando swap (intento inicial) >> "!LOG!"\r\n'
-            # Swap con retries: hasta 10 intentos con 1s de espera (AV puede bloquear el .new)
+            "echo   Instalando la nueva version...\r\n"
+            # Swap con retries: hasta 15 intentos con 1s de espera (AV puede bloquear el .new)
             "set MTRIES=0\r\n"
             ":moveloop\r\n"
             "set /a MTRIES+=1\r\n"
             f'move /y "{new}" "{old}" >nul 2>&1\r\n'
             f'if exist "{old}" goto :moveok\r\n'
-            "if !MTRIES! GEQ 10 (\r\n"
+            "if !MTRIES! GEQ 15 (\r\n"
             f'  echo [!TIME!] MOVE FAIL tras !MTRIES! intentos, rollback desde .bak >> "!LOG!"\r\n'
             f'  move /y "{bak}" "{old}" >nul 2>&1\r\n'
             f'  echo [!TIME!] rollback aplicado. Update ABORTADO. >> "!LOG!"\r\n'
-            f'  start "" "{old}"\r\n'
-            "  exit /b 2\r\n"
+            '  echo swap: no se pudo reemplazar el .exe (antivirus/permisos). Se restauro la version anterior. > "!FAILFLAG!"\r\n'
+            "  goto :fail_relaunch\r\n"
             ")\r\n"
             "ping -n 2 127.0.0.1 >nul\r\n"
             "goto moveloop\r\n"
             ":moveok\r\n"
             f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) >> "!LOG!"\r\n'
             f'del "{bak}" >nul 2>&1\r\n'
-            # ── Relanzamiento robusto multi-estrategia ──────────────────
-            # BUG HISTÓRICO: `start "" "{old}"` desde un cmd DETACHED_PROCESS
-            # sin ventana a veces no relanzaba el .exe en Windows (proceso
-            # heredaba pipes cerrados o quedaba en zombie). Los usuarios veían
-            # "app se cerró y no volvió a abrir". Ahora intentamos 3 métodos
-            # en cascada y logueamos cada intento.
-            f'echo [!TIME!] Relanzando app (metodo 1: powershell Start-Process) >> "!LOG!"\r\n'
+            "echo   Version instalada. Reiniciando la app...\r\n"
+            # ── Relanzamiento robusto: hasta 4 rondas, verificando el proceso ──
+            "set RTRIES=0\r\n"
+            ":relaunch\r\n"
+            "set /a RTRIES+=1\r\n"
+            f'echo [!TIME!] Relanzando app (ronda !RTRIES!) >> "!LOG!"\r\n'
+            f'start "" /D "{install_dir}" "{old}"\r\n'
+            f'ping -n 4 127.0.0.1 >nul\r\n'
+            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
+            # Fallback dentro de la misma ronda: powershell + explorer
             f'powershell -NoProfile -WindowStyle Hidden -Command '
             f'"Start-Process -FilePath \'{old}\' -WorkingDirectory \'{install_dir}\'" '
             f'>> "!LOG!" 2>&1\r\n'
             f'ping -n 3 127.0.0.1 >nul\r\n'
-            # Verificar si el proceso arrancó consultando por nombre.
             f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
-            f'if !ERRORLEVEL! EQU 0 (\r\n'
-            f'  echo [!TIME!] Relanzamiento OK (powershell) >> "!LOG!"\r\n'
-            f'  goto :launched\r\n'
-            f')\r\n'
-            f'echo [!TIME!] Metodo 1 fallo. Intentando metodo 2 (start) >> "!LOG!"\r\n'
-            f'start "" /D "{install_dir}" "{old}"\r\n'
-            f'ping -n 3 127.0.0.1 >nul\r\n'
-            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
-            f'if !ERRORLEVEL! EQU 0 (\r\n'
-            f'  echo [!TIME!] Relanzamiento OK (start) >> "!LOG!"\r\n'
-            f'  goto :launched\r\n'
-            f')\r\n'
-            f'echo [!TIME!] Metodo 2 fallo. Intentando metodo 3 (explorer) >> "!LOG!"\r\n'
+            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
+            "if !RTRIES! LSS 4 goto :relaunch\r\n"
+            # Último recurso: explorer (usa la shell del usuario, evita restricciones)
+            f'echo [!TIME!] fallback final: explorer >> "!LOG!"\r\n'
             f'explorer "{old}"\r\n'
-            f'ping -n 3 127.0.0.1 >nul\r\n'
-            f':launched\r\n'
-            f'echo [!TIME!] === update completo === >> "!LOG!"\r\n'
-            # Auto-borrar el .bat (deja el .log para debug)
+            f'ping -n 4 127.0.0.1 >nul\r\n'
+            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
+            "goto :fail_relaunch\r\n"
+            ":launched\r\n"
+            f'echo [!TIME!] === update completo, app relanzada === >> "!LOG!"\r\n'
+            "echo.\r\n"
+            "echo   Listo! La aplicacion se esta abriendo de nuevo.\r\n"
+            "echo   Esta ventana se cerrara sola...\r\n"
+            "ping -n 3 127.0.0.1 >nul\r\n"
             '(goto) 2>nul & del "%~f0"\r\n'
+            "exit /b 0\r\n"
+            # ── Relanzamiento fallo: NO cerrar en silencio ──
+            ":fail_relaunch\r\n"
+            f'echo [!TIME!] ERROR: la app no se pudo relanzar automaticamente >> "!LOG!"\r\n'
+            '  echo relanzamiento: la nueva version no arranco sola tras la actualizacion. > "!FAILFLAG!"\r\n'
+            ":fail\r\n"
+            "echo.\r\n"
+            "echo   ============================================\r\n"
+            "echo    NO SE PUDO COMPLETAR LA ACTUALIZACION\r\n"
+            "echo   ============================================\r\n"
+            "echo.\r\n"
+            "echo   Motivo:\r\n"
+            f'  type "{fail_flag}" 2>nul\r\n'
+            "echo.\r\n"
+            f'  echo   Detalles tecnicos en: {log}\r\n'
+            "echo.\r\n"
+            "echo   Solucion: abre Cinema Productions manualmente desde el\r\n"
+            "echo   acceso directo del escritorio. Tus datos estan intactos.\r\n"
+            "echo.\r\n"
+            "pause\r\n"
+            'del "%~f0" >nul 2>&1\r\n'
+            "exit /b 1\r\n"
         )
         bat.write_text(script, encoding="ascii")
-        DETACHED_PROCESS = 0x00000008
+        # CREATE_NEW_CONSOLE (0x10): ventana VISIBLE para que el usuario vea el
+        # progreso y, sobre todo, cualquier ERROR (antes se cerraba en silencio).
+        CREATE_NEW_CONSOLE = 0x00000010
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         subprocess.Popen(["cmd", "/c", str(bat)], cwd=str(install_dir),
-                         creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                         creationflags=CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,
                          close_fds=True)
     else:
         sh = install_dir / "_cp_update.sh"
@@ -2693,6 +2739,47 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
             "asset": asset_name, "install_dir": str(install_dir),
             "install_mode": install_mode,
             "message": "Descarga completa. La app se cerrará y se actualizará automáticamente en unos segundos."}
+
+
+@api_router.get("/updates/last-result")
+async def updates_last_result(clear: bool = False):
+    """Devuelve el resultado del ÚLTIMO intento de auto-actualización.
+
+    Si el helper de swap falló (no pudo reemplazar el .exe o no relanzó la app),
+    dejó un archivo `_cp_update_failed.flag` con el motivo. Así la app puede
+    AVISAR al usuario en vez de dejarlo sin saber por qué "no pasó nada".
+    """
+    try:
+        install_dir = Path(sys.executable).resolve().parent
+    except Exception:
+        install_dir = ROOT_DIR
+    flag = install_dir / "_cp_update_failed.flag"
+    log = install_dir / "_cp_update.log"
+    if not flag.exists():
+        return {"failed": False}
+    reason = ""
+    log_tail = ""
+    try:
+        reason = flag.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        pass
+    try:
+        if log.exists():
+            lines = log.read_text(encoding="utf-8", errors="ignore").splitlines()
+            log_tail = "\n".join(lines[-25:])
+    except Exception:
+        pass
+    if clear:
+        try:
+            flag.unlink()
+        except Exception:
+            pass
+    return {
+        "failed": True,
+        "reason": reason or "La actualización no se completó.",
+        "log_tail": log_tail,
+        "current_version": _local_version,
+    }
 
 
 # ── AUTO-UPDATE: descarga, aplica y reinicia el ejecutable ──────────────────
@@ -4460,6 +4547,211 @@ async def diagnostic_fix_all():
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Error Reporting (exe)  ·  logs visibles + reporte automático a GitHub Issues
+#  Igual que el backend de preview, pero autocontenido para el ejecutable.
+# ═══════════════════════════════════════════════════════════════════════════
+ERROR_LOG_FILE = ROOT_DIR / "error_reports.log"
+
+
+def _parse_github_url_desktop(url: str):
+    import re as _re2
+    if not url:
+        return None, None
+    m = _re2.match(r"^https?://github\.com/([^/]+)/([^/.]+?)(?:\.git)?/?$", url.strip())
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
+
+
+def _error_fingerprint_desktop(source: str, message: str, stack: str) -> str:
+    first_line = ""
+    if stack:
+        for ln in str(stack).splitlines():
+            if ln.strip():
+                first_line = ln.strip()
+                break
+    base = f"{source}|{(message or '')[:200]}|{first_line[:200]}"
+    return hashlib.sha256(base.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+async def _get_error_settings_desktop() -> dict:
+    doc = await db.app_settings.find_one({}, {"error_reporting": 1}) or {}
+    cfg = doc.get("error_reporting") or {}
+    return {"auto_report_github": cfg.get("auto_report_github", True),
+            "notify_user": cfg.get("notify_user", True)}
+
+
+def _create_github_issue_desktop(token: str, owner: str, repo: str, title: str, body: str, labels: list) -> Optional[str]:
+    import urllib.request, json as _json, ssl as _ssl
+    try:
+        import certifi as _certifi
+        ctx = _ssl.create_default_context(cafile=_certifi.where())
+    except Exception:
+        ctx = _ssl.create_default_context()
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    data = _json.dumps({"title": title[:250], "body": body[:60000], "labels": labels}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST", headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cinema-productions-desktop",
+        "Content-Type": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
+            return _json.loads(r.read().decode("utf-8")).get("html_url")
+    except Exception as e:
+        logger.warning(f"[errors] GitHub issue error: {e}")
+        return None
+
+
+async def _persist_error_report_desktop(payload: dict) -> dict:
+    now = datetime.now(timezone.utc)
+    source = (payload.get("source") or "unknown").strip()[:60]
+    message = (payload.get("message") or "Error desconocido").strip()[:2000]
+    stack = (payload.get("stack") or "")[:8000]
+    level = (payload.get("level") or "error").strip()[:20]
+    context = payload.get("context") or {}
+    version = str(payload.get("version") or _local_version)[:40]
+    platform_info = str(payload.get("platform") or "")[:120]
+    fingerprint = _error_fingerprint_desktop(source, message, stack)
+
+    logger.error(f"[error_report] source={source} fp={fingerprint} :: {message}")
+    try:
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{now.isoformat()} [{level}] {source} ({fingerprint}) {message}\n")
+            if stack:
+                f.write(stack[:4000] + "\n")
+    except Exception:
+        pass
+
+    settings = await _get_error_settings_desktop()
+    existing = await db.error_reports.find_one({"fingerprint": fingerprint, "resolved": {"$ne": True}})
+    if existing:
+        await db.error_reports.update_one({"_id": existing["_id"]},
+            {"$set": {"last_seen": now.isoformat()}, "$inc": {"count": 1}})
+        doc = await db.error_reports.find_one({"_id": existing["_id"]})
+        return {"id": str(doc["_id"]), "fingerprint": fingerprint, "count": doc.get("count", 1),
+                "github_issue_url": doc.get("github_issue_url"), "deduped": True,
+                "notify_user": settings["notify_user"]}
+
+    record = {"source": source, "message": message, "stack": stack, "level": level,
+              "context": context, "version": version, "platform": platform_info,
+              "fingerprint": fingerprint, "count": 1, "resolved": False,
+              "first_seen": now.isoformat(), "last_seen": now.isoformat(),
+              "created_at": now.isoformat(), "github_issue_url": None}
+    res = await db.error_reports.insert_one(record)
+    rid = str(res.inserted_id)
+
+    issue_url = None
+    if settings["auto_report_github"]:
+        cfg = await _get_github_cfg()
+        token = (cfg.get("token") or "").strip()
+        owner, repo = _parse_github_url_desktop(cfg.get("repo_url", ""))
+        if token and owner and repo:
+            title = f"[{source}] {message[:120]}"
+            body = "\n".join([
+                f"**Reporte automático de error (app de escritorio)** · `{fingerprint}`", "",
+                f"- **Origen:** {source}", f"- **Nivel:** {level}",
+                f"- **Versión app:** {version or 'n/a'}", f"- **Plataforma:** {platform_info or 'n/a'}",
+                f"- **Fecha (UTC):** {now.isoformat()}", "",
+                "### Mensaje", "```", message, "```",
+            ] + (["### Stack trace", "```", stack[:6000], "```"] if stack else [])
+              + ["", "_Generado automáticamente por CinemaProductions._"])
+            issue_url = await asyncio.to_thread(_create_github_issue_desktop, token, owner, repo, title, body, ["bug", "auto-report", f"src:{source}"])
+            if issue_url:
+                await db.error_reports.update_one({"_id": res.inserted_id}, {"$set": {"github_issue_url": issue_url}})
+
+    return {"id": rid, "fingerprint": fingerprint, "count": 1, "github_issue_url": issue_url,
+            "deduped": False, "notify_user": settings["notify_user"]}
+
+
+@api_router.post("/errors/report")
+async def report_error_desktop(payload: dict = Body(...)):
+    result = await _persist_error_report_desktop(payload)
+    return {"success": True, **result}
+
+
+@api_router.get("/errors")
+async def list_errors_desktop(limit: int = 50, include_resolved: bool = False):
+    q = {} if include_resolved else {"resolved": {"$ne": True}}
+    docs = await db.error_reports.find(q, sort=[("last_seen", -1)]).to_list(min(max(limit, 1), 200))
+    items = [doc_to_dict(d) for d in docs]
+    all_open = await db.error_reports.find({"resolved": {"$ne": True}}).to_list(1000)
+    return {"items": items, "open_count": len(all_open)}
+
+
+@api_router.get("/errors/settings")
+async def get_error_settings_desktop():
+    return await _get_error_settings_desktop()
+
+
+@api_router.put("/errors/settings")
+async def update_error_settings_desktop(payload: dict = Body(...)):
+    update = {}
+    if "auto_report_github" in payload:
+        update["error_reporting.auto_report_github"] = bool(payload["auto_report_github"])
+    if "notify_user" in payload:
+        update["error_reporting.notify_user"] = bool(payload["notify_user"])
+    if update:
+        await db.app_settings.update_one({}, {"$set": update}, upsert=True)
+    return await _get_error_settings_desktop()
+
+
+@api_router.post("/errors/{error_id}/resolve")
+async def resolve_error_desktop(error_id: str):
+    try:
+        oid = ObjectId(error_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    r = await db.error_reports.update_one({"_id": oid}, {"$set": {"resolved": True, "resolved_at": datetime.now(timezone.utc).isoformat()}})
+    if getattr(r, "matched_count", 1) == 0:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
+    return {"success": True}
+
+
+@api_router.delete("/errors/{error_id}")
+async def delete_error_desktop(error_id: str):
+    try:
+        oid = ObjectId(error_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    await db.error_reports.delete_one({"_id": oid})
+    return {"success": True}
+
+
+@api_router.post("/errors/clear-resolved")
+async def clear_resolved_errors_desktop():
+    r = await db.error_reports.delete_many({"resolved": True})
+    return {"success": True, "deleted": getattr(r, "deleted_count", 0)}
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler_desktop(request, exc):
+    import traceback as _tb
+    from starlette.requests import Request as _Req  # noqa
+    stack = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+    ref, issue = None, None
+    try:
+        result = await _persist_error_report_desktop({
+            "source": "backend", "message": f"{type(exc).__name__}: {exc}",
+            "stack": stack, "level": "error",
+            "context": {"path": str(getattr(request, 'url', '')), "method": getattr(request, 'method', '')},
+        })
+        ref = result.get("fingerprint")
+        issue = result.get("github_issue_url")
+    except Exception:
+        pass
+    return JSONResponse(status_code=500, content={
+        "error": True,
+        "detail": f"Ocurrió un error en el servidor: {type(exc).__name__}",
+        "message": str(exc)[:500], "reference": ref,
+        "github_issue_url": issue, "reported": bool(ref),
+    })
+
+
+# ─── App config ───────────────────────────────────────────
 # ─── App config ───────────────────────────────────────────
 
 app.include_router(api_router)

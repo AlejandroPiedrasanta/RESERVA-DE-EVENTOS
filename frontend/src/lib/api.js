@@ -6,6 +6,47 @@ const BASE = `${window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL}/ap
 // caído en la app de escritorio) el frontend no se quede colgado en spinners.
 export const api = axios.create({ baseURL: BASE, timeout: 30000 });
 
+// Interceptor de respuestas: reporta automáticamente los fallos de backend
+// (errores 5xx y errores de red) para que no pasen desapercibidos. Se evita
+// reportar el propio endpoint de reporte para no entrar en bucle.
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    try {
+      const cfg = error?.config || {};
+      const url = cfg.url || "";
+      const status = error?.response?.status;
+      const isReportCall = url.includes("/errors/report");
+      const isServerOrNetwork = !error?.response || (status >= 500);
+      if (!isReportCall && isServerOrNetwork) {
+        const backendIssue = error?.response?.data?.github_issue_url;
+        const { reportError } = await import("@/lib/errorReporter");
+        // Si el backend ya reportó (500 con reference), solo notificamos.
+        if (error?.response?.data?.reported) {
+          try {
+            window.dispatchEvent(new CustomEvent("cp:error-reported", {
+              detail: {
+                fingerprint: error.response.data.reference,
+                github_issue_url: backendIssue,
+                message: error.response.data.message || "Error del servidor",
+                source: "backend",
+              },
+            }));
+          } catch { /* ignore */ }
+        } else {
+          reportError({
+            source: "frontend",
+            message: `Fallo de API ${cfg.method?.toUpperCase() || ""} ${url}: ${error?.message || status || "sin respuesta"}`,
+            stack: error?.stack || "",
+            context: { url, method: cfg.method, status: status || "network_error" },
+          });
+        }
+      }
+    } catch { /* nunca romper el flujo por el reporte */ }
+    return Promise.reject(error);
+  }
+);
+
 export const getStats = () => api.get("/stats").then(r => r.data);
 export const getReservations = () => api.get("/reservations").then(r => r.data);
 export const getReservation = (id) => api.get(`/reservations/${id}`).then(r => r.data);
@@ -260,4 +301,16 @@ export const adminTestPaypalConfig   = (pwd)          => api.post("/admin/paypal
 export const adminGetGoogleLoginConfig    = (pwd)          => api.get("/admin/google-login/config", adminHeaders(pwd)).then(r => r.data);
 export const adminUpdateGoogleLoginConfig = (pwd, payload) => api.patch("/admin/google-login/config", payload, adminHeaders(pwd)).then(r => r.data);
 export const getGoogleAuthConfig          = ()             => api.get("/auth/google-config").then(r => r.data);
+
+// ─── Error Reporting / Incidencias ──────────────────────────────────────
+export const reportErrorToServer = (payload) => api.post("/errors/report", payload).then(r => r.data);
+export const listErrors = (includeResolved = false) =>
+  api.get("/errors", { params: { include_resolved: includeResolved } }).then(r => r.data);
+export const resolveError = (id) => api.post(`/errors/${id}/resolve`).then(r => r.data);
+export const deleteError = (id) => api.delete(`/errors/${id}`).then(r => r.data);
+export const clearResolvedErrors = () => api.post("/errors/clear-resolved").then(r => r.data);
+export const getErrorSettings = () => api.get("/errors/settings").then(r => r.data);
+export const updateErrorSettings = (data) => api.put("/errors/settings", data).then(r => r.data);
+export const getUpdateLastResult = (clear = false) =>
+  api.get("/updates/last-result", { params: { clear } }).then(r => r.data);
 
