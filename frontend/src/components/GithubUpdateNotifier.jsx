@@ -48,6 +48,8 @@ export default function GithubUpdateNotifier() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [progress, setProgress] = useState(null);
+  const [waitingLong, setWaitingLong] = useState(false);
+  const waitingTimerRef = useRef(null);
   const progressTimerRef = useRef(null);
   const intervalRef = useRef(null);
 
@@ -147,6 +149,12 @@ export default function GithubUpdateNotifier() {
   const handleApply = async () => {
     if (applying) return;
     setApplying(true);
+    setWaitingLong(false);
+    // Si a los 25s el backend nuevo aún no responde, mostramos un fallback
+    // manual (abrir acceso directo) para no dejar al usuario colgado en
+    // "Recargando aplicación…" cuando el swap del .exe no relanza solo.
+    if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+    waitingTimerRef.current = setTimeout(() => setWaitingLong(true), 25000);
     let restarting = false;
     try {
       const res = await applyGithubUpdate(true);
@@ -254,7 +262,14 @@ export default function GithubUpdateNotifier() {
     } finally {
       // Si NO estamos reiniciando, siempre liberar el estado. Si estamos
       // reiniciando, la app se recargará y el estado se resetea al montar.
-      if (!restarting) setApplying(false);
+      if (waitingTimerRef.current && !restarting) {
+        clearTimeout(waitingTimerRef.current);
+        waitingTimerRef.current = null;
+      }
+      if (!restarting) {
+        setApplying(false);
+        setWaitingLong(false);
+      }
     }
   };
 
@@ -477,11 +492,30 @@ export default function GithubUpdateNotifier() {
                         </p>
                       </>
                     ) : (
-                      <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold mx-auto py-1 justify-center">
-                        <CheckCircle2 size={16} />
-                        {progress?.stage === "installing"
-                          ? "Instalando la nueva versión…"
-                          : "Recargando aplicación…"}
+                      <div className="flex flex-col items-center gap-2 py-1 w-full">
+                        <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold justify-center">
+                          <CheckCircle2 size={16} />
+                          {progress?.stage === "installing"
+                            ? "Instalando la nueva versión…"
+                            : "Recargando aplicación…"}
+                        </div>
+                        {waitingLong && (
+                          <div className="w-full mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-800 space-y-2">
+                            <p className="font-semibold flex items-center gap-1.5">
+                              <AlertTriangle size={12} /> ¿Tarda demasiado?
+                            </p>
+                            <p className="leading-snug">
+                              Si la app no vuelve sola, cierra esta ventana y abre <b>Cinema Productions</b> desde el acceso directo del escritorio.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => window.location.replace("/?_v=" + Date.now())}
+                              className="w-full px-3 py-2 rounded-lg text-[11px] font-bold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
+                            >
+                              Reintentar recarga ahora
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -2468,8 +2468,35 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             ":moveok\r\n"
             f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) >> "!LOG!"\r\n'
             f'del "{bak}" >nul 2>&1\r\n'
-            f'echo [!TIME!] Relanzando app >> "!LOG!"\r\n'
-            f'start "" "{old}"\r\n'
+            # ── Relanzamiento robusto multi-estrategia ──────────────────
+            # BUG HISTÓRICO: `start "" "{old}"` desde un cmd DETACHED_PROCESS
+            # sin ventana a veces no relanzaba el .exe en Windows (proceso
+            # heredaba pipes cerrados o quedaba en zombie). Los usuarios veían
+            # "app se cerró y no volvió a abrir". Ahora intentamos 3 métodos
+            # en cascada y logueamos cada intento.
+            f'echo [!TIME!] Relanzando app (metodo 1: powershell Start-Process) >> "!LOG!"\r\n'
+            f'powershell -NoProfile -WindowStyle Hidden -Command '
+            f'"Start-Process -FilePath \'{old}\' -WorkingDirectory \'{install_dir}\'" '
+            f'>> "!LOG!" 2>&1\r\n'
+            f'ping -n 3 127.0.0.1 >nul\r\n'
+            # Verificar si el proceso arrancó consultando por nombre.
+            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'if !ERRORLEVEL! EQU 0 (\r\n'
+            f'  echo [!TIME!] Relanzamiento OK (powershell) >> "!LOG!"\r\n'
+            f'  goto :launched\r\n'
+            f')\r\n'
+            f'echo [!TIME!] Metodo 1 fallo. Intentando metodo 2 (start) >> "!LOG!"\r\n'
+            f'start "" /D "{install_dir}" "{old}"\r\n'
+            f'ping -n 3 127.0.0.1 >nul\r\n'
+            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'if !ERRORLEVEL! EQU 0 (\r\n'
+            f'  echo [!TIME!] Relanzamiento OK (start) >> "!LOG!"\r\n'
+            f'  goto :launched\r\n'
+            f')\r\n'
+            f'echo [!TIME!] Metodo 2 fallo. Intentando metodo 3 (explorer) >> "!LOG!"\r\n'
+            f'explorer "{old}"\r\n'
+            f'ping -n 3 127.0.0.1 >nul\r\n'
+            f':launched\r\n'
             f'echo [!TIME!] === update completo === >> "!LOG!"\r\n'
             # Auto-borrar el .bat (deja el .log para debug)
             '(goto) 2>nul & del "%~f0"\r\n'
