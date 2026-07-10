@@ -4606,9 +4606,47 @@ if __name__ == "__main__":
 
     db_label = "Embebida (cinema_data.json)" if _using_embedded else MONGO_URL[:40]
 
+    def _wait_port(host="127.0.0.1", port=8001, timeout=45.0):
+        """Espera hasta que el servidor acepte conexiones TCP."""
+        import socket as _socket
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with _socket.create_connection((host, port), timeout=1.0):
+                    return True
+            except OSError:
+                time.sleep(0.4)
+        return False
+
     def _open_browser():
-        time.sleep(3)
-        webbrowser.open("http://localhost:8001")
+        # BUGFIX «instala pero no abre»: la app de escritorio NO tiene ventana
+        # propia — su unica UI es una pestana del navegador. Antes se hacia
+        # time.sleep(3) fijo y luego webbrowser.open(); pero en arranque en frio
+        # de --onefile (extraccion de _MEIxxx) + verificacion de MongoDB Atlas
+        # (hasta 9s bloqueando el startup de uvicorn) el servidor rara vez esta
+        # listo a los 3s: el navegador abria en «no se puede conectar» y no
+        # reintentaba, dando la sensacion de que la app «no abre». Ahora
+        # sondeamos el puerto igual que launcher.pyw y solo abrimos cuando el
+        # servidor responde de verdad.
+        if _wait_port():
+            try:
+                webbrowser.open("http://localhost:8001")
+            except Exception:
+                pass
+        else:
+            try:
+                (ROOT_DIR / "error_log.txt").write_text(
+                    "Cinema Productions: el servidor local no respondio en el "
+                    "puerto 8001 dentro del tiempo esperado.\n\n"
+                    "Posibles causas:\n"
+                    "  - El puerto 8001 esta ocupado por otra aplicacion.\n"
+                    "  - Un antivirus bloqueo la extraccion del ejecutable.\n\n"
+                    "Abre manualmente http://localhost:8001 en tu navegador o "
+                    "revisa el archivo de log del servidor.",
+                    encoding="utf-8", errors="ignore",
+                )
+            except Exception:
+                pass
 
     # El launcher grafico abre el navegador con mejor timing; si nos lanza,
     # define CP_NO_BROWSER=1 para no abrir dos pestanas.

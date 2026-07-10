@@ -166,6 +166,8 @@ export default function DatabasePage() {
   // Unified "Datos y Respaldos" internal tabs: "conn" | "presets" | "backup"
   const [unifiedTab, setUnifiedTab] = useState("conn");
   const [clearLoading, setClearLoading] = useState(false);
+  // Divulgación progresiva: ocultar las opciones avanzadas de conexión por defecto
+  const [showAdvancedConn, setShowAdvancedConn] = useState(false);
 
   // Unified "Soporte avanzado" internal tabs: "publish" | "desktop" | "storage" | "tools" | "users"
   const [supportTab, setSupportTab] = useState("publish");
@@ -1395,7 +1397,7 @@ export default function DatabasePage() {
                 </div>
                 <div>
                   <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Datos y Respaldos</p>
-                  <p className="text-[11px] text-slate-400">Conexión activa · Bases guardadas · Respaldo automático al PC</p>
+                  <p className="text-[11px] text-slate-400">Dónde se guardan tus datos y cómo hacer copias de seguridad</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1424,9 +1426,9 @@ export default function DatabasePage() {
               {/* ── Sub-tabs unificados ── */}
               <div className="flex gap-1 p-1 rounded-2xl bg-slate-100/70">
                 {[
-                  { key: "conn",    icon: Database, label: "Conexión" },
-                  { key: "presets", icon: Bookmark, label: "Bases guardadas" },
-                  { key: "backup",  icon: Zap,      label: "Respaldo PC" },
+                  { key: "conn",    icon: Database, label: "Mis datos" },
+                  { key: "presets", icon: Bookmark, label: "Conexiones" },
+                  { key: "backup",  icon: Zap,      label: "Copias de seguridad" },
                 ].map(({ key, icon: Icon, label }) => (
                   <button key={key} onClick={() => setUnifiedTab(key)}
                     data-testid={`unified-tab-${key}`}
@@ -1443,6 +1445,14 @@ export default function DatabasePage() {
               </div>
 
               {unifiedTab === "conn" && (<>
+
+              {/* Explicación sencilla */}
+              <div className="flex items-start gap-2.5 bg-indigo-50/70 rounded-2xl px-4 py-3 border border-indigo-100">
+                <Info size={14} className="text-indigo-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Aquí ves un resumen de tu base de datos y dónde está guardada. Puedes subir tus datos a la nube o cambiar la conexión más abajo.
+                </p>
+              </div>
 
               {/* ── Stats ── */}
               {dbLoading ? (
@@ -1715,6 +1725,13 @@ export default function DatabasePage() {
               </>)}
 
               {unifiedTab === "presets" && (<>
+              {/* Explicación sencilla */}
+              <div className="flex items-start gap-2.5 bg-amber-50/70 rounded-2xl px-4 py-3 border border-amber-100 mb-3">
+                <Info size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Guarda tus bases de datos favoritas para conectarte a ellas con un solo clic, sin escribir la dirección cada vez.
+                </p>
+              </div>
               {/* ── Conexiones guardadas ── */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -1842,6 +1859,13 @@ export default function DatabasePage() {
 
               {unifiedTab === "backup" && (
                 <div className="space-y-4" data-testid="unified-backup-panel">
+                  {/* Explicación sencilla */}
+                  <div className="flex items-start gap-2.5 bg-emerald-50/70 rounded-2xl px-4 py-3 border border-emerald-100">
+                    <Info size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      Una copia de seguridad guarda todos tus datos en un archivo. Actívala para que se guarde sola cada cierto tiempo, o crea una copia ahora mismo.
+                    </p>
+                  </div>
                   {/* Toggle principal */}
                   <div className={`flex items-center justify-between rounded-2xl border-2 transition-all px-4 py-3 ${autoBackup.config.enabled ? "border-emerald-300 bg-emerald-50/60" : "border-slate-200 bg-white/50"}`}>
                     <div className="flex items-center gap-3">

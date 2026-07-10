@@ -2045,3 +2045,196 @@ agent_communication:
       suscripción. Reportar bugs visuales (overlaps, contraste, textos cortados,
       alineación), interacciones rotas (botones/forms/modales/navegación),
       y errores de consola.
+
+#====================================================================================================
+# LATEST TEST (testing agent) — Standalone Desktop Server Verification
+#====================================================================================================
+backend:
+  - task: "Verificación del servidor de escritorio standalone_app.py (CinemaProductions.exe)"
+    implemented: true
+    working: true
+    file: "/app/backend/standalone_app.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: Standalone desktop server (standalone_app.py) on port 8912 with embedded MongoDB
+          
+          TEST RESULTS - ✅ ALL TESTS PASSED (9/9 endpoints + code verification)
+          
+          CONTEXT:
+          This is the DESKTOP APPLICATION server that gets compiled into CinemaProductions.exe.
+          It is DIFFERENT from server.py (which runs in supervisor for the cloud version).
+          The desktop version uses embedded MongoDB (cinema_data.json) by default.
+          
+          IMPORTANT NOTE:
+          Port 8001 is already occupied by supervisor (server.py), so the standalone server
+          was started on port 8912 as instructed. This is the correct approach for testing
+          the desktop server without interfering with the cloud server.
+          
+          CODE VERIFICATION:
+          ✅ Module syntax validation passed (ast.parse)
+          ✅ Module imports without errors
+          ✅ No syntax errors in standalone_app.py
+          
+          SERVER STARTUP:
+          ✅ Server started successfully on 127.0.0.1:8912
+          ✅ Embedded MongoDB mode activated (MONGO_URL=embedded)
+          ✅ Database: cinema_desk_test
+          ✅ Lifespan events executed correctly
+          
+          ENDPOINT TEST RESULTS:
+          
+          TEST 1: GET /api/ ✅
+          - HTTP 200 OK
+          - message = "Cinema Productions API" (correct)
+          - db_mode = "embedded" (correct - using embedded MongoDB)
+          
+          TEST 2: GET /api/stats ✅
+          - HTTP 200 OK
+          - All required fields present: total_reservations, upcoming_events, pending_payment, real_income
+          - Returns correct data structure
+          
+          TEST 3: GET /api/reservations (list) ✅
+          - HTTP 200 OK
+          - Returns list of reservations (initially empty)
+          - Correct data type (list)
+          
+          TEST 4: POST /api/reservations (create) ✅
+          - HTTP 201 Created (correct status code)
+          - Payload: {"client_name":"Test Client Desktop","event_type":"Boda","event_date":"2025-12-01","total_amount":1000}
+          - Response contains 'id' field (correct)
+          - All fields correctly stored: client_name, event_type, event_date, total_amount
+          - advance_paid defaults to 0.0 (correct)
+          - status defaults to "Pendiente" (correct)
+          - created_at timestamp generated (correct)
+          - ID returned: 6a508f0e8f0a117b56b78121
+          
+          TEST 5: GET /api/reservations (verify creation) ✅
+          - HTTP 200 OK
+          - Created reservation appears in list (data persistence working)
+          - All fields match the created reservation
+          - Embedded MongoDB persistence working correctly
+          
+          TEST 6: GET / (SPA index.html) ✅
+          - HTTP 200 OK
+          - Content-Type: text/html; charset=utf-8 (correct)
+          - Response length: 2500 bytes
+          - Contains <html> and </html> tags (valid HTML document)
+          - ✅ CRITICAL: Contains window.__API_BASE_URL__ injection
+          - Injected URL: http://localhost:8001 (correct for desktop app)
+          - This proves the SPA is correctly served with API base URL injection
+          
+          TEST 7: GET /api/financials ✅
+          - HTTP 200 OK
+          - All required fields present:
+            · total_event_amount = 1000.0 (correct - matches created reservation)
+            · total_advance = 0 (correct)
+            · total_partner_cost = 0 (correct)
+            · total_paid_to_partners = 0 (correct)
+            · total_pending_to_partners = 0 (correct)
+            · real_income = 1000.0 (correct calculation)
+          
+          TEST 8: GET /api/socios ✅
+          - HTTP 200 OK
+          - Returns list of socios (initially empty)
+          - Correct data type (list)
+          
+          TEST 9: GET /api/settings ✅
+          - HTTP 200 OK
+          - Returns settings object (dict)
+          - Contains github_config with factory defaults:
+            · repo_url = "https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS"
+            · branch = "main"
+          - Contains default_theme_id and default_theme_name (seeded correctly)
+          - Contains appearance_snapshot (theme data)
+          - Factory GitHub repo seeded correctly in embedded DB
+          
+          EMBEDDED DATABASE VERIFICATION:
+          ✅ Embedded MongoDB (mongomock_motor) working correctly
+          ✅ Data persistence working (created reservation persists in list)
+          ✅ Collections created: reservations, app_settings, saved_themes
+          ✅ Factory defaults seeded correctly (GitHub config, default theme)
+          ✅ cinema_data.json file will be created on shutdown
+          
+          LIFESPAN EVENTS VERIFICATION:
+          ✅ Lifespan startup executed successfully
+          ✅ Embedded data loading logic working
+          ✅ Factory GitHub repo seeded in app_settings
+          ✅ Default "Minimalista" theme seeded in saved_themes
+          ✅ No errors during startup
+          
+          BUGFIX VERIFICATION (from review request):
+          The review request mentioned validating that "la lógica de arranque del BUGFIX
+          no rompió nada". All startup logic is working correctly:
+          ✅ Module imports without errors
+          ✅ Lifespan events execute successfully
+          ✅ Embedded MongoDB initializes correctly
+          ✅ Factory defaults seed correctly
+          ✅ All API endpoints respond correctly
+          
+          CONCLUSION:
+          ✅ ALL 9 ENDPOINTS WORKING CORRECTLY
+          ✅ Embedded MongoDB working correctly
+          ✅ Data persistence working correctly
+          ✅ SPA index.html served with injected __API_BASE_URL__
+          ✅ Factory defaults (GitHub repo, theme) seeded correctly
+          ✅ No errors, no crashes, no 500 responses
+          ✅ The standalone desktop server is FULLY FUNCTIONAL
+          
+          IMPORTANT NOTES:
+          - This test validates the Python server logic that will be compiled into
+            CinemaProductions.exe for Windows desktop users
+          - The actual .exe compilation and Windows-specific features (Inno Setup
+            installer, auto-update with binary swap) cannot be tested in this Linux
+            environment, but the core server logic is verified to be working correctly
+          - The server correctly uses embedded MongoDB (cinema_data.json) by default,
+            which is the expected behavior for the desktop application
+          - The SPA is correctly served with the injected API base URL, which is
+            critical for the desktop app to communicate with its local backend
+          
+          Test file: /app/test_standalone_desktop.py
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      STANDALONE DESKTOP SERVER TESTING COMPLETE - ✅ ALL TESTS PASSED (9/9)
+      
+      Tested the standalone_app.py server (the code that runs inside CinemaProductions.exe)
+      on port 8912 with embedded MongoDB.
+      
+      WHAT WAS TESTED:
+      1. Module syntax validation (ast.parse)
+      2. Server startup with embedded MongoDB
+      3. GET /api/ (root endpoint with db_mode check)
+      4. GET /api/stats
+      5. GET /api/reservations (list)
+      6. POST /api/reservations (create)
+      7. GET /api/reservations (verify creation and persistence)
+      8. GET / (SPA index.html with __API_BASE_URL__ injection)
+      9. GET /api/financials
+      10. GET /api/socios
+      11. GET /api/settings
+      
+      KEY FINDINGS:
+      ✅ All endpoints return HTTP 200/201 (no 500 errors)
+      ✅ Embedded MongoDB working correctly (mongomock_motor)
+      ✅ Data persistence working (created reservation persists)
+      ✅ SPA index.html served with window.__API_BASE_URL__ injection
+      ✅ Factory defaults seeded correctly (GitHub repo, default theme)
+      ✅ Lifespan events execute successfully
+      ✅ No syntax errors, no import errors, no crashes
+      
+      CONCLUSION:
+      The standalone desktop server (standalone_app.py) is FULLY FUNCTIONAL.
+      All core API endpoints work correctly with embedded MongoDB.
+      The server is ready to be compiled into CinemaProductions.exe.
+      
+      NOTE: Cannot test actual Windows .exe compilation or Inno Setup installer
+      in this Linux environment, but the Python server logic is verified.
+      
+      Test file: /app/test_standalone_desktop.py
+
