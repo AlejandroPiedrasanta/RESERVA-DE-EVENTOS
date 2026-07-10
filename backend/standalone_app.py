@@ -4446,7 +4446,7 @@ app.add_middleware(
 
 # ─── Serve React build (SPA) ─────────────────────────────
 
-_LOCAL_INJECT = '<script>window.__API_BASE_URL__="http://localhost:8001";</script>'
+_LOCAL_INJECT = '<script>window.__API_BASE_URL__=window.location.origin;</script>'
 
 # Scripts externos que hay que eliminar para evitar pantalla en blanco offline
 _EXTERNAL_SCRIPTS_TO_REMOVE = [
@@ -4606,6 +4606,33 @@ if __name__ == "__main__":
 
     db_label = "Embebida (cinema_data.json)" if _using_embedded else MONGO_URL[:40]
 
+    # ── SSL autofirmado auto-generado (primer arranque) ──────────────
+    # Genera un cert RSA-2048 self-signed con SAN=[localhost, 127.0.0.1]
+    # y lo cachea en %LOCALAPPDATA%\CinemaProductions\ssl (10 años).
+    # Reutilizado en siguientes arranques (idempotente).
+    _ssl_cert_file = None
+    _ssl_key_file = None
+    _ssl_disabled = os.environ.get("CP_DISABLE_SSL", "").strip() in ("1", "true", "yes")
+    if not _ssl_disabled:
+        try:
+            from ssl_bootstrap import ensure_local_certificate  # type: ignore
+        except ImportError:
+            try:
+                from backend.ssl_bootstrap import ensure_local_certificate  # type: ignore
+            except ImportError:
+                ensure_local_certificate = None  # noqa: N816
+        if ensure_local_certificate is not None:
+            try:
+                _cf, _kf = ensure_local_certificate()
+                _ssl_cert_file, _ssl_key_file = str(_cf), str(_kf)
+                print(f"  SSL:  {_cf}")
+            except Exception as _e:
+                print(f"  SSL:  DESHABILITADO ({_e}) — usando HTTP")
+                _ssl_cert_file = _ssl_key_file = None
+
+    _scheme = "https" if _ssl_cert_file else "http"
+    _base_url = f"{_scheme}://localhost:8001"
+
     def _wait_port(host="127.0.0.1", port=8001, timeout=45.0):
         """Espera hasta que el servidor acepte conexiones TCP."""
         import socket as _socket
@@ -4630,7 +4657,7 @@ if __name__ == "__main__":
         # servidor responde de verdad.
         if _wait_port():
             try:
-                webbrowser.open("http://localhost:8001")
+                webbrowser.open(_base_url)
             except Exception:
                 pass
         else:
@@ -4656,7 +4683,7 @@ if __name__ == "__main__":
     print("\n" + "=" * 54)
     print("  CINEMA PRODUCTIONS — Gestor de Reservas")
     print("=" * 54)
-    print(f"  URL:  http://localhost:8001")
+    print(f"  URL:  {_base_url}")
     print(f"  BD:   {db_label}")
     print(f"  Datos: {DATA_FILE.name if _using_embedded else 'MongoDB'}")
     print("  Para cerrar: Ctrl+C  o  cierra esta ventana")
@@ -4698,7 +4725,11 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=8001, log_level="warning", access_log=False)
+    _uv_kwargs = dict(host="0.0.0.0", port=8001, log_level="warning", access_log=False)
+    if _ssl_cert_file and _ssl_key_file:
+        _uv_kwargs["ssl_certfile"] = _ssl_cert_file
+        _uv_kwargs["ssl_keyfile"] = _ssl_key_file
+    config = uvicorn.Config(app, **_uv_kwargs)
     server = uvicorn.Server(config)
     try:
         server.run()
