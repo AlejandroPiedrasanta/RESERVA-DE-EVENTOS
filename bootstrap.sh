@@ -107,4 +107,26 @@ wait $PID_FE
 # ── 6) Save hash post-install ────────────────────────────────────
 sha256sum frontend/package.json | cut -c1-16 > frontend/.pkg_hash
 
+# ── 7) Auto-regenerate tarball artifact in BACKGROUND (only if yarn ran) ─
+# Después de un yarn install exitoso, regeneramos frontend/node_modules.tar.gz
+# y frontend/node_modules.tar.gz.sha16 para que la próxima corrida entre
+# por fast-path (~10s). El usuario solo tiene que commit+push de esos 2 archivos.
+# Corre en background para no bloquear el "Ready".
+if [ "$NEED_INSTALL" = "1" ] && [ -d frontend/node_modules ]; then
+  (
+    cd frontend || exit 0
+    NEW_HASH=$(sha256sum package.json | cut -c1-16)
+    # tar excluye .cache para bajar tamaño; usa gzip -1 para velocidad
+    if tar --exclude='node_modules/.cache' -cf - node_modules/ 2>/dev/null | gzip -1 > node_modules.tar.gz.new 2>/dev/null; then
+      mv node_modules.tar.gz.new node_modules.tar.gz
+      echo "$NEW_HASH" > node_modules.tar.gz.sha16
+      echo "♻ [bg] Regenerated node_modules.tar.gz + .sha16 (hash=$NEW_HASH, size=$(du -h node_modules.tar.gz | cut -f1)) — commit ambos para fast-path en la próxima corrida" >&2
+    else
+      rm -f node_modules.tar.gz.new
+      echo "⚠ [bg] Falló regeneración del tarball (no crítico)" >&2
+    fi
+  ) &
+  disown
+fi
+
 echo "==> ✅ Ready in $(($(date +%s)-t0))s · Backend :8001 · Frontend :3000 · Preview: ${BACKEND_URL}"
