@@ -1,7 +1,7 @@
 {
   "app": "Cinema Productions — Reserva de Eventos",
   "kind": "saved_themes_backup",
-  "generated_at": "2026-07-11T01:52:44.788272+00:00",
+  "generated_at": "2026-07-11T01:52:57.449735+00:00",
   "count": 1,
   "themes": [
     {
@@ -17,7 +17,7 @@
         "nav_config": "[{\"path\":\"/dashboard\",\"custom\":\"\"},{\"path\":\"/reservaciones\",\"custom\":\"\"},{\"path\":\"/calendario\",\"custom\":\"\"},{\"path\":\"/socios\",\"custom\":\"\"},{\"path\":\"/apariencia\",\"custom\":\"\"},{\"path\":\"/base-de-datos\",\"custom\":\"\"},{\"path\":\"/ajustes\",\"custom\":\"\"},{\"path\":\"/actualizaciones\",\"custom\":\"\"}]"
       },
       "created_at": "2026-07-04T04:09:45.325988+00:00",
-      "updated_at": "2026-07-04T20:47:11.800433+00:00",
+      "updated_at": "2026-07-11T01:52:54.026237+00:00",
       "is_default": true
     }
   ]
