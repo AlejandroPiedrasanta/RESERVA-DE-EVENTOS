@@ -26,18 +26,19 @@ fi
 
 # ── 4) FAST-PATH attempt: prebuilt node_modules tarball ─────────
 # Priority: (a) tarball committed in repo (frontend/node_modules.tar.gz)
-#           (b) GitHub Releases tarball (deps-latest tag)
+#           (b) GitHub Releases tarball (deps-latest tag) — auto-regen by CI
 # Either avoids yarn install (~180s) -> extract only (~10s).
 # The restored node_modules is VALIDATED before being trusted:
-#   - package.json hash must match frontend/node_modules.tar.gz.sha16 (if present)
+#   - package.json hash must match frontend/node_modules.tar.gz.sha16
 #   - the Vite build tool binary must exist (node_modules/.bin/vite)
-# If validation fails (stale/incompatible tarball), we discard it and yarn install.
+# If validation fails, we FALL THROUGH to next source (committed -> releases -> yarn).
 TARBALL_URL="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/deps-latest/node_modules.tar.gz"
+SHA16_URL="https://github.com/AlejandroPiedrasanta/RESERVA-DE-EVENTOS/releases/download/deps-latest/node_modules.tar.gz.sha16"
 
 validate_node_modules() {
   # 1) build tool present?
   [ -x frontend/node_modules/.bin/vite ] || { echo "✗ tarball has no vite binary"; return 1; }
-  # 2) hash matches package.json (only if a committed hash is available)
+  # 2) hash matches package.json (only if a hash file is available)
   if [ -f frontend/node_modules.tar.gz.sha16 ]; then
     local expected cur
     expected=$(cat frontend/node_modules.tar.gz.sha16 2>/dev/null)
@@ -47,26 +48,48 @@ validate_node_modules() {
   return 0
 }
 
-if [ "$NEED_INSTALL" = "1" ]; then
-  echo "⚡ Trying fast-path (node_modules tarball)..."
+try_committed_tarball() {
+  [ -f frontend/node_modules.tar.gz ] || return 1
+  echo "⚡ Trying committed tarball: frontend/node_modules.tar.gz"
   rm -rf frontend/node_modules
-  if [ -f frontend/node_modules.tar.gz ]; then
-    echo "⚡ Using committed tarball: frontend/node_modules.tar.gz"
-    tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null || true
-  elif curl -fsSL --max-time 90 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null; then
-    echo "⚡ Using Releases tarball"
-    tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null || true
-    rm -f /tmp/nm.tgz
-  else
-    echo "ℹ Tarball not available — falling back to yarn install"
-  fi
+  tar -xzf frontend/node_modules.tar.gz -C frontend/ 2>/dev/null || return 1
+  validate_node_modules || { rm -rf frontend/node_modules; return 1; }
+  return 0
+}
 
-  if [ -d frontend/node_modules ] && validate_node_modules; then
+try_releases_tarball() {
+  echo "⚡ Trying Releases tarball (deps-latest)..."
+  # Fetch the sha16 first (small, fast) so we can validate BEFORE 60MB download
+  local remote_sha
+  remote_sha=$(curl -fsSL --max-time 15 "$SHA16_URL" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$remote_sha" ]; then
+    local cur
+    cur=$(sha256sum frontend/package.json | cut -c1-16)
+    if [ "$remote_sha" != "$cur" ]; then
+      echo "✗ Releases tarball stale (package.json: $cur vs release: $remote_sha) — CI hasn't caught up yet"
+      return 1
+    fi
+    # Pre-write sha16 so validate_node_modules can check post-extract
+    echo "$remote_sha" > frontend/node_modules.tar.gz.sha16
+  fi
+  curl -fsSL --max-time 120 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null || { echo "✗ Releases download failed"; return 1; }
+  rm -rf frontend/node_modules
+  tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null
+  rm -f /tmp/nm.tgz
+  validate_node_modules || { rm -rf frontend/node_modules; return 1; }
+  return 0
+}
+
+if [ "$NEED_INSTALL" = "1" ]; then
+  echo "⚡ Fast-path attempt (committed -> releases -> yarn)..."
+  if try_committed_tarball; then
     NEED_INSTALL=0
-    echo "⚡ node_modules restored & validated ($(du -sh frontend/node_modules | cut -f1))"
+    echo "⚡ node_modules restored from committed tarball ($(du -sh frontend/node_modules | cut -f1))"
+  elif try_releases_tarball; then
+    NEED_INSTALL=0
+    echo "⚡ node_modules restored from Releases tarball ($(du -sh frontend/node_modules | cut -f1))"
   else
-    echo "ℹ Discarding invalid/absent tarball — will run yarn install"
-    rm -rf frontend/node_modules
+    echo "ℹ No valid tarball — will run yarn install (CI will refresh tarballs on next push)"
     NEED_INSTALL=1
   fi
 fi

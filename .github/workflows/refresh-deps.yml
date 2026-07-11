@@ -72,7 +72,9 @@ jobs:
           # zstd (rapido: descarga + descompresion) — nivel 19 multihilo
           tar --use-compress-program="zstd -19 -T0" -cf artifacts/node_modules.tar.zst -C frontend node_modules
           sha256sum frontend/yarn.lock | awk '{print $1}' > artifacts/node_modules.sha256
-          echo "→ gzip: $(du -sh artifacts/node_modules.tar.gz | cut -f1) | zstd: $(du -sh artifacts/node_modules.tar.zst | cut -f1)"
+          # sha16 de package.json — usado por bootstrap.sh para validar tarball ANTES de descargar
+          sha256sum frontend/package.json | cut -c1-16 > artifacts/node_modules.tar.gz.sha16
+          echo "→ gzip: $(du -sh artifacts/node_modules.tar.gz | cut -f1) | zstd: $(du -sh artifacts/node_modules.tar.zst | cut -f1) | sha16: $(cat artifacts/node_modules.tar.gz.sha16)"
 
       - name: Download pip wheels (resiliente)
         run: |
@@ -97,6 +99,7 @@ jobs:
             --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Podado + zstd/gzip. Target env: linux/aarch64, node 20, python 3.11." \
             artifacts/node_modules.tar.zst \
             artifacts/node_modules.tar.gz \
+            artifacts/node_modules.tar.gz.sha16 \
             artifacts/node_modules.sha256 \
             artifacts/pip-wheels.tar.gz \
             artifacts/pip-wheels.sha256
