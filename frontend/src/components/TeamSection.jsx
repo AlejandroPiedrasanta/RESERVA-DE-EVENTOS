@@ -185,6 +185,7 @@ export default function TeamSection({ reservation, onUpdated }) {
   const { toast } = useToast();
   const { formatCurrency } = useSettings();
   const [socios, setSocios] = useState([]);
+  const [socioMap, setSocioMap] = useState({});
   const [selectedSocio, setSelectedSocio] = useState("");
   const [payment, setPayment] = useState("");
   const [adding, setAdding] = useState(false);
@@ -194,6 +195,7 @@ export default function TeamSection({ reservation, onUpdated }) {
     getSocios().then(data => {
       const assignedIds = partners.map(p => p.socio_id);
       setSocios(data.filter(s => !assignedIds.includes(s.id)));
+      setSocioMap(Object.fromEntries((data || []).map(s => [s.id, s])));
     }).catch(console.error);
   }, [reservation]);
 
@@ -356,7 +358,11 @@ export default function TeamSection({ reservation, onUpdated }) {
         {partners.length > 0 ? (
           <div className="space-y-2.5 mb-5">
             {partners.map((p, i) => {
-              const meta = ROLE_META[p.role] || ROLE_META["Asistente"];
+              const info = socioMap[p.socio_id] || {};
+              const pName = p.name || info.name || "Socio";
+              const pRole = p.role || info.role || "Fotógrafo";
+              const avatarSocio = { ...info, ...p, name: pName, role: pRole };
+              const meta = ROLE_META[pRole] || ROLE_META["Asistente"];
               const RoleIcon = meta.icon;
               const isPaid = p.payment_status === "Pagado";
               return (
@@ -377,12 +383,12 @@ export default function TeamSection({ reservation, onUpdated }) {
                     style={{ background: meta.accent }}
                   />
 
-                  <SocioAvatar socio={p} size="md" />
+                  <SocioAvatar socio={avatarSocio} size="md" />
 
                   <div className="flex-1 min-w-0 pr-2">
-                    <p className="text-sm font-black text-slate-900 truncate leading-tight">{p.name}</p>
+                    <p className="text-sm font-black text-slate-900 truncate leading-tight">{pName}</p>
                     <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider mt-1 ${meta.text}`}>
-                      <RoleIcon size={10} /> {p.role}
+                      <RoleIcon size={10} /> {pRole}
                     </span>
                   </div>
 

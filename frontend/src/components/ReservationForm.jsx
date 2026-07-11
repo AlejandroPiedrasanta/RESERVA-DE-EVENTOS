@@ -144,6 +144,16 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
   }, [reservation]);
 
   const set = (field) => (e) => setForm(p => ({ ...p, [field]: e.target.value }));
+  // Al cambiar el monto total: si la reserva está marcada como "Pagado",
+  // mantener el anticipo sincronizado con el total (pago completo real).
+  const setTotal = (e) => {
+    const val = e.target.value;
+    setForm(prev => ({
+      ...prev,
+      total_amount: val,
+      advance_paid: prev.status === "Pagado" ? val : prev.advance_paid,
+    }));
+  };
   const setStatus = (e) => {
     const newStatus = e.target.value;
     setForm(prev => ({
@@ -169,10 +179,20 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
       total_amount: parseFloat(form.total_amount),
       advance_paid: parseFloat(form.advance_paid) || 0,
     };
+    // Garantizar que "Pagado" siempre signifique pago completo (anticipo = total),
+    // sin importar el orden en que se llenaron los campos.
+    if (form.status === "Pagado") {
+      payload.advance_paid = parseFloat(form.total_amount) || 0;
+    }
     // Al crear: si se eligió un socio, adjuntarlo como assigned_partners
     if (!isEdit && partnerSocioId) {
+      const soc = socios.find(s => s.id === partnerSocioId);
       payload.assigned_partners = [{
         socio_id: partnerSocioId,
+        name: soc?.name || "",
+        role: soc?.role || "Fotógrafo",
+        photo: soc?.photo || null,
+        photo_content_type: soc?.photo_content_type || null,
         payment: parseFloat(partnerPayment) || 0,
         payment_status: "Pendiente",
       }];
@@ -534,7 +554,7 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                 <UField icon={CurrencyGlyph} label={`${f.totalAmount} *`} dirty={isDirtyField("total_amount")} testId="field-total">
-                  <input type="number" value={form.total_amount} onChange={set("total_amount")} placeholder="50,000" min="0" step="0.01" required
+                  <input type="number" value={form.total_amount} onChange={setTotal} placeholder="50,000" min="0" step="0.01" required
                          data-testid="input-total" />
                 </UField>
                 {ff.advance !== false && (
