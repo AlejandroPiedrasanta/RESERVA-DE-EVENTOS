@@ -4917,6 +4917,32 @@ async def _trigger_exe_build_workflow(owner_repo=None, token: str = "", repo_url
         return {"ok": False, "error": str(e)[:200]}
 
 
+async def _trigger_refresh_deps_workflow(token: str = "", repo_url: str = "",
+                                         branch: str = "main") -> dict:
+    """Dispara el workflow 'refresh-deps.yml' vía workflow_dispatch API.
+    Se llama después de un push que modificó frontend/package.json,
+    frontend/yarn.lock o backend/requirements.txt. Necesario porque el commit
+    del push lleva '[skip ci]' y GitHub NO dispara workflows con esa marca.
+    Este workflow regenera el tarball de node_modules + sha16 y los publica al
+    release 'deps-latest' para que bootstrap.sh entre por fast-path (~30s)."""
+    if not token:
+        return {"ok": False, "error": "no_token"}
+    owner, repo = _parse_github_url(repo_url)
+    if not owner or not repo:
+        return {"ok": False, "error": "no_repo"}
+    url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/refresh-deps.yml/dispatches"
+    headers = _gh_api_headers(token)
+    body = {"ref": branch or "main"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(url, headers=headers, json=body)
+            if r.status_code in (204, 201, 200):
+                return {"ok": True, "status": r.status_code}
+            return {"ok": False, "status": r.status_code, "error": (r.text or "")[:300]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
 @api_router.post("/github/build-exe")
 async def github_build_exe(payload: dict = Body(default={})):
     """Dispara manualmente la compilación del .exe en GitHub Actions.
@@ -5984,6 +6010,28 @@ async def _do_github_push_all(payload: dict):
                     logger.warning(f"[push-all] no se pudo disparar build-exe.yml: {dispatch.get('error')}")
             except Exception as disp_err:
                 logger.warning(f"[push-all] excepción al disparar build-exe.yml: {disp_err}")
+
+            # ── 6d. Disparar refresh-deps.yml si cambiaron deps ──────────────
+            # El commit lleva "[skip ci]" así que refresh-deps.yml no corre
+            # automáticamente. Lo forzamos vía workflow_dispatch cuando detectamos
+            # cambios en frontend/package.json, frontend/yarn.lock o
+            # backend/requirements.txt. Esto mantiene el release 'deps-latest'
+            # fresco como backup del tarball committeado.
+            try:
+                deps_touched = any(
+                    p in status_out
+                    for p in ("frontend/package.json", "frontend/yarn.lock", "backend/requirements.txt")
+                )
+                if deps_touched:
+                    _set_push_state(progress=99, message="Refrescando cache de dependencias en GitHub…", step=8,
+                                    detail="Disparando el workflow «refresh-deps»")
+                    rd = await _trigger_refresh_deps_workflow(token=token, repo_url=repo_url, branch=branch)
+                    if rd.get("ok"):
+                        logger.info("[push-all] refresh-deps.yml disparado")
+                    else:
+                        logger.warning(f"[push-all] no se pudo disparar refresh-deps.yml: {rd.get('error')}")
+            except Exception as rd_err:
+                logger.warning(f"[push-all] excepción al disparar refresh-deps.yml: {rd_err}")
         except Exception as reg_err:
             logger.warning(f"No se pudo registrar el push como update: {reg_err}")
             registered_version = None
