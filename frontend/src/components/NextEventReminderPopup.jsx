@@ -206,11 +206,15 @@ export default function NextEventReminderPopup({
                     boxShadow: "0 12px 34px -8px rgba(0,0,0,0.4)",
                   }}
                 >
-                  <motion.span
-                    className="absolute inset-0 rounded-2xl"
-                    style={{ background: "linear-gradient(135deg,#fbbf24,#f97316)" }}
-                    animate={{ scale: [1, 1.55], opacity: [0.55, 0] }}
-                    transition={{ duration: 1.7, repeat: Infinity, ease: "easeOut" }}
+                  {/* Soft static halo behind the icon (no flicker) */}
+                  <span
+                    aria-hidden
+                    className="absolute -inset-2 rounded-3xl pointer-events-none -z-10"
+                    style={{
+                      background:
+                        "radial-gradient(closest-side, rgba(251,191,36,0.55), rgba(249,115,22,0) 75%)",
+                      filter: "blur(6px)",
+                    }}
                   />
                   {isToday ? (
                     <motion.span

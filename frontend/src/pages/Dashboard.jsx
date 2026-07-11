@@ -357,6 +357,7 @@ export default function Dashboard() {
           language={language}
           onCreate={() => setShowForm(true)}
           onViewAll={() => navigate("/reservaciones")}
+          onEventClick={(id) => id && navigate(`/reservaciones/${id}`)}
         />
       )}
 

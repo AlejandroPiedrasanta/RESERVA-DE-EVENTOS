@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CalendarDays, Sparkles, Zap, Clock, ArrowRight, Flame, Plus } from "lucide-react";
+import { CalendarDays, Sparkles, Zap, ArrowRight, Flame, Plus, ChevronDown, CalendarClock } from "lucide-react";
 import { getEventConfig } from "@/lib/eventConfig";
 
 /**
@@ -58,37 +58,29 @@ export default function MonthlyEventsBanner({
   language = "es",
   onCreate,
   onViewAll,
+  onEventClick,
 }) {
   const monthCount = monthEvents.length;
   const nextEvent = monthEvents[0]; // already sorted asc
   const pendingCount = pendingEvents.length;
+  const [upcomingOpen, setUpcomingOpen] = useState(false);
 
-  // Group pending events by "YYYY-MM" to show upcoming-month breakdown
+  // Sorted list of upcoming pending events (asc by date), cap for display
+  const upcomingList = useMemo(() => {
+    return [...pendingEvents]
+      .filter(e => !!e.event_date)
+      .sort((a, b) => a.event_date.localeCompare(b.event_date))
+      .slice(0, 6);
+  }, [pendingEvents]);
+
+  // Month labels for date formatting
   const monthLabels = useMemo(() => {
     const es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
     const en = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return language === "es" ? es : en;
   }, [language]);
 
-  const pendingByMonth = useMemo(() => {
-    const map = new Map();
-    pendingEvents.forEach(e => {
-      if (!e.event_date) return;
-      const [y, m] = e.event_date.split("-");
-      const key = `${y}-${m}`;
-      map.set(key, (map.get(key) || 0) + 1);
-    });
-    return Array.from(map.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(0, 4)
-      .map(([k, v]) => {
-        const [yy, mm] = k.split("-");
-        return { key: k, label: monthLabels[parseInt(mm, 10) - 1], year: yy, count: v };
-      });
-  }, [pendingEvents, monthLabels]);
-
   const bigNum = useCounter(monthCount, 1000);
-  const pendingNum = useCounter(pendingCount, 1400);
 
   // Days until next event
   let daysToNext = null;
@@ -251,22 +243,30 @@ export default function MonthlyEventsBanner({
               </motion.span>
             </motion.div>
 
-            <div className="pb-4 min-w-[180px] flex-1">
-              <p className="text-white/90 text-base font-bold leading-tight">
+            <div className="pb-4 min-w-[220px] flex-1">
+              <p
+                className="text-white font-black leading-[1.1] tracking-tight"
+                style={{
+                  fontFamily: "Cabinet Grotesk, sans-serif",
+                  fontSize: "clamp(1.5rem, 2.6vw, 2.25rem)",
+                  textShadow: "0 2px 20px rgba(0,0,0,0.25)",
+                }}
+                data-testid="banner-month-label"
+              >
                 {monthCount === 0
                   ? (language === "es" ? "Sin eventos este mes" : "No events this month")
                   : monthCount === 1
-                  ? (language === "es" ? "reserva confirmada este mes" : "reservation confirmed this month")
-                  : (language === "es" ? "reservas confirmadas este mes" : "reservations confirmed this month")}
+                  ? (language === "es" ? "Reserva confirmada este mes" : "Reservation confirmed this month")
+                  : (language === "es" ? "Reservas confirmadas este mes" : "Reservations confirmed this month")}
               </p>
               {daysToNext !== null && nextEvent && (
                 <motion.p
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.6 }}
-                  className="text-white/70 text-sm mt-2 font-semibold flex items-center gap-1.5"
+                  className="text-white/85 text-base mt-3 font-bold flex items-center gap-2"
                 >
-                  <Zap size={14} className="text-yellow-300" />
+                  <Zap size={16} className="text-yellow-300" />
                   {daysToNext === 0
                     ? (language === "es" ? "Un evento es HOY" : "An event is TODAY")
                     : daysToNext === 1
@@ -325,79 +325,157 @@ export default function MonthlyEventsBanner({
           )}
         </div>
 
-        {/* RIGHT — Pending events for upcoming months + CTA */}
+        {/* RIGHT — Clean "Próximos eventos" with hover/click reveal + CTA */}
         <div className="flex flex-col justify-between gap-6">
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.35 }}
-            className="rounded-3xl p-6 backdrop-blur-md relative overflow-hidden"
+            onMouseEnter={() => setUpcomingOpen(true)}
+            onMouseLeave={() => setUpcomingOpen(false)}
+            className="rounded-3xl backdrop-blur-md relative overflow-hidden"
             style={{
               background: "rgba(255,255,255,0.08)",
               border: "1px solid rgba(255,255,255,0.18)",
             }}
+            data-testid="banner-upcoming-card"
           >
             <motion.div
-              className="absolute -right-8 -top-8 w-32 h-32 rounded-full"
+              className="absolute -right-8 -top-8 w-32 h-32 rounded-full pointer-events-none"
               style={{ background: "radial-gradient(circle, rgba(255,255,255,0.15), transparent 70%)" }}
               animate={{ scale: [1, 1.2, 1], opacity: [0.6, 1, 0.6] }}
               transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
             />
-            <div className="flex items-center gap-2 mb-3 relative z-10">
-              <Clock size={14} className="text-amber-300" />
-              <p className="text-[10px] uppercase tracking-[0.25em] text-white/70 font-black">
-                {language === "es" ? "Eventos totales pendientes" : "Total pending events"}
-              </p>
-            </div>
-            <div className="flex items-end gap-3 relative z-10">
-              <p
-                className="text-6xl font-black text-white leading-none tracking-tight"
-                style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-                data-testid="banner-pending-count"
-              >
-                {pendingNum}
-              </p>
-              <p className="text-white/70 text-xs font-bold pb-2 leading-tight">
-                {language === "es" ? "próximos meses" : "upcoming months"}
-              </p>
-            </div>
 
-            {/* Per-month breakdown */}
-            {pendingByMonth.length > 0 ? (
-              <div className="mt-4 space-y-1.5 relative z-10" data-testid="banner-pending-breakdown">
-                {pendingByMonth.map((m, i) => (
-                  <motion.div
-                    key={m.key}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.6 + i * 0.08 }}
-                    className="flex items-center justify-between px-3 py-1.5 rounded-xl"
-                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
-                  >
-                    <span className="text-white/85 text-xs font-black uppercase tracking-wider">
-                      {m.label} {m.year}
-                    </span>
-                    <span
-                      className="text-xs font-black px-2 py-0.5 rounded-full"
-                      style={{
-                        background: "linear-gradient(135deg,#f472b6,#a78bfa)",
-                        color: "white",
-                        minWidth: 26,
-                        textAlign: "center",
-                      }}
-                    >
-                      {m.count}
-                    </span>
-                  </motion.div>
-                ))}
+            {/* Header — clickable to toggle on mobile */}
+            <button
+              type="button"
+              onClick={() => setUpcomingOpen(o => !o)}
+              className="w-full text-left p-6 flex items-center gap-4 relative z-10"
+              data-testid="banner-upcoming-toggle"
+              aria-expanded={upcomingOpen}
+            >
+              <motion.div
+                animate={{ scale: [1, 1.08, 1] }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+                className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: "linear-gradient(135deg,#f472b6,#a78bfa)",
+                  boxShadow: "0 8px 20px -6px rgba(168,85,247,0.55)",
+                }}
+              >
+                <CalendarClock size={22} className="text-white" strokeWidth={2.2} />
+              </motion.div>
+              <div className="flex-1 min-w-0">
+                <p
+                  className="text-white font-black leading-tight"
+                  style={{
+                    fontFamily: "Cabinet Grotesk, sans-serif",
+                    fontSize: "clamp(1.35rem, 2vw, 1.75rem)",
+                  }}
+                >
+                  {language === "es" ? "Próximos eventos" : "Upcoming events"}
+                </p>
+                <p className="text-white/70 text-sm font-semibold mt-0.5">
+                  {pendingCount === 0
+                    ? (language === "es" ? "Sin eventos pendientes" : "No pending events")
+                    : pendingCount === 1
+                    ? (language === "es" ? "1 evento pendiente" : "1 pending event")
+                    : (language === "es" ? `${pendingCount} eventos pendientes` : `${pendingCount} pending events`)}
+                </p>
               </div>
-            ) : (
-              <p className="text-white/60 text-xs font-semibold mt-3 relative z-10">
-                {language === "es"
-                  ? `Aún sin eventos para ${nextMonthName || "los próximos meses"}`
-                  : `No events yet for ${nextMonthName || "upcoming months"}`}
-              </p>
-            )}
+              <motion.div
+                animate={{ rotate: upcomingOpen ? 180 : 0 }}
+                transition={{ duration: 0.3 }}
+                className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.22)" }}
+              >
+                <ChevronDown size={18} className="text-white" />
+              </motion.div>
+            </button>
+
+            {/* Expandable list */}
+            <AnimatePresence initial={false}>
+              {upcomingOpen && upcomingList.length > 0 && (
+                <motion.div
+                  key="upcoming-list"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+                  className="relative z-10 overflow-hidden"
+                  data-testid="banner-upcoming-list"
+                >
+                  <div className="px-4 pb-4 space-y-1.5 max-h-[280px] overflow-y-auto">
+                    {upcomingList.map((ev, i) => {
+                      const cfg = getEventConfig(ev.event_type);
+                      const Icon = cfg?.icon;
+                      let dateLabel = "";
+                      if (ev.event_date) {
+                        const [y, m, d] = ev.event_date.split("-");
+                        dateLabel = `${d} ${monthLabels[parseInt(m, 10) - 1]}`;
+                      }
+                      return (
+                        <motion.button
+                          key={ev.id || i}
+                          initial={{ opacity: 0, x: 12 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          onClick={() => onEventClick && onEventClick(ev.id)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left group hover:bg-white/10 transition-colors"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+                          data-testid={`banner-upcoming-item-${i}`}
+                        >
+                          {Icon && (
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ background: cfg.fg }}
+                            >
+                              <Icon size={14} className="text-white" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-bold text-sm truncate">
+                              {ev.event_type || (language === "es" ? "Evento" : "Event")}
+                              {ev.client_name ? ` · ${ev.client_name}` : ""}
+                            </p>
+                            <p className="text-white/60 text-xs font-semibold">{dateLabel}</p>
+                          </div>
+                          <ArrowRight
+                            size={14}
+                            className="text-white/50 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0"
+                          />
+                        </motion.button>
+                      );
+                    })}
+                    {pendingCount > upcomingList.length && (
+                      <button
+                        type="button"
+                        onClick={onViewAll}
+                        className="w-full text-center text-white/80 hover:text-white text-xs font-black uppercase tracking-widest py-2 mt-1"
+                        data-testid="banner-upcoming-viewall"
+                      >
+                        {language === "es"
+                          ? `Ver los ${pendingCount} eventos →`
+                          : `View all ${pendingCount} events →`}
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+              {upcomingOpen && upcomingList.length === 0 && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="px-6 pb-6 text-white/60 text-sm font-semibold relative z-10"
+                >
+                  {language === "es"
+                    ? `Aún sin eventos para ${nextMonthName || "los próximos meses"}`
+                    : `No events yet for ${nextMonthName || "upcoming months"}`}
+                </motion.p>
+              )}
+            </AnimatePresence>
           </motion.div>
 
           <motion.button
