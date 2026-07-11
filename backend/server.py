@@ -6011,25 +6011,20 @@ async def _do_github_push_all(payload: dict):
             except Exception as disp_err:
                 logger.warning(f"[push-all] excepción al disparar build-exe.yml: {disp_err}")
 
-            # ── 6d. Disparar refresh-deps.yml si cambiaron deps ──────────────
+            # ── 6d. Disparar refresh-deps.yml SIEMPRE ────────────────────────
             # El commit lleva "[skip ci]" así que refresh-deps.yml no corre
-            # automáticamente. Lo forzamos vía workflow_dispatch cuando detectamos
-            # cambios en frontend/package.json, frontend/yarn.lock o
-            # backend/requirements.txt. Esto mantiene el release 'deps-latest'
-            # fresco como backup del tarball committeado.
+            # automáticamente. Lo forzamos vía workflow_dispatch en CADA push
+            # para garantizar que el release 'deps-latest' quede siempre fresco
+            # como backup del tarball committeado. El workflow es idempotente y
+            # rápido (~5-8 min) — no ejecuta build si ya está actualizado.
             try:
-                deps_touched = any(
-                    p in status_out
-                    for p in ("frontend/package.json", "frontend/yarn.lock", "backend/requirements.txt")
-                )
-                if deps_touched:
-                    _set_push_state(progress=99, message="Refrescando cache de dependencias en GitHub…", step=8,
-                                    detail="Disparando el workflow «refresh-deps»")
-                    rd = await _trigger_refresh_deps_workflow(token=token, repo_url=repo_url, branch=branch)
-                    if rd.get("ok"):
-                        logger.info("[push-all] refresh-deps.yml disparado")
-                    else:
-                        logger.warning(f"[push-all] no se pudo disparar refresh-deps.yml: {rd.get('error')}")
+                _set_push_state(progress=99, message="Refrescando cache de dependencias en GitHub…", step=8,
+                                detail="Disparando el workflow «refresh-deps»")
+                rd = await _trigger_refresh_deps_workflow(token=token, repo_url=repo_url, branch=branch)
+                if rd.get("ok"):
+                    logger.info("[push-all] refresh-deps.yml disparado")
+                else:
+                    logger.warning(f"[push-all] no se pudo disparar refresh-deps.yml: {rd.get('error')}")
             except Exception as rd_err:
                 logger.warning(f"[push-all] excepción al disparar refresh-deps.yml: {rd_err}")
         except Exception as reg_err:
