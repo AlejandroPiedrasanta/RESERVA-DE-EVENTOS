@@ -169,8 +169,8 @@ export default function Dashboard() {
   // Socio lookup map: id → socio
   const socioMap = Object.fromEntries(socios.map(s => [s.id, s]));
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const [s, r, sc] = await Promise.all([getStats(), getReservations(), getSocios()]);
       setStats(s);
@@ -187,7 +187,7 @@ export default function Dashboard() {
         })
         .sort((a, b) => new Date(a.event_date) - new Date(b.event_date));
       setRecent(monthEvents);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { console.error(e); } finally { if (!silent) setLoading(false); }
   };
 
   const currentMonthName = tr.months[new Date().getMonth()];
@@ -1021,7 +1021,7 @@ export default function Dashboard() {
       {showForm && (
         <ReservationForm
           onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); load(); }}
+          onSaved={() => { setShowForm(false); load({ silent: true }); }}
         />
       )}
     </div>

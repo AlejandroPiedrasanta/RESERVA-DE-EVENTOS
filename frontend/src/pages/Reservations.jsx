@@ -53,13 +53,13 @@ export default function Reservations({ embedded = false }) {
 
   const EVENT_TYPES = ["Boda","Quinceañera","Fiesta Social","Evento Corporativo","Conferencia","Otro"];
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const data = await getReservations();
       setReservations([...data].sort((a, b) => new Date(a.event_date) - new Date(b.event_date)));
     } catch { toast({ title: "Error", variant: "destructive" }); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -67,7 +67,7 @@ export default function Reservations({ embedded = false }) {
   const handleDelete = async (id, e) => {
     e.stopPropagation();
     if (!window.confirm("¿Eliminar?")) return;
-    try { await deleteReservation(id); toast({ title: "Eliminado" }); load(); }
+    try { await deleteReservation(id); toast({ title: "Eliminado" }); load({ silent: true }); }
     catch { toast({ title: "Error", variant: "destructive" }); }
   };
 
@@ -426,7 +426,7 @@ export default function Reservations({ embedded = false }) {
         )}
       </motion.div>
 
-      {showForm && <ReservationForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load(); }} />}
+      {showForm && <ReservationForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load({ silent: true }); }} />}
     </div>
   );
 }

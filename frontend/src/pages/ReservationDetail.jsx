@@ -51,11 +51,11 @@ export default function ReservationDetail() {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try { const data = await getReservation(id); setReservation(data); }
     catch { toast({ title: dt.toasts?.loadError || "Error", variant: "destructive" }); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   };
 
   useEffect(() => { load(); }, [id]);
@@ -75,7 +75,7 @@ export default function ReservationDetail() {
     for (const file of files) {
       if (!allowed.includes(file.type)) { toast({ title: "Tipo no soportado", variant: "destructive" }); continue; }
       setUploading(true);
-      try { await uploadReceipt(id, file); toast({ title: dt.toasts?.uploadSuccess || "Comprobante subido" }); load(); }
+      try { await uploadReceipt(id, file); toast({ title: dt.toasts?.uploadSuccess || "Comprobante subido" }); load({ silent: true }); }
       catch (e) { toast({ title: "Error al subir", description: e.response?.data?.detail || "Error", variant: "destructive" }); }
       finally { setUploading(false); }
     }
@@ -85,7 +85,7 @@ export default function ReservationDetail() {
 
   const handleDeleteReceipt = async (receiptId) => {
     if (!window.confirm("¿Eliminar comprobante?")) return;
-    try { await deleteReceipt(id, receiptId); toast({ title: "Eliminado" }); load(); }
+    try { await deleteReceipt(id, receiptId); toast({ title: "Eliminado" }); load({ silent: true }); }
     catch { toast({ title: "Error", variant: "destructive" }); }
   };
 
@@ -125,6 +125,8 @@ export default function ReservationDetail() {
 
   const remaining = (reservation.total_amount||0) - (reservation.advance_paid||0);
   const paidPct = reservation.total_amount > 0 ? Math.min(100, ((reservation.advance_paid||0)/reservation.total_amount)*100) : 0;
+  const teamCost = (reservation.assigned_partners || []).reduce((sum, p) => sum + (p.payment || 0), 0);
+  const realEarnings = (reservation.total_amount || 0) - teamCost;
   const statusMeta = STATUS_META[reservation.status] || STATUS_META.Pendiente;
   const EventTypeIcon = EVENT_ICON[reservation.event_type] || Star;
 
@@ -293,9 +295,9 @@ export default function ReservationDetail() {
             )}
           </motion.div>
 
-          <LocationsSection reservation={reservation} onUpdated={load} />
+          <LocationsSection reservation={reservation} onUpdated={() => load({ silent: true })} />
 
-          <TeamSection reservation={reservation} onUpdated={load} />
+          <TeamSection reservation={reservation} onUpdated={() => load({ silent: true })} />
 
           {/* Receipts */}
           <motion.div
@@ -398,43 +400,77 @@ export default function ReservationDetail() {
               <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">{dt.paymentSummary}</h2>
             </div>
 
-            {/* Circular progress */}
-            <div className="flex items-center gap-5 mb-5">
-              <CircularProgress percent={paidPct} />
-              <div className="flex-1">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total</p>
-                <p className="text-2xl font-black text-slate-900 leading-none" style={{ fontFamily: 'Cabinet Grotesk, sans-serif' }}>
-                  {formatCurrency(reservation.total_amount)}
+            {/* Two key metrics: what you earned + what they owe */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {/* Ganancia real: total del evento - costo de socios */}
+              <div
+                className="rounded-2xl p-4"
+                style={{
+                  background: realEarnings >= 0
+                    ? "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.04))"
+                    : "linear-gradient(135deg, rgba(244,63,94,0.12), rgba(244,63,94,0.04))",
+                  border: realEarnings >= 0
+                    ? "1px solid rgba(16,185,129,0.25)"
+                    : "1px solid rgba(244,63,94,0.3)",
+                }}
+                data-testid="payment-earned"
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Wallet size={12} className={realEarnings >= 0 ? "text-emerald-600" : "text-rose-600"} />
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${realEarnings >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{dt.realEarnings}</p>
+                </div>
+                <p className={`text-2xl font-black leading-none ${realEarnings >= 0 ? "text-emerald-700" : "text-rose-700"}`} style={{ fontFamily: 'Cabinet Grotesk, sans-serif' }}>
+                  {formatCurrency(realEarnings)}
                 </p>
-                <p className={`text-xs font-bold mt-2 ${remaining > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-                  {remaining > 0 ? `Falta ${formatCurrency(remaining)}` : "¡Pagado en su totalidad!"}
+                {teamCost > 0 && (
+                  <p className="text-[10px] font-bold text-slate-500 mt-1.5 truncate" title={`${formatCurrency(reservation.total_amount || 0)} − ${formatCurrency(teamCost)}`}>
+                    −{formatCurrency(teamCost)} equipo
+                  </p>
+                )}
+              </div>
+
+              {/* Deben */}
+              <div
+                className="rounded-2xl p-4"
+                style={{
+                  background: remaining > 0
+                    ? "linear-gradient(135deg, rgba(245,158,11,0.14), rgba(245,158,11,0.04))"
+                    : "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.04))",
+                  border: remaining > 0
+                    ? "1px solid rgba(245,158,11,0.3)"
+                    : "1px solid rgba(16,185,129,0.25)",
+                }}
+                data-testid="payment-owed"
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingUp size={12} className={remaining > 0 ? "text-amber-600" : "text-emerald-600"} />
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${remaining > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                    {remaining > 0 ? dt.owedByClient : dt.allPaid}
+                  </p>
+                </div>
+                <p className={`text-2xl font-black leading-none ${remaining > 0 ? "text-amber-700" : "text-emerald-700"}`} style={{ fontFamily: 'Cabinet Grotesk, sans-serif' }}>
+                  {remaining > 0 ? formatCurrency(remaining) : formatCurrency(0)}
                 </p>
               </div>
             </div>
 
-            <div className="space-y-3">
-              <PaymentRow icon={Wallet} color="emerald" label={dt.advancePaid} value={formatCurrency(reservation.advance_paid)} strong />
-              <PaymentRow icon={TrendingUp} color={remaining > 0 ? "amber" : "emerald"} label={dt.pendingBalance} value={formatCurrency(remaining)} strong />
-              <div className="pt-2">
-                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }} animate={{ width: `${paidPct}%` }}
-                    transition={{ duration: 0.9, ease: easeOut, delay: 0.3 }}
-                    className="h-full rounded-full"
-                    style={{ background: "linear-gradient(90deg, #8b5cf6, #ec4899, #f59e0b)" }}
-                    data-testid="payment-progress"
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{Math.round(paidPct)}% {dt.paid}</p>
-                  {paidPct >= 100 && (
-                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 400, damping: 12 }}
-                      className="inline-flex items-center gap-1 text-emerald-600 text-[10px] font-black">
-                      <CheckCircle2 size={11} /> COMPLETO
-                    </motion.span>
-                  )}
-                </div>
-              </div>
+            {/* Subtle total + progress */}
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 mb-2">
+              <span>{Math.round(paidPct)}% {dt.paid} {dt.ofTotal} {formatCurrency(reservation.total_amount)}</span>
+              {paidPct >= 100 && (
+                <span className="inline-flex items-center gap-1 text-emerald-600 font-black">
+                  <CheckCircle2 size={11} /> COMPLETO
+                </span>
+              )}
+            </div>
+            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }} animate={{ width: `${paidPct}%` }}
+                transition={{ duration: 0.9, ease: easeOut, delay: 0.3 }}
+                className="h-full rounded-full"
+                style={{ background: "linear-gradient(90deg, #10b981, #34d399)" }}
+                data-testid="payment-progress"
+              />
             </div>
           </motion.div>
 
@@ -487,7 +523,7 @@ export default function ReservationDetail() {
       document.body
       )}
 
-      {showEdit && <ReservationForm reservation={reservation} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />}
+      {showEdit && <ReservationForm reservation={reservation} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load({ silent: true }); }} />}
     </div>
   );
 }

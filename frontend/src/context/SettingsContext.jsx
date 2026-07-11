@@ -107,6 +107,7 @@ const T = {
       receipts: "Comprobantes de Pago", uploading: "Subiendo...", uploadHint: "Arrastra o haz clic para subir", uploadSub: "JPG, PNG, PDF — máx 10MB",
       paymentSummary: "Resumen de Pago", totalLabel: "Total", advancePaid: "Anticipo pagado",
       pendingBalance: "Saldo pendiente", paid: "pagado", filesUploaded: "archivo(s) subido(s)", receiptsCount: "Comprobantes",
+      realEarnings: "Ganancia real", owedByClient: "Deben", allPaid: "Todo cobrado", ofTotal: "de",
     },
     settings: {
       title: "Ajustes", subtitle: "Personaliza tu experiencia",
@@ -184,6 +185,7 @@ const T = {
       receipts: "Payment Receipts", uploading: "Uploading...", uploadHint: "Drag or click to upload", uploadSub: "JPG, PNG, PDF — max 10MB",
       paymentSummary: "Payment Summary", totalLabel: "Total", advancePaid: "Deposit paid",
       pendingBalance: "Pending balance", paid: "paid", filesUploaded: "file(s) uploaded", receiptsCount: "Receipts",
+      realEarnings: "Actual earnings", owedByClient: "Owed", allPaid: "Fully paid", ofTotal: "of",
     },
     settings: {
       title: "Settings", subtitle: "Customize your experience",

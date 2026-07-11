@@ -259,12 +259,12 @@ export default function Socios() {
   const { formatCurrency } = useSettings();
   const { toast } = useToast();
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const [s, r, f] = await Promise.all([getSocios(), getReservations(), getFinancials()]);
       setSocios(s); setReservations(r); setFinancials(f);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { console.error(e); } finally { if (!silent) setLoading(false); }
   };
   useEffect(() => { load(); }, []);
   useEffect(() => { if (orderedIds.length > 0) localStorage.setItem(ORDER_KEY, JSON.stringify(orderedIds)); }, [orderedIds]);
@@ -291,7 +291,7 @@ export default function Socios() {
 
   const handleDelete = async (id) => {
     if (!window.confirm("¿Eliminar este socio?")) return;
-    try { await deleteSocio(id); toast({ title: "Socio eliminado" }); load(); }
+    try { await deleteSocio(id); toast({ title: "Socio eliminado" }); load({ silent: true }); }
     catch { toast({ title: "Error al eliminar", variant: "destructive" }); }
   };
 
@@ -304,7 +304,7 @@ export default function Socios() {
     try {
       await updateReservation(reservation.id, { assigned_partners: partners });
       toast({ title: "Estado de pago actualizado ✓" });
-      load();
+      load({ silent: true });
     } catch { toast({ title: "Error al actualizar", variant: "destructive" }); }
   };
 
@@ -314,7 +314,7 @@ export default function Socios() {
     try {
       await updateReservation(reservation.id, { assigned_partners: partners });
       toast({ title: "Socio quitado del evento ✓" });
-      load();
+      load({ silent: true });
     } catch { toast({ title: "Error al actualizar", variant: "destructive" }); }
   };
 
@@ -447,7 +447,7 @@ export default function Socios() {
                 <AnimatePresence>
                   {isAssigning && (
                     <AssignEventPanel key="assign" socio={socio} reservations={reservations} formatCurrency={formatCurrency}
-                      onAssigned={() => { setAssigningId(null); load(); }}
+                      onAssigned={() => { setAssigningId(null); load({ silent: true }); }}
                       onClose={() => setAssigningId(null)} />
                   )}
                 </AnimatePresence>
@@ -558,7 +558,7 @@ export default function Socios() {
         </motion.div>
       )}
 
-      {showForm && <SocioForm socio={editTarget} onClose={() => { setShowForm(false); setEditTarget(null); }} onSaved={() => { setShowForm(false); setEditTarget(null); load(); }} />}
+      {showForm && <SocioForm socio={editTarget} onClose={() => { setShowForm(false); setEditTarget(null); }} onSaved={() => { setShowForm(false); setEditTarget(null); load({ silent: true }); }} />}
     </div>
   );
 }

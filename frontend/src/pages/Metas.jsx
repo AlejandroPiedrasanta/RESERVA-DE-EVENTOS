@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getMetasProgress, upsertMeta } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award } from "lucide-react";
+import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award, Plane, Car, Home, Globe } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { celebrateGoalReached, fireConfetti, triggerSidebarSweep } from "@/lib/celebrations";
@@ -566,8 +566,8 @@ export default function Metas() {
   const { formatCurrency } = useSettings();
   const { toast } = useToast();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const p = await getMetasProgress(year, type);
 
@@ -592,7 +592,7 @@ export default function Metas() {
     } catch (e) {
       console.error(e);
       toast({ title: "Error al cargar metas", variant: "destructive" });
-    } finally { setLoading(false); }
+    } finally { if (!silent) setLoading(false); }
   }, [year, type, toast]);
 
   useEffect(() => {
@@ -650,7 +650,7 @@ export default function Metas() {
       await upsertMeta({ year, month, type, amount });
       toast({ title: `Meta de ${MONTHS_ES[month - 1]} guardada ✓` });
       triggerSidebarSweep(typeCfg.accent === "emerald" ? "emerald" : typeCfg.accent === "purple" ? "purple" : "amber");
-      await load();
+      await load({ silent: true });
     } catch { toast({ title: "Error al guardar", variant: "destructive" }); }
   };
 
@@ -661,7 +661,7 @@ export default function Metas() {
       toast({ title: `Meta anual ${year} guardada ✓` });
       setAnnualEditing(false);
       fireConfetti(typeCfg.accent === "emerald" ? "payment" : "reservation", { x: 0.5, y: 0.3 });
-      await load();
+      await load({ silent: true });
     } catch { toast({ title: "Error al guardar", variant: "destructive" }); }
     finally { setSavingAnnual(false); }
   };
@@ -989,6 +989,9 @@ export default function Metas() {
             )}
           </div>
         </div>
+
+        {/* Motivation journey — rewards you unlock as you progress */}
+        <MotivationJourney pct={animAnnualPct} accent={typeCfg.key} />
       </motion.div>
       )}
 
@@ -1029,6 +1032,157 @@ export default function Metas() {
         amount={modal?.amount || 0}
         formatCurrency={formatCurrency}
       />
+    </div>
+  );
+}
+
+
+/* ============================================================
+ * Motivation journey — anima 4 recompensas que se desbloquean
+ * conforme la meta anual avanza. Muestra qué se está logrando.
+ * ============================================================ */
+const REWARDS = [
+  { pct: 25,  icon: Plane, label: "Viaje soñado",   from: "#38bdf8", to: "#0ea5e9" },
+  { pct: 50,  icon: Car,   label: "Auto nuevo",     from: "#f59e0b", to: "#ef4444" },
+  { pct: 75,  icon: Home,  label: "Tu casa",        from: "#a78bfa", to: "#ec4899" },
+  { pct: 100, icon: Globe, label: "Vuelta al mundo", from: "#10b981", to: "#0d9488" },
+];
+
+function MotivationJourney({ pct = 0, accent = "ventas" }) {
+  const safe = Math.max(0, Math.min(100, pct));
+  const trackGrad = accent === "ganancias"
+    ? "linear-gradient(90deg,#a78bfa,#ec4899,#f59e0b,#10b981)"
+    : accent === "gastos"
+    ? "linear-gradient(90deg,#f59e0b,#f43f5e,#ec4899,#8b5cf6)"
+    : "linear-gradient(90deg,#38bdf8,#f59e0b,#a78bfa,#10b981)";
+
+  // Recompensa "actual" en la que estamos trabajando (siguiente por desbloquear)
+  const nextReward = REWARDS.find(r => safe < r.pct) || REWARDS[REWARDS.length - 1];
+
+  return (
+    <div className="relative mt-6 pt-5 border-t border-slate-200/70" data-testid="motivation-journey">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <motion.div
+            animate={{ y: [0, -3, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <Sparkles size={13} className="text-amber-500" />
+          </motion.div>
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            Lo que estás logrando
+          </p>
+        </div>
+        <p className="text-[10px] font-bold text-slate-500">
+          Próximo: <span className="font-black text-slate-800">{nextReward.label}</span>
+        </p>
+      </div>
+
+      {/* Track with milestones */}
+      <div className="relative h-16 sm:h-20">
+        {/* Base track */}
+        <div
+          className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-1.5 rounded-full"
+          style={{ background: "rgba(148,163,184,0.22)" }}
+        />
+        {/* Filled portion */}
+        <motion.div
+          className="absolute left-2 top-1/2 -translate-y-1/2 h-1.5 rounded-full"
+          style={{ background: trackGrad, maxWidth: "calc(100% - 16px)" }}
+          initial={{ width: 0 }}
+          animate={{ width: `calc(${safe}% - ${(safe / 100) * 16}px)` }}
+          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+        />
+        {/* Traveler dot (rocket) that rides the progress */}
+        <motion.div
+          className="absolute top-1/2 -translate-y-1/2"
+          initial={{ left: "0.5rem" }}
+          animate={{ left: `calc(${safe}% - ${(safe / 100) * 16}px + 0.5rem - 12px)` }}
+          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <motion.div
+            className="w-6 h-6 rounded-full flex items-center justify-center shadow-lg"
+            style={{ background: "linear-gradient(135deg,#f59e0b,#ec4899)" }}
+            animate={{ scale: [1, 1.15, 1], rotate: [0, 8, -8, 0] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <Rocket size={12} className="text-white" strokeWidth={2.4} />
+          </motion.div>
+        </motion.div>
+
+        {/* Milestone nodes */}
+        {REWARDS.map((r, i) => {
+          const unlocked = safe >= r.pct;
+          const Icon = r.icon;
+          return (
+            <div
+              key={r.pct}
+              className="absolute top-0 h-full flex flex-col items-center"
+              style={{
+                left: `calc(${r.pct}% - ${(r.pct / 100) * 16}px + 0.5rem)`,
+                transform: "translateX(-50%)",
+              }}
+              data-testid={`journey-milestone-${r.pct}`}
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -30 }}
+                animate={{
+                  scale: unlocked ? [1, 1.12, 1] : 1,
+                  rotate: 0,
+                  y: unlocked ? [0, -3, 0] : 0,
+                }}
+                transition={{
+                  scale: unlocked
+                    ? { duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: i * 0.15 }
+                    : { type: "spring", stiffness: 260, damping: 18, delay: 0.3 + i * 0.1 },
+                  y: unlocked
+                    ? { duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: i * 0.15 }
+                    : { duration: 0 },
+                }}
+                className="relative w-10 h-10 rounded-2xl flex items-center justify-center shadow-md"
+                style={{
+                  background: unlocked
+                    ? `linear-gradient(135deg, ${r.from}, ${r.to})`
+                    : "rgba(255,255,255,0.85)",
+                  border: unlocked ? "2px solid rgba(255,255,255,0.9)" : "1.5px dashed rgba(148,163,184,0.55)",
+                  filter: unlocked ? "none" : "grayscale(0.5)",
+                  opacity: unlocked ? 1 : 0.55,
+                }}
+              >
+                <Icon
+                  size={16}
+                  className={unlocked ? "text-white" : "text-slate-400"}
+                  strokeWidth={2.2}
+                />
+                {unlocked && (
+                  <motion.span
+                    className="absolute inset-0 rounded-2xl pointer-events-none"
+                    style={{ background: `linear-gradient(135deg, ${r.from}, ${r.to})` }}
+                    animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut", delay: 0.2 * i }}
+                  />
+                )}
+                {unlocked && (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1, rotate: 360 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 15 }}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow"
+                  >
+                    <Check size={9} className="text-white" strokeWidth={3.5} />
+                  </motion.div>
+                )}
+              </motion.div>
+              <p
+                className={`hidden sm:block absolute top-full mt-1 text-[9px] font-black uppercase tracking-wider whitespace-nowrap ${unlocked ? "text-slate-700" : "text-slate-400"}`}
+                style={{ letterSpacing: "0.06em" }}
+              >
+                {r.label}
+              </p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

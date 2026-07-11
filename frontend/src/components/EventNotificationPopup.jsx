@@ -139,12 +139,6 @@ export default function EventNotificationPopup({
                     boxShadow: "0 10px 30px -8px rgba(168,85,247,0.6)",
                   }}
                 >
-                  <motion.span
-                    className="absolute inset-0 rounded-2xl"
-                    style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
-                    animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-                  />
                   <Bell size={22} className="text-white relative" strokeWidth={2.2} />
                 </motion.div>
                 <div className="flex-1 min-w-0">

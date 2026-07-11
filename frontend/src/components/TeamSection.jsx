@@ -460,39 +460,6 @@ export default function TeamSection({ reservation, onUpdated }) {
 
       {/* Financial dashboard */}
       <div className="relative">
-        {/* Stat pills */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <StatPill
-            icon={Coins}
-            label="Total evento"
-            value={formatCurrency(totalAmount)}
-            grad="from-slate-100 to-slate-50"
-            iconGrad="from-slate-500 to-slate-700"
-            valueClass="text-slate-900"
-            delay={0.05}
-          />
-          <StatPill
-            icon={Wallet}
-            label="Costo equipo"
-            value={formatCurrency(teamCost)}
-            grad="from-amber-50 to-orange-50"
-            iconGrad="from-amber-500 to-orange-500"
-            valueClass="text-amber-700"
-            delay={0.12}
-          />
-          <StatPill
-            icon={realIncome >= 0 ? TrendingUp : TrendingDown}
-            label="Ingreso real"
-            value={formatCurrency(realIncome)}
-            grad={realIncome >= 0 ? "from-emerald-50 to-teal-50" : "from-rose-50 to-red-50"}
-            iconGrad={realIncome >= 0 ? "from-emerald-500 to-teal-500" : "from-rose-500 to-red-500"}
-            valueClass={realIncome >= 0 ? "text-emerald-700" : "text-rose-700"}
-            delay={0.2}
-            emphasis
-            testid="real-income"
-          />
-        </div>
-
         {/* Team payment progress */}
         {teamCost > 0 && (
           <motion.div
@@ -535,20 +502,6 @@ export default function TeamSection({ reservation, onUpdated }) {
                 </span>
               )}
             </div>
-          </motion.div>
-        )}
-
-        {/* Margin indicator */}
-        {totalAmount > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
-            className="mt-3 flex items-center justify-between text-[10px] font-black uppercase tracking-widest"
-          >
-            <span className="text-slate-400">Margen del evento</span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${marginPct >= 50 ? "bg-emerald-100 text-emerald-700" : marginPct >= 20 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700"}`}>
-              {marginPct >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-              {Math.round(marginPct)}%
-            </span>
           </motion.div>
         )}
       </div>
