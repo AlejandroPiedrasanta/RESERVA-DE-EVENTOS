@@ -1432,8 +1432,8 @@ export default function DatabasePage() {
                   <Database size={16} className="text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Datos y Respaldos</p>
-                  <p className="text-[11px] text-slate-400">Dónde se guardan tus datos y cómo hacer copias de seguridad</p>
+                  <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>Copia de seguridad</p>
+                  <p className="text-[11px] text-slate-400">Guarda todos tus datos en tu PC con un solo clic</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1459,42 +1459,11 @@ export default function DatabasePage() {
             <CollapseBody open={openBlocks.conn}>
             <div className="p-5 space-y-5">
 
-              {/* ── Sub-tabs unificados ── */}
-              <div className="flex gap-1 p-1 rounded-2xl bg-slate-100/70">
-                {[
-                  { key: "conn",    icon: Database, label: "Mis datos" },
-                  { key: "presets", icon: Bookmark, label: "Conexiones" },
-                  { key: "backup",  icon: Zap,      label: "Copias de seguridad" },
-                ].map(({ key, icon: Icon, label }) => (
-                  <button key={key} onClick={() => setUnifiedTab(key)}
-                    data-testid={`unified-tab-${key}`}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-[11px] font-bold transition-all ${unifiedTab === key ? "bg-white shadow-sm text-indigo-700" : "text-slate-500 hover:text-slate-700"}`}>
-                    <Icon size={12} /> {label}
-                    {key === "backup" && autoBackup.config.enabled && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
-                    )}
-                    {key === "presets" && presets.length > 0 && (
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${unifiedTab === key ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-500"}`}>{presets.length}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {unifiedTab === "conn" && (<>
-
-              {/* Explicación sencilla */}
-              <div className="flex items-start gap-2.5 bg-indigo-50/70 rounded-2xl px-4 py-3 border border-indigo-100">
-                <Info size={14} className="text-indigo-500 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Aquí ves un resumen de tu base de datos y dónde está guardada. Puedes subir tus datos a la nube o cambiar la conexión más abajo.
-                </p>
-              </div>
-
-              {/* ── Stats ── */}
+              {/* ── Stats compactas + Espacio ── */}
               {dbLoading ? (
-                <div className="flex items-center justify-center py-6 gap-3 text-slate-400">
-                  <Loader2 size={18} className="animate-spin" />
-                  <span className="text-sm">Cargando estadísticas...</span>
+                <div className="flex items-center justify-center py-4 gap-3 text-slate-400">
+                  <Loader2 size={16} className="animate-spin" />
+                  <span className="text-xs">Cargando estadísticas...</span>
                 </div>
               ) : dbStats ? (
                 <div className="space-y-3">
@@ -1502,37 +1471,30 @@ export default function DatabasePage() {
                     <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
                       <WifiOff size={14} className="text-red-500 mt-0.5 shrink-0" />
                       <div>
-                        <p className="text-xs font-bold text-red-700">Sin conexión a la base de datos en la nube</p>
-                        <p className="text-[10px] text-red-500 mt-0.5">Verifica tu internet y que el URL sea correcto.</p>
+                        <p className="text-xs font-bold text-red-700">Sin conexión a la base de datos</p>
+                        <p className="text-[10px] text-red-500 mt-0.5">Usa "Probar conexión" para diagnosticar.</p>
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2">
                     {[
-                      { label: "Colecciones", value: dbStats.collections, color: "bg-indigo-50 text-indigo-700" },
-                      { label: "Documentos",  value: dbStats.objects?.toLocaleString(), color: "bg-emerald-50 text-emerald-700" },
-                      { label: "Tamaño",      value: dbStats.total_size, color: "bg-violet-50 text-violet-700" },
+                      { label: "Documentos",  value: dbStats.objects?.toLocaleString() || "—", color: "bg-emerald-50 text-emerald-700" },
+                      { label: "Colecciones", value: dbStats.collections ?? "—",               color: "bg-indigo-50 text-indigo-700" },
+                      { label: "Tamaño",      value: dbStats.total_size || "—",                color: "bg-violet-50 text-violet-700" },
                     ].map((item) => (
-                      <div key={item.label} className={`rounded-2xl p-4 ${item.color}`}>
-                        <div className="text-xl font-black" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{item.value}</div>
-                        <div className="text-[11px] font-semibold mt-1 opacity-70">{item.label}</div>
+                      <div key={item.label} className={`rounded-2xl px-3 py-2.5 ${item.color}`} data-testid={`db-stat-${item.label.toLowerCase()}`}>
+                        <div className="text-lg font-black leading-tight" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{item.value}</div>
+                        <div className="text-[10px] font-semibold opacity-70">{item.label}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="flex items-center gap-3 bg-slate-50/80 rounded-2xl px-4 py-3">
-                    <Link2 size={13} className="text-slate-400 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Conexión activa</p>
-                      <p className="text-xs font-mono text-slate-600 truncate">{dbStats.current_url}</p>
-                    </div>
-                  </div>
 
-                  {/* ── Espacio disponible ── */}
+                  {/* Espacio disponible */}
                   {dbStats.free_size && (
                     <div data-testid="db-space-info" className="bg-slate-50/80 rounded-2xl px-4 py-3">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          Espacio {dbStats.is_atlas ? "(en la nube)" : ""}
+                          Espacio {dbStats.is_atlas ? "(en la nube)" : "en tu equipo"}
                         </p>
                         <p className="text-[11px] font-black text-slate-600">
                           {dbStats.used_size} usado{dbStats.limit_size && dbStats.limit_size !== "—" ? ` / ${dbStats.limit_size}` : ""}
@@ -1540,7 +1502,7 @@ export default function DatabasePage() {
                       </div>
                       {typeof dbStats.used_pct === "number" && dbStats.limit_size !== "—" ? (
                         <>
-                          <div className="h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
                             <motion.div
                               initial={{ width: 0 }}
                               animate={{ width: `${Math.max(2, dbStats.used_pct)}%` }}
@@ -1558,613 +1520,169 @@ export default function DatabasePage() {
                     </div>
                   )}
 
-                  {/* ── Sube tus reservas a la nube ── */}
-                  <motion.button whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.98 }}
-                    onClick={openUploadModal} disabled={optimizing}
-                    data-testid="optimize-db-btn"
-                    title="Muestra un resumen animado de lo que se subirá y luego sincroniza tus datos con la nube."
-                    className="relative w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-2xl text-white text-sm font-black disabled:opacity-60 shadow-lg overflow-hidden"
-                    style={{ background: "linear-gradient(120deg,#0ea5e9 0%,#6366f1 45%,#8b5cf6 100%)" }}>
-                    <motion.span
-                      className="absolute inset-0 pointer-events-none"
-                      initial={{ x: "-120%" }}
-                      animate={{ x: "120%" }}
-                      transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
-                      style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)" }}
-                    />
-                    {optimizing
-                      ? <><Loader2 size={15} className="animate-spin" /> Subiendo a la nube…</>
-                      : <><CloudUpload size={16} /> Sube tus reservas a la nube</>}
-                  </motion.button>
-                  <p className="text-[10px] text-slate-400 -mt-1 px-1">
-                    Sincroniza reservas · contactos · diseño · configuración · optimiza la BD
-                  </p>
+                  {/* Probar conexión + URL */}
+                  <div className="flex items-center gap-2 bg-white/60 border border-slate-200/70 rounded-2xl px-3 py-2">
+                    <Link2 size={12} className="text-slate-400 shrink-0" />
+                    <p className="text-[10px] font-mono text-slate-500 truncate flex-1">{dbStats.current_url || "—"}</p>
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
+                      onClick={() => { setNewDbUrl(dbStats.current_url || ""); handleDbTest(); }}
+                      disabled={dbTesting}
+                      data-testid="db-test-btn"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all disabled:opacity-50"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(99,102,241,0.9), rgba(168,85,247,0.9))",
+                        color: "white",
+                        boxShadow: "0 4px 12px -4px rgba(99,102,241,0.5)",
+                      }}>
+                      {dbTesting ? <Loader2 size={11} className="animate-spin" /> : <Wifi size={11} />}
+                      {dbTesting ? "Probando..." : "Probar conexión"}
+                    </motion.button>
+                  </div>
+                  {dbTestResult && (
+                    <div className={`flex items-center gap-2 text-[11px] font-semibold px-3 py-2 rounded-xl ${dbTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
+                      {dbTestResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                      {dbTestResult.msg}
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="flex items-center justify-between py-4">
-                  <p className="text-sm text-slate-400">No se pudieron cargar las estadísticas</p>
+                <div className="flex items-center justify-between py-3">
+                  <p className="text-xs text-slate-400">No se pudieron cargar las estadísticas</p>
                   <button onClick={loadDbStats} className="text-xs text-indigo-500 font-bold hover:underline">Reintentar</button>
                 </div>
               )}
 
-              {/* ── Cambiar conexión ── */}
-              <div className="border-t border-white/30 pt-4 space-y-3">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cambiar conexión</p>
-
-                {/* Mode tabs */}
-                <div className="flex gap-1 p-1 rounded-2xl bg-slate-100/70">
-                  {[
-                    { key: "url",    icon: Globe,   label: "URL completa" },
-                    { key: "fields", icon: Server,  label: "Por IP/campos" },
-                    { key: "nas",    icon: Network,  label: "NAS / Red local" },
-                  ].map(({ key, icon: Icon, label }) => (
-                    <button key={key} onClick={() => { setConnMode(key); setDbTestResult(null); }}
-                      data-testid={`conn-mode-${key}`}
-                      className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-[11px] font-bold transition-all ${connMode === key ? "bg-white shadow-sm text-indigo-700" : "text-slate-500 hover:text-slate-700"}`}>
-                      <Icon size={12} /> {label}
-                    </button>
-                  ))}
-                </div>
-
-                {dbStats?.connection_error && (
-                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={() => { setConnMode("url"); setNewDbUrl(dbStats.current_url?.includes("***") ? "" : (dbStats.current_url || "")); }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold hover:bg-amber-100 transition-all">
-                    <Wifi size={12} /> Reintentar con URL actual
-                  </motion.button>
-                )}
-
-                {/* Mode: URL completa */}
-                {connMode === "url" && (
-                  <input type="text" value={newDbUrl}
-                    onChange={e => { setNewDbUrl(e.target.value); setDbTestResult(null); }}
-                    placeholder="mongodb+srv://usuario:contraseña@cluster.mongodb.net"
-                    data-testid="db-url-input"
-                    className="w-full bg-white/60 border border-slate-200/80 rounded-xl px-4 py-3 text-sm font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:border-transparent" />
-                )}
-
-                {/* Mode: Por IP/campos */}
-                {connMode === "fields" && (
-                  <div className="space-y-2.5 p-4 rounded-2xl bg-slate-50/60 border border-slate-200/50">
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="col-span-2">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Host / IP *</label>
-                        <input value={connFields.host} onChange={e => setConnFields(p => ({ ...p, host: e.target.value }))}
-                          placeholder="192.168.1.100 o cluster.mongodb.net" data-testid="field-host"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Puerto</label>
-                        <input value={connFields.port} onChange={e => setConnFields(p => ({ ...p, port: e.target.value }))}
-                          placeholder="27017" data-testid="field-port"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Usuario</label>
-                        <input value={connFields.user} onChange={e => setConnFields(p => ({ ...p, user: e.target.value }))}
-                          placeholder="admin" data-testid="field-user"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Contraseña</label>
-                        <input type="password" value={connFields.pass} onChange={e => setConnFields(p => ({ ...p, pass: e.target.value }))}
-                          placeholder="••••••••" data-testid="field-pass"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Base de datos</label>
-                      <input value={connFields.db} onChange={e => setConnFields(p => ({ ...p, db: e.target.value }))}
-                        placeholder="cinema_events" data-testid="field-db"
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300" />
-                    </div>
-                    {buildUrlFromFields() && (
-                      <div className="flex items-center gap-2 bg-indigo-50/50 rounded-xl px-3 py-2">
-                        <Link2 size={10} className="text-indigo-400 shrink-0" />
-                        <p className="text-[10px] font-mono text-indigo-700 truncate">{buildUrlFromFields().replace(/:([^@]+)@/, ":***@")}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Mode: NAS / Red local */}
-                {connMode === "nas" && (
-                  <div className="space-y-2.5">
-                    <div className="flex items-start gap-2.5 bg-blue-50/60 rounded-2xl px-4 py-3 border border-blue-200/50">
-                      <Network size={13} className="text-blue-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-[10px] font-bold text-blue-700 mb-0.5">Conexión a NAS o servidor en red</p>
-                        <p className="text-[9px] text-blue-600 leading-relaxed">
-                          Ingresa la IP de tu NAS (Synology, QNAP, etc.) o servidor local con MongoDB. El puerto estándar de MongoDB es <strong>27017</strong>.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 p-4 rounded-2xl bg-slate-50/60 border border-slate-200/50">
-                      <div className="col-span-2">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">IP del NAS / Servidor *</label>
-                        <input value={connFields.host} onChange={e => setConnFields(p => ({ ...p, host: e.target.value }))}
-                          placeholder="192.168.1.50" data-testid="nas-field-host"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Puerto MongoDB</label>
-                        <input value={connFields.port} onChange={e => setConnFields(p => ({ ...p, port: e.target.value }))}
-                          placeholder="27017" data-testid="nas-field-port"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Usuario MongoDB</label>
-                          <input value={connFields.user} onChange={e => setConnFields(p => ({ ...p, user: e.target.value }))}
-                            placeholder="admin" data-testid="nas-field-user"
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Contraseña</label>
-                          <input type="password" value={connFields.pass} onChange={e => setConnFields(p => ({ ...p, pass: e.target.value }))}
-                            placeholder="••••••••" data-testid="nas-field-pass"
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                        </div>
-                      </div>
-                      <div className="col-span-3">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Base de datos</label>
-                        <input value={connFields.db} onChange={e => setConnFields(p => ({ ...p, db: e.target.value }))}
-                          placeholder="cinema_events" data-testid="nas-field-db"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                      </div>
-                      {buildUrlFromFields() && (
-                        <div className="col-span-3 flex items-center gap-2 bg-blue-50/50 rounded-xl px-3 py-2">
-                          <Link2 size={10} className="text-blue-400 shrink-0" />
-                          <p className="text-[10px] font-mono text-blue-700 truncate">{buildUrlFromFields().replace(/:([^@]+)@/, ":***@")}</p>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-start gap-2 bg-amber-50/60 rounded-2xl px-4 py-3 border border-amber-200/50 text-[9px] text-amber-700">
-                      <AlertCircle size={11} className="shrink-0 mt-0.5" />
-                      <span>Asegúrate que MongoDB esté instalado en el NAS y que el puerto 27017 esté abierto en el firewall de tu red local.</span>
-                    </div>
-                  </div>
-                )}
-
-                {dbTestResult && (
-                  <div className={`flex items-center gap-2 text-xs font-semibold px-3 py-2.5 rounded-xl ${dbTestResult.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60" : "bg-red-50 text-red-600 border border-red-200/60"}`}>
-                    {dbTestResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
-                    {dbTestResult.msg}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                    onClick={handleDbTest} disabled={!activeConnUrl.trim() || dbTesting} data-testid="db-test-btn"
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 transition-all disabled:opacity-40">
-                    {dbTesting ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
-                    Probar
-                  </motion.button>
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                    onClick={handleDbConnect} disabled={!activeConnUrl.trim() || dbConnecting} data-testid="db-connect-btn"
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl btn-primary text-white text-xs font-bold disabled:opacity-40">
-                    {dbConnecting ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
-                    Conectar
-                  </motion.button>
-                  {dbStats?.is_custom && (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleDbReset} disabled={dbResetting} data-testid="db-reset-btn"
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 text-red-600 text-xs font-bold hover:bg-red-100 transition-all border border-red-200/60 disabled:opacity-40">
-                      {dbResetting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                      Restaurar local
-                    </motion.button>
-                  )}
-                </div>
-              </div>
-
-              </>)}
-
-              {unifiedTab === "presets" && (<>
-              {/* Explicación sencilla */}
-              <div className="flex items-start gap-2.5 bg-amber-50/70 rounded-2xl px-4 py-3 border border-amber-100 mb-3">
-                <Info size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              {/* ── Explicación breve ── */}
+              <div className="flex items-start gap-2.5 bg-emerald-50/70 rounded-2xl px-4 py-3 border border-emerald-100">
+                <Info size={14} className="text-emerald-500 shrink-0 mt-0.5" />
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Guarda tus bases de datos favoritas para conectarte a ellas con un solo clic, sin escribir la dirección cada vez.
+                  Guarda una copia completa de tus datos (reservas, socios, apariencia, configuración) en la carpeta <code className="font-mono text-emerald-700">backups/</code> junto a la app. Un solo botón, sin complicaciones.
                 </p>
               </div>
-              {/* ── Conexiones guardadas ── */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conexiones guardadas</p>
-                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                    onClick={() => setShowAddPreset(p => !p)} data-testid="add-preset-btn"
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors">
-                    <Plus size={11} /> Agregar
-                  </motion.button>
+
+              {/* ── BOTÓN PRINCIPAL: Guardar respaldo ahora ── */}
+              <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.985 }}
+                onClick={() => {
+                  // Forzar destino a la carpeta de la app (junto al .exe)
+                  if (autoBackup.config.mode !== "app_folder") {
+                    autoBackup.updateConfig({ mode: "app_folder" });
+                  }
+                  autoBackup.triggerBackup();
+                  toast({ title: "Guardando respaldo en tu PC..." });
+                }}
+                disabled={autoBackup.isBacking}
+                data-testid="backup-save-now-btn"
+                className="w-full flex items-center justify-center gap-3 py-5 rounded-3xl text-base font-black text-white transition-all disabled:opacity-60"
+                style={{
+                  background: "linear-gradient(135deg, #10b981, #059669)",
+                  boxShadow: "0 14px 32px -10px rgba(16,185,129,0.55), inset 0 1px 0 rgba(255,255,255,0.28)",
+                }}>
+                {autoBackup.isBacking
+                  ? <><Loader2 size={20} className="animate-spin" /> Guardando respaldo...</>
+                  : <><Download size={20} strokeWidth={2.6} /> Guardar respaldo ahora</>}
+              </motion.button>
+
+              {/* ── Confirmación último respaldo ── */}
+              {(autoBackup.backupCount > 0 || lastAgoDisplay) && (
+                <div className="flex items-center gap-3 bg-white/60 border border-emerald-100 rounded-2xl px-4 py-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center">
+                    <CheckCircle size={14} className="text-emerald-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[11px] font-bold text-slate-700">Último respaldo: <span className="text-emerald-700">{lastAgoDisplay || "hace unos segundos"}</span></p>
+                    <p className="text-[10px] text-slate-400">Se guardó en la carpeta <code className="font-mono">backups/</code> junto a la app</p>
+                  </div>
+                  {autoBackup.backupCount > 0 && (
+                    <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                      {autoBackup.backupCount} esta sesión
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {autoBackup.lastError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200/60 rounded-xl px-4 py-2.5 text-xs text-red-600 font-semibold">
+                  <AlertCircle size={13} />
+                  {autoBackup.lastError}
+                </div>
+              )}
+
+              {/* ── Automático (opcional, plegado) ── */}
+              <div className={`rounded-2xl border transition-all ${autoBackup.config.enabled ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200/70 bg-white/50"}`}>
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${autoBackup.config.enabled ? "bg-emerald-200" : "bg-slate-100"}`}>
+                      <Zap size={14} className={autoBackup.config.enabled ? "text-emerald-700" : "text-slate-400"} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-800">Respaldo automático</p>
+                      <p className="text-[10px] text-slate-400">
+                        {autoBackup.config.enabled
+                          ? `Cada ${autoBackup.config.intervalMinutes} min mientras la app esté abierta`
+                          : "Actívalo para que se guarde solo"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    data-testid="auto-backup-toggle"
+                    onClick={() => {
+                      const next = !autoBackup.config.enabled;
+                      autoBackup.updateConfig({ enabled: next, mode: "app_folder" });
+                      toast({ title: next ? "Respaldo automático activado ✓" : "Respaldo automático desactivado" });
+                    }}
+                    className={`w-11 h-6 rounded-full transition-all duration-300 relative ${autoBackup.config.enabled ? "bg-emerald-500" : "bg-slate-300"}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-300 ${autoBackup.config.enabled ? "left-[22px]" : "left-0.5"}`} />
+                  </button>
                 </div>
 
                 <AnimatePresence>
-                  {showAddPreset && (
-                    <motion.div key="add-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                      className="space-y-2 pb-3 border-b border-white/40">
-                      <input type="text" value={presetName}
-                        onChange={e => setPresetName(e.target.value)}
-                        placeholder="Nombre (ej: Atlas Producción)"
-                        data-testid="preset-name-input"
-                        className="w-full bg-white/60 border border-slate-200/80 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                      <div className="flex gap-2">
-                        <input type="text" value={newDbUrl}
-                          onChange={e => { setNewDbUrl(e.target.value); setDbTestResult(null); }}
-                          placeholder="mongodb://... o mongodb+srv://..."
-                          className="flex-1 bg-white/60 border border-slate-200/80 rounded-xl px-3 py-2.5 text-xs font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                          data-testid="save-preset-btn"
-                          disabled={!presetName.trim() || !newDbUrl.trim()}
-                          onClick={() => {
-                            const newPreset = { name: presetName.trim(), url: newDbUrl.trim(), color: ["indigo","emerald","sky","amber","rose","violet"][presets.length % 6] };
-                            savePresets([...presets, newPreset]);
-                            setPresetName(""); setNewDbUrl(""); setShowAddPreset(false);
-                            toast({ title: `Preset "${newPreset.name}" guardado ✓` });
-                          }}
-                          className="px-4 py-2.5 rounded-xl bg-amber-500 text-white text-xs font-bold disabled:opacity-40 hover:bg-amber-600 transition-colors">
-                          <Save size={12} />
-                        </motion.button>
+                  {autoBackup.config.enabled && (
+                    <motion.div key="freq" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+                      className="px-4 pb-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { label: "30 min",  value: 30 },
+                          { label: "1 hora",  value: 60 },
+                          { label: "6 horas", value: 360 },
+                          { label: "24 horas", value: 1440 },
+                        ].map(({ label, value }) => {
+                          const active = autoBackup.config.intervalMinutes === value;
+                          return (
+                            <button key={value}
+                              data-testid={`interval-${value}`}
+                              onClick={() => autoBackup.updateConfig({ intervalMinutes: value })}
+                              className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${active ? "bg-emerald-500 text-white shadow-sm" : "bg-white/70 text-slate-500 border border-slate-200 hover:bg-white"}`}>
+                              {label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
 
-                {presets.length === 0 ? (
-                  <div className="flex items-center justify-center py-4 text-slate-300 gap-2">
-                    <Bookmark size={14} />
-                    <span className="text-xs">No hay conexiones guardadas</span>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {presets.map((p, i) => {
-                      const colors = {
-                        indigo: "bg-indigo-50 border-indigo-200/60 text-indigo-700",
-                        emerald: "bg-emerald-50 border-emerald-200/60 text-emerald-700",
-                        sky: "bg-sky-50 border-sky-200/60 text-sky-700",
-                        amber: "bg-amber-50 border-amber-200/60 text-amber-700",
-                        rose: "bg-rose-50 border-rose-200/60 text-rose-700",
-                        violet: "bg-violet-50 border-violet-200/60 text-violet-700",
-                      };
-                      return (
-                        <div key={p.url || p.name || i} className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${colors[p.color] || colors.indigo}`}>
-                          <Database size={13} className="shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <p className="text-xs font-black truncate">{p.name}</p>
-                              {p.factory && (
-                                <span
-                                  data-testid={`preset-factory-badge-${i}`}
-                                  title="Conexión precargada con el proyecto"
-                                  className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/70 border border-current/20 text-[8px] font-black uppercase tracking-wider"
-                                >
-                                  <Star size={8} className="fill-current" />
-                                  De fábrica
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[10px] font-mono opacity-60 truncate">{p.url.replace(/:([^@]+)@/, ":***@")}</p>
-                          </div>
-                          <div className="flex gap-1.5">
-                            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                              data-testid={`preset-connect-${i}`}
-                              onClick={async () => {
-                                setNewDbUrl(p.url);
-                                try {
-                                  const res = await switchDatabase(p.url);
-                                  const uploaded = res?.total_uploaded || 0;
-                                  if (uploaded > 0) {
-                                    toast({ title: `☁️ "${p.name}" conectada · ${uploaded} registros locales subidos`, description: "Los datos locales se fusionaron con la nube. Actualizando..." });
-                                  } else {
-                                    toast({ title: `Conectado a "${p.name}" ✓ — Actualizando...` });
-                                  }
-                                  setTimeout(() => window.location.reload(), 1600);
-                                } catch (e) { toast({ title: e.response?.data?.detail || "Error al conectar", variant: "destructive" }); }
-                              }}
-                              className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-white/80 hover:bg-white transition-colors border border-white/60">
-                              Conectar
-                            </motion.button>
-                            <button onClick={() => {
-                                const target = presets[i];
-                                if (target?.factory) {
-                                  // Registrar dismiss para no volver a añadirla en el próximo load
-                                  try {
-                                    const d = JSON.parse(localStorage.getItem("cp_db_factory_dismissed")) || [];
-                                    if (!d.includes(target.url)) {
-                                      d.push(target.url);
-                                      localStorage.setItem("cp_db_factory_dismissed", JSON.stringify(d));
-                                    }
-                                  } catch { /* noop */ }
-                                }
-                                savePresets(presets.filter((_, j) => j !== i));
-                              }}
-                              data-testid={`preset-delete-${i}`}
-                              className="w-7 h-7 rounded-lg bg-white/60 hover:bg-red-50 flex items-center justify-center transition-colors">
-                              <Trash2 size={10} className="text-red-400" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+              {/* ── Restaurar ── */}
+              <div className="rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Upload size={13} className="text-indigo-500" />
+                  <p className="text-xs font-black text-slate-700">Restaurar respaldo</p>
+                  <span className="text-[10px] text-slate-400 ml-auto">Sube un archivo .json</span>
+                </div>
+                <input ref={restoreAutoInputRef} type="file" accept=".json"
+                  onChange={handleRestoreFile} className="hidden" id="restore-file-auto-input" data-testid="restore-file-auto-input" />
+                <label htmlFor="restore-file-auto-input"
+                  className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all border-2 border-dashed ${restoreLoading ? "border-slate-200 bg-slate-50 text-slate-300" : "border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700"}`}>
+                  {restoreLoading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  {restoreLoading ? "Restaurando datos..." : "Seleccionar archivo .json"}
+                </label>
+                {restoreResult && (
+                  <div className={`mt-2 flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl ${restoreResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+                    {restoreResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                    {restoreResult.msg}
                   </div>
                 )}
-
-                {/* MongoDB Atlas guide — removido por preferencia del proyecto */}
               </div>
-              </>)}
-
-              {unifiedTab === "backup" && (
-                <div className="space-y-4" data-testid="unified-backup-panel">
-                  {/* Explicación sencilla */}
-                  <div className="flex items-start gap-2.5 bg-emerald-50/70 rounded-2xl px-4 py-3 border border-emerald-100">
-                    <Info size={14} className="text-emerald-500 shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      Una copia de seguridad guarda todos tus datos en un archivo. Actívala para que se guarde sola cada cierto tiempo, o crea una copia ahora mismo.
-                    </p>
-                  </div>
-                  {/* Toggle principal */}
-                  <div className={`flex items-center justify-between rounded-2xl border-2 transition-all px-4 py-3 ${autoBackup.config.enabled ? "border-emerald-300 bg-emerald-50/60" : "border-slate-200 bg-white/50"}`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${autoBackup.config.enabled ? "bg-emerald-200" : "bg-slate-100"}`}>
-                        <Zap size={16} className={autoBackup.config.enabled ? "text-emerald-700" : "text-slate-400"} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
-                          Respaldo automático al PC
-                        </p>
-                        <p className="text-[11px] text-slate-400">Copias automáticas mientras la app está abierta</p>
-                      </div>
-                    </div>
-                    <button
-                      data-testid="auto-backup-toggle"
-                      onClick={() => {
-                        const next = !autoBackup.config.enabled;
-                        autoBackup.updateConfig({ enabled: next });
-                        if (next) toast({ title: "Respaldo automático activado ✓" });
-                        else toast({ title: "Respaldo automático desactivado" });
-                      }}
-                      className={`w-11 h-6 rounded-full transition-all duration-300 relative ${autoBackup.config.enabled ? "bg-emerald-500" : "bg-slate-200"}`}>
-                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all duration-300 ${autoBackup.config.enabled ? "left-[22px]" : "left-0.5"}`} />
-                    </button>
-                  </div>
-
-                  {/* Status cards cuando está activo */}
-                  <AnimatePresence>
-                    {autoBackup.config.enabled && (
-                      <motion.div key="status" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                        className="grid grid-cols-3 gap-3">
-                        <div className="bg-emerald-50 rounded-2xl p-3 text-center">
-                          <div className="text-lg font-black text-emerald-700" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>{autoBackup.backupCount}</div>
-                          <div className="text-[10px] font-bold text-emerald-500 mt-0.5">Respaldos esta sesión</div>
-                        </div>
-                        <div className="bg-white/70 rounded-2xl p-3 text-center border border-emerald-100">
-                          <div className="text-xs font-black text-slate-700 truncate">{lastAgoDisplay || "—"}</div>
-                          <div className="text-[10px] font-bold text-slate-400 mt-0.5">Último respaldo</div>
-                        </div>
-                        <div className="bg-white/70 rounded-2xl p-3 text-center border border-emerald-100">
-                          <div className="text-xs font-black text-slate-700">{countdown || "—"}</div>
-                          <div className="text-[10px] font-bold text-slate-400 mt-0.5">Próximo en</div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Frecuencia */}
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Frecuencia de respaldo</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { label: "30 min", value: 30 },
-                        { label: "1 hora", value: 60 },
-                        { label: "2 horas", value: 120 },
-                        { label: "6 horas", value: 360 },
-                        { label: "12 horas", value: 720 },
-                        { label: "24 horas", value: 1440 },
-                      ].map(({ label, value }) => {
-                        const active = autoBackup.config.intervalMinutes === value;
-                        return (
-                          <motion.button key={value} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                            data-testid={`interval-${value}`}
-                            onClick={() => autoBackup.updateConfig({ intervalMinutes: value })}
-                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${active ? "bg-emerald-500 text-white shadow-sm" : "bg-white/60 text-slate-600 border border-slate-200/80 hover:bg-white"}`}>
-                            {label}
-                          </motion.button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Destino */}
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Destino del respaldo</p>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        data-testid="mode-downloads"
-                        onClick={() => autoBackup.updateConfig({ mode: "app_folder" })}
-                        className={`flex flex-col items-start gap-2 p-4 rounded-2xl border-2 transition-all text-left ${autoBackup.config.mode === "app_folder" ? "border-emerald-400 bg-emerald-50/60" : "border-slate-200/70 bg-white/50 hover:border-slate-300"}`}>
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${autoBackup.config.mode === "app_folder" ? "bg-emerald-200" : "bg-slate-100"}`}>
-                          <Download size={14} className={autoBackup.config.mode === "app_folder" ? "text-emerald-700" : "text-slate-400"} />
-                        </div>
-                        <div>
-                          <p className={`text-xs font-black ${autoBackup.config.mode === "app_folder" ? "text-emerald-800" : "text-slate-700"}`}>Carpeta de la app</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Se guarda en <code>backups/</code> junto a la app de escritorio</p>
-                        </div>
-                        {autoBackup.config.mode === "app_folder" && (
-                          <span className="text-[10px] font-black text-emerald-600 flex items-center gap-1">
-                            <CheckCircle size={10} /> Seleccionado
-                          </span>
-                        )}
-                      </motion.button>
-
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        data-testid="mode-folder"
-                        onClick={async () => {
-                          if (!autoBackup.fsSupportado) {
-                            toast({ title: "Tu navegador no soporta carpeta fija (usa Chrome o Edge)", variant: "destructive" });
-                            return;
-                          }
-                          if (autoBackup.config.folderName && autoBackup.config.mode === "folder") {
-                            autoBackup.updateConfig({ mode: "folder" });
-                            return;
-                          }
-                          const ok = await autoBackup.pickFolder();
-                          if (ok) toast({ title: `Carpeta seleccionada: ${autoBackup.config.folderName} ✓` });
-                        }}
-                        className={`flex flex-col items-start gap-2 p-4 rounded-2xl border-2 transition-all text-left ${autoBackup.config.mode === "folder" ? "border-indigo-400 bg-indigo-50/60" : "border-slate-200/70 bg-white/50 hover:border-slate-300"}`}>
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${autoBackup.config.mode === "folder" ? "bg-indigo-200" : "bg-slate-100"}`}>
-                          <FolderOpen size={14} className={autoBackup.config.mode === "folder" ? "text-indigo-700" : "text-slate-400"} />
-                        </div>
-                        <div>
-                          <p className={`text-xs font-black ${autoBackup.config.mode === "folder" ? "text-indigo-800" : "text-slate-700"}`}>Carpeta fija</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {autoBackup.config.folderName ? `📁 ${autoBackup.config.folderName}` : "Elige una carpeta y la app siempre guardará ahí"}
-                          </p>
-                        </div>
-                        {autoBackup.config.mode === "folder" && autoBackup.config.folderName && (
-                          <span className="text-[10px] font-black text-indigo-600 flex items-center gap-1">
-                            <CheckCircle size={10} /> {autoBackup.folderPerm === "granted" ? "Acceso activo" : "Clic para reactivar"}
-                          </span>
-                        )}
-                        {!autoBackup.fsSupportado && (
-                          <span className="text-[10px] text-amber-500 font-bold">Solo Chrome/Edge</span>
-                        )}
-                      </motion.button>
-                    </div>
-
-                    <AnimatePresence>
-                      {autoBackup.config.mode === "folder" && autoBackup.config.folderName && (
-                        <motion.div key="folder-info" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                          className="mt-2.5 flex items-center gap-3 bg-indigo-50/70 rounded-2xl px-4 py-3 border border-indigo-200/50">
-                          <Folder size={14} className="text-indigo-500 shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-indigo-800 truncate">📁 {autoBackup.config.folderName}</p>
-                            <p className="text-[10px] text-indigo-400">
-                              {autoBackup.folderPerm === "granted" ? "Acceso concedido — guardando automáticamente" : "Clic en 'Cambiar carpeta' para reactivar el acceso"}
-                            </p>
-                          </div>
-                          <div className="flex gap-1.5">
-                            <button onClick={autoBackup.pickFolder} data-testid="change-folder-btn"
-                              className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors">
-                              Cambiar
-                            </button>
-                            <button onClick={() => { autoBackup.clearFolder(); toast({ title: "Carpeta eliminada" }); }}
-                              data-testid="clear-folder-btn"
-                              className="px-2 py-1.5 rounded-xl text-[10px] font-bold bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
-                              <Trash2 size={10} />
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {autoBackup.lastError && (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-200/60 rounded-xl px-4 py-2.5 text-xs text-red-600 font-semibold">
-                      <AlertCircle size={13} />
-                      {autoBackup.lastError}
-                    </div>
-                  )}
-
-                  {/* Respaldo manual */}
-                  <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      autoBackup.triggerBackup();
-                      toast({ title: "Creando respaldo ahora..." });
-                    }}
-                    disabled={autoBackup.isBacking}
-                    data-testid="manual-auto-backup-btn"
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white transition-all disabled:opacity-60"
-                    style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
-                    {autoBackup.isBacking
-                      ? <><Loader2 size={14} className="animate-spin" /> Guardando respaldo...</>
-                      : <><Download size={14} /> Guardar respaldo ahora</>}
-                  </motion.button>
-
-                  {/* Contenido incluido */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Incluye:</span>
-                    {["Reservas", "Socios", "Apariencia", "Temas", "Config.", "Todo"].map((tag) => (
-                      <span key={tag} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex items-center gap-1">
-                        <CheckCircle size={8} /> {tag}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Restaurar */}
-                  <div className="rounded-2xl border border-emerald-200/60 bg-emerald-50/30 overflow-hidden">
-                    <div className="flex items-center gap-2 px-4 py-3 border-b border-emerald-100/60">
-                      <Upload size={13} className="text-emerald-600" />
-                      <p className="text-xs font-black text-emerald-800">Restaurar respaldo</p>
-                      <span className="text-[10px] text-emerald-500 ml-auto">Sube un archivo .json guardado</span>
-                    </div>
-                    <div className="p-3 space-y-2">
-                      <input ref={restoreAutoInputRef} type="file" accept=".json"
-                        onChange={handleRestoreFile} className="hidden" id="restore-file-auto-input" data-testid="restore-file-auto-input" />
-                      <label htmlFor="restore-file-auto-input"
-                        className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all border-2 border-dashed ${restoreLoading ? "border-emerald-200 bg-emerald-50 text-emerald-300" : "border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-700"}`}>
-                        {restoreLoading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                        {restoreLoading ? "Restaurando datos..." : "Seleccionar archivo .json para restaurar"}
-                      </label>
-                      {restoreResult && (
-                        <div className={`flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl ${restoreResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
-                          {restoreResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
-                          {restoreResult.msg}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Guardar en servidor + historial */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                      onClick={handleCreateServerBackup} disabled={backupCreating} data-testid="backup-server-btn"
-                      className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-white/70 border border-emerald-200/60 text-emerald-700 disabled:opacity-60 hover:bg-emerald-50 transition-all">
-                      {backupCreating ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      <span className="text-xs font-bold">Guardar en servidor</span>
-                      <span className="text-[9px] opacity-60">Historial 15 respaldos</span>
-                    </motion.button>
-                    <div className="flex flex-col items-center gap-1.5 py-3 rounded-2xl bg-white/50 border border-slate-100">
-                      <HardDrive size={16} className="text-slate-400" />
-                      <span className="text-xs font-bold text-slate-600">{backupHistory.length} respaldo(s)</span>
-                      <button onClick={loadBackupHistory} className="text-[9px] text-indigo-500 font-bold hover:underline">Actualizar lista</button>
-                    </div>
-                  </div>
-
-                  {backupHistory.length > 0 && (
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
-                      {backupHistory.map((b) => {
-                        const isAuto = b.label === "auto";
-                        return (
-                          <div key={b.filename} className="flex items-center gap-2.5 bg-white/60 border border-slate-100 rounded-xl px-3 py-2 hover:bg-white/80 transition-all">
-                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${isAuto ? "bg-slate-100" : "bg-indigo-100"}`}>
-                              {isAuto ? <Clock size={10} className="text-slate-400" /> : <ShieldCheck size={10} className="text-indigo-500" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-bold text-slate-700 truncate">{b.filename}</p>
-                              <span className="text-[9px] text-slate-400">{b.size} · {fmtDate(b.created_at)}</span>
-                            </div>
-                            <a href={downloadBackupFileUrl(b.filename)} download data-testid={`backup-dl-${b.filename}`}
-                              className="w-6 h-6 rounded-lg bg-indigo-50 hover:bg-indigo-100 flex items-center justify-center transition-colors">
-                              <Download size={10} className="text-indigo-600" />
-                            </a>
-                            <button onClick={() => handleDeleteBackup(b.filename)} data-testid={`backup-del-${b.filename}`}
-                              className="w-6 h-6 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors">
-                              <Trash2 size={10} className="text-red-400" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="flex items-start gap-2.5 bg-amber-50/60 rounded-2xl px-4 py-3 border border-amber-200/50">
-                    <AlertCircle size={13} className="text-amber-500 shrink-0 mt-0.5" />
-                    <p className="text-[10px] text-amber-700 leading-relaxed">
-                      El respaldo automático funciona mientras esta página esté abierta. Para respaldos en segundo plano usa "Guardar en servidor".
-                    </p>
-                  </div>
-                </div>
-              )}
 
             </div>
             </CollapseBody>

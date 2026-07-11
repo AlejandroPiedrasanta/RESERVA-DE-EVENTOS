@@ -2,13 +2,13 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getMetasProgress, upsertMeta } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award, Plane, Car, Home, Globe, ImagePlus, Upload, Camera, Trash2, Zap } from "lucide-react";
+import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award, Plane, Car, Home, Globe, ImagePlus, Upload, Camera, Trash2, Zap, Wand2 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { celebrateGoalReached, fireConfetti, triggerSidebarSweep } from "@/lib/celebrations";
 import PageHeader from "@/components/PageHeader";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Slider } from "@/components/ui/slider";
+import * as SliderPrimitive from "@radix-ui/react-slider";
 
 const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const MONTHS_SHORT = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
@@ -541,9 +541,74 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
  *    ajustar intervalo, y modificar tamaño, posición y rotación por imagen.
  *  · Persiste todo en localStorage por año+tipo.
  * ============================================================ */
+
+// Variantes de transición para el carrusel de imágenes
+const TRANSITIONS = {
+  fade: {
+    label: "Fundido",
+    hint: "Cross-fade suave",
+    variants: {
+      initial: { opacity: 0 },
+      animate: { opacity: 1 },
+      exit:    { opacity: 0 },
+    },
+    duration: 0.6,
+  },
+  slide: {
+    label: "Deslizar",
+    hint: "Entra desde la derecha",
+    variants: {
+      initial: { opacity: 0, x: 60 },
+      animate: { opacity: 1, x: 0 },
+      exit:    { opacity: 0, x: -60 },
+    },
+    duration: 0.55,
+  },
+  zoom: {
+    label: "Zoom",
+    hint: "Aparece creciendo",
+    variants: {
+      initial: { opacity: 0, scale: 0.82 },
+      animate: { opacity: 1, scale: 1 },
+      exit:    { opacity: 0, scale: 1.12 },
+    },
+    duration: 0.55,
+  },
+  blur: {
+    label: "Desenfoque",
+    hint: "Enfoca de borroso a nítido",
+    variants: {
+      initial: { opacity: 0, filter: "blur(16px)" },
+      animate: { opacity: 1, filter: "blur(0px)" },
+      exit:    { opacity: 0, filter: "blur(16px)" },
+    },
+    duration: 0.6,
+  },
+  flip: {
+    label: "Flip 3D",
+    hint: "Volteo tridimensional",
+    variants: {
+      initial: { opacity: 0, rotateY: 90 },
+      animate: { opacity: 1, rotateY: 0 },
+      exit:    { opacity: 0, rotateY: -90 },
+    },
+    duration: 0.65,
+  },
+  rise: {
+    label: "Elevar",
+    hint: "Emerge desde abajo",
+    variants: {
+      initial: { opacity: 0, y: 36 },
+      animate: { opacity: 1, y: 0 },
+      exit:    { opacity: 0, y: -36 },
+    },
+    duration: 0.55,
+  },
+};
+
 function GoalDreamImage({ year, type }) {
   const LS_KEY = `cp:metas:dreamImageV2:${type}:${year}`;
-  const DEFAULT_STATE = { images: [], intervalSec: 5 };
+  const DEFAULT_STATE = { images: [], intervalSec: 5, transition: "fade" };
 
   const [state, setState] = useState(DEFAULT_STATE);
   const [idx, setIdx] = useState(0);
@@ -558,6 +623,7 @@ function GoalDreamImage({ year, type }) {
         setState({
           images: Array.isArray(parsed.images) ? parsed.images : [],
           intervalSec: Number(parsed.intervalSec) > 0 ? Number(parsed.intervalSec) : 5,
+          transition: TRANSITIONS[parsed.transition] ? parsed.transition : "fade",
         });
       } else {
         // Migración desde versión previa (una sola imagen)
@@ -567,6 +633,7 @@ function GoalDreamImage({ year, type }) {
           setState({
             images: [newImage(legacy)],
             intervalSec: 5,
+            transition: "fade",
           });
         } else {
           setState(DEFAULT_STATE);
@@ -603,31 +670,49 @@ function GoalDreamImage({ year, type }) {
       >
         <AnimatePresence mode="wait">
           {current ? (
-            <motion.div
-              key={current.id + "-" + idx}
-              className="absolute inset-0"
-              style={{ zIndex: current.onTop ? 60 : 50 }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: current.opacity ?? 1, y: [0, -4, 0] }}
-              exit={{ opacity: 0 }}
-              transition={{
-                opacity: { duration: 0.6, ease: "easeOut" },
-                y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-              }}
-            >
-              <img
-                src={current.src}
-                alt="Meta"
-                className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
-                draggable={false}
-                style={{
-                  transform: imgTransform(current),
-                  transformOrigin: "center center",
-                  filter: imgFilter(current),
-                }}
-                data-testid="goal-image-preview"
-              />
-            </motion.div>
+            (() => {
+              const tr = TRANSITIONS[state.transition] || TRANSITIONS.fade;
+              const animateExtra = state.transition === "fade"
+                ? { opacity: current.opacity ?? 1, y: [0, -4, 0] }
+                : { ...tr.variants.animate, opacity: current.opacity ?? 1 };
+              return (
+                <motion.div
+                  key={current.id + "-" + idx}
+                  className="absolute inset-0"
+                  style={{
+                    zIndex: current.onTop ? 60 : 50,
+                    perspective: state.transition === "flip" ? 900 : undefined,
+                    transformStyle: state.transition === "flip" ? "preserve-3d" : undefined,
+                  }}
+                  initial={tr.variants.initial}
+                  animate={animateExtra}
+                  exit={tr.variants.exit}
+                  transition={{
+                    opacity: { duration: tr.duration, ease: "easeOut" },
+                    x:       { duration: tr.duration, ease: [0.22, 0.9, 0.36, 1] },
+                    y:       state.transition === "fade"
+                              ? { duration: 4, repeat: Infinity, ease: "easeInOut" }
+                              : { duration: tr.duration, ease: [0.22, 0.9, 0.36, 1] },
+                    scale:   { duration: tr.duration, ease: [0.22, 0.9, 0.36, 1] },
+                    filter:  { duration: tr.duration, ease: "easeOut" },
+                    rotateY: { duration: tr.duration, ease: [0.22, 0.9, 0.36, 1] },
+                  }}
+                >
+                  <img
+                    src={current.src}
+                    alt="Meta"
+                    className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
+                    draggable={false}
+                    style={{
+                      transform: imgTransform(current),
+                      transformOrigin: "center center",
+                      filter: imgFilter(current),
+                    }}
+                    data-testid="goal-image-preview"
+                  />
+                </motion.div>
+              );
+            })()
           ) : (
             <motion.div
               key="empty"
@@ -647,22 +732,6 @@ function GoalDreamImage({ year, type }) {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Contador discreto abajo si hay >1 imagen */}
-        {state.images.length > 1 && (
-          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 pb-1">
-            {state.images.map((_, i) => (
-              <span
-                key={i}
-                className="h-1 rounded-full transition-all"
-                style={{
-                  width: i === idx ? 14 : 4,
-                  background: i === idx ? "rgba(15,23,42,0.7)" : "rgba(148,163,184,0.5)",
-                }}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
       <GoalImageModal
@@ -802,6 +871,7 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
   };
   const updateShadow = (patch) => updateSelected({ shadow: { ...(selected.shadow || {}), ...patch } });
   const setIntervalSec = (v) => { setDraft((p) => ({ ...p, intervalSec: Math.max(1, Math.min(60, v)) })); setDirty(true); };
+  const setTransition = (key) => { setDraft((p) => ({ ...p, transition: key })); setDirty(true); };
 
   const handleFiles = async (files) => {
     const arr = Array.from(files || []);
@@ -876,40 +946,43 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose?.()}>
-      <DialogContent className="max-w-3xl w-[95vw] max-h-[92vh] p-0 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <DialogContent className="max-w-6xl w-[97vw] max-h-[95vh] p-0 bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden flex flex-col [&>button]:hidden">
         {/* Header simple */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-white via-slate-50/40 to-white">
           <div>
-            <DialogTitle className="text-base font-bold text-slate-900">Imágenes de tu meta</DialogTitle>
-            <p className="text-xs text-slate-400 mt-0.5">Arrastra la imagen para moverla · edita y guarda</p>
+            <DialogTitle className="text-lg font-bold text-slate-900 tracking-tight">Imágenes de tu meta</DialogTitle>
+            <p className="text-xs text-slate-400 mt-0.5">Vista previa a tamaño real · arrastra para mover · guarda cuando termines</p>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+            className="w-9 h-9 rounded-full bg-white/60 backdrop-blur-md border border-slate-200/70 hover:bg-white hover:border-slate-300 flex items-center justify-center text-slate-500 hover:text-slate-800 transition-all shadow-sm"
             data-testid="goal-modal-close"
+            aria-label="Cerrar"
           >
-            <X size={16} />
+            <X size={16} strokeWidth={2.4} />
           </button>
         </div>
 
         {/* Body scrollable */}
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-0 flex-1 overflow-hidden">
-          <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_340px] gap-0 flex-1 overflow-hidden">
+          <div className="p-6 flex flex-col gap-5 overflow-y-auto bg-gradient-to-br from-slate-50/60 to-white">
             {/* Preview con VISOR: la imagen puede salir del marco; lo de fuera se atenúa */}
             <div
               onPointerDown={onPointerDown}
-              className={`relative w-full aspect-square max-h-[400px] mx-auto rounded-xl overflow-hidden ${selected ? "cursor-grab active:cursor-grabbing" : ""}`}
+              className={`relative w-full mx-auto rounded-2xl overflow-hidden ${selected ? "cursor-grab active:cursor-grabbing" : ""}`}
               style={{
-                background: "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 18px 18px",
+                background: "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 22px 22px",
                 border: "1px solid #e2e8f0",
                 touchAction: "none",
+                minHeight: "clamp(420px, 62vh, 720px)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(15,23,42,0.04)",
               }}
               data-testid="goal-modal-preview"
             >
               {selected ? (
                 <>
                   {/* Escenario = tamaño real del visor (área visible en la tarjeta) */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[62%] aspect-[4/5]">
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[58%] max-w-[520px] aspect-[4/5]">
                     <img
                       key={selected.id}
                       src={selected.src}
@@ -927,7 +1000,7 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
 
                   {/* VISOR: marco + máscara (spotlight) que oscurece lo que queda fuera */}
                   <div
-                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[62%] aspect-[4/5] rounded-md pointer-events-none"
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[58%] max-w-[520px] aspect-[4/5] rounded-lg pointer-events-none"
                     style={{
                       boxShadow: "0 0 0 9999px rgba(15,23,42,0.55)",
                       outline: "2px solid rgba(255,255,255,0.95)",
@@ -936,23 +1009,24 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
                     data-testid="goal-modal-visor"
                   >
                     {/* esquinas tipo cámara */}
-                    <span className="absolute -top-px -left-px w-4 h-4 border-t-2 border-l-2 border-indigo-400 rounded-tl-md" />
-                    <span className="absolute -top-px -right-px w-4 h-4 border-t-2 border-r-2 border-indigo-400 rounded-tr-md" />
-                    <span className="absolute -bottom-px -left-px w-4 h-4 border-b-2 border-l-2 border-indigo-400 rounded-bl-md" />
-                    <span className="absolute -bottom-px -right-px w-4 h-4 border-b-2 border-r-2 border-indigo-400 rounded-br-md" />
-                    <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[9px] font-bold uppercase tracking-wider text-white/90 whitespace-nowrap">
+                    <span className="absolute -top-px -left-px w-5 h-5 border-t-2 border-l-2 border-indigo-400 rounded-tl-lg" />
+                    <span className="absolute -top-px -right-px w-5 h-5 border-t-2 border-r-2 border-indigo-400 rounded-tr-lg" />
+                    <span className="absolute -bottom-px -left-px w-5 h-5 border-b-2 border-l-2 border-indigo-400 rounded-bl-lg" />
+                    <span className="absolute -bottom-px -right-px w-5 h-5 border-b-2 border-r-2 border-indigo-400 rounded-br-lg" />
+                    <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-widest text-white/95 whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-900/60 backdrop-blur">
                       Visible en la meta
                     </span>
                   </div>
 
-                  <span className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-white bg-slate-900/70 backdrop-blur px-2.5 py-1 rounded-full pointer-events-none z-10">
-                    ✋ Arrastra para mover
+                  <span className="absolute top-3 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-white bg-slate-900/70 backdrop-blur px-3 py-1.5 rounded-full pointer-events-none z-10 shadow-lg">
+                    ✋ Arrastra para mover · así se verá en tu meta
                   </span>
                 </>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-300">
-                  <ImagePlus size={38} strokeWidth={1.4} />
-                  <p className="text-xs font-semibold mt-2 text-slate-400">Sube tu primera imagen</p>
+                  <ImagePlus size={56} strokeWidth={1.2} />
+                  <p className="text-sm font-semibold mt-3 text-slate-400">Sube tu primera imagen</p>
+                  <p className="text-xs font-medium mt-1 text-slate-300">Usa el panel de la derecha</p>
                 </div>
               )}
             </div>
@@ -1028,12 +1102,42 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
             )}
 
             {/* Carrusel */}
-            <div className="pt-1 border-t border-slate-100">
+            <div className="pt-1 border-t border-slate-100 space-y-3">
               <TransformSlider label="Intervalo del carrusel" value={draft.intervalSec} min={1} max={30} step={1}
                 onChange={(v) => setIntervalSec(v)} display={`${draft.intervalSec}s`} testId="tr-interval" icon={Zap} />
               <p className="text-[10px] text-slate-400 font-medium mt-1">
                 {draft.images.length < 2 ? "Con 1 imagen no rota" : "Con 2+ imágenes rota automáticamente"}
               </p>
+
+              {/* Transición al cambiar de imagen */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                    <Wand2 size={11} strokeWidth={2.6} className="text-fuchsia-500" />
+                    Transición entre imágenes
+                  </p>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    {TRANSITIONS[draft.transition]?.label || "Fundido"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2" data-testid="transition-picker">
+                  {Object.entries(TRANSITIONS).map(([key, cfg]) => (
+                    <TransitionChip
+                      key={key}
+                      active={draft.transition === key}
+                      onClick={() => setTransition(key)}
+                      label={cfg.label}
+                      hint={cfg.hint}
+                      testId={`transition-${key}`}
+                    />
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium mt-2 italic">
+                  {draft.images.length < 2
+                    ? "Sube 2+ imágenes para previsualizar la transición"
+                    : "Se aplica automáticamente al rotar entre imágenes"}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -1042,8 +1146,14 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
             <div className="flex items-center justify-between mb-3">
               <p className="text-[11px] font-semibold text-slate-500">Galería · {draft.images.length}</p>
               <button onClick={() => fileInputRef.current?.click()}
-                className="text-[11px] font-bold text-white px-3 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all flex items-center gap-1.5"
-                style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)" }}
+                className="text-[11px] font-bold text-white px-3 py-1.5 rounded-full transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-1.5"
+                style={{
+                  background: "linear-gradient(135deg, rgba(99,102,241,0.95), rgba(168,85,247,0.95))",
+                  backdropFilter: "blur(12px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(12px) saturate(160%)",
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  boxShadow: "0 6px 18px -6px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
+                }}
                 data-testid="goal-modal-upload">
                 <Upload size={11} strokeWidth={2.6} /> Subir
               </button>
@@ -1078,21 +1188,34 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
         </div>
 
         {/* Footer con Guardar */}
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-slate-100 bg-white">
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-gradient-to-r from-white via-slate-50/40 to-white">
           <span className={`text-xs font-semibold transition-colors ${dirty ? "text-amber-600" : "text-slate-400"}`} data-testid="goal-modal-dirty">
             {dirty ? "● Cambios sin guardar" : "Todo guardado"}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose}
-              className="text-sm font-semibold text-slate-500 hover:text-slate-800 px-4 py-2 rounded-full hover:bg-slate-100 transition-colors"
+              className="text-sm font-semibold text-slate-600 hover:text-slate-900 px-4 py-2 rounded-full transition-all"
+              style={{
+                background: "linear-gradient(135deg, rgba(255,255,255,0.7), rgba(255,255,255,0.4))",
+                backdropFilter: "blur(12px) saturate(160%)",
+                WebkitBackdropFilter: "blur(12px) saturate(160%)",
+                border: "1px solid rgba(226,232,240,0.9)",
+                boxShadow: "0 4px 14px -6px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
+              }}
               data-testid="goal-modal-cancel">
               Cancelar
             </button>
             <button onClick={handleSave} disabled={!dirty}
-              className="text-sm font-bold text-white px-5 py-2 rounded-full shadow-md hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)" }}
+              className="text-sm font-bold text-white px-5 py-2.5 rounded-full transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0"
+              style={{
+                background: "linear-gradient(135deg, rgba(99,102,241,0.95), rgba(168,85,247,0.95))",
+                backdropFilter: "blur(14px) saturate(180%)",
+                WebkitBackdropFilter: "blur(14px) saturate(180%)",
+                border: "1px solid rgba(255,255,255,0.35)",
+                boxShadow: "0 10px 28px -8px rgba(99,102,241,0.6), inset 0 1px 0 rgba(255,255,255,0.35)",
+              }}
               data-testid="goal-modal-save">
-              <Check size={15} strokeWidth={2.6} /> Guardar configuración
+              <Check size={15} strokeWidth={2.8} /> Guardar configuración
             </button>
           </div>
         </div>
@@ -1104,6 +1227,99 @@ function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveId
 // Etiqueta de sección minimalista
 function SectionLabel({ children }) {
   return <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{children}</p>;
+}
+
+// Glass slider con track translúcido, range en gradiente indigo→púrpura y thumb glassmorphism
+function GlassSlider({ value, min, max, step, onValueChange, testId }) {
+  return (
+    <SliderPrimitive.Root
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      onValueChange={onValueChange}
+      data-testid={testId}
+      className="relative flex w-full touch-none select-none items-center h-6"
+    >
+      <SliderPrimitive.Track
+        className="relative h-2 w-full grow overflow-hidden rounded-full"
+        style={{
+          background: "linear-gradient(135deg, rgba(226,232,240,0.85), rgba(241,245,249,0.55))",
+          border: "1px solid rgba(226,232,240,0.9)",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.06)",
+          backdropFilter: "blur(6px)",
+          WebkitBackdropFilter: "blur(6px)",
+        }}
+      >
+        <SliderPrimitive.Range
+          className="absolute h-full rounded-full"
+          style={{
+            background: "linear-gradient(135deg, #6366f1, #a855f7)",
+            boxShadow: "0 0 12px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
+          }}
+        />
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb
+        className="block h-5 w-5 rounded-full focus:outline-none transition-transform hover:scale-110 active:scale-95"
+        style={{
+          background: "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(255,255,255,0.72))",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          border: "1.5px solid rgba(99,102,241,0.85)",
+          boxShadow: "0 4px 12px rgba(99,102,241,0.4), inset 0 1px 0 rgba(255,255,255,0.9)",
+        }}
+      />
+    </SliderPrimitive.Root>
+  );
+}
+
+// Glass chip para seleccionar tipo de transición del carrusel
+function TransitionChip({ active, onClick, label, hint, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      aria-pressed={active}
+      title={hint}
+      className="group relative flex flex-col items-start px-3 py-2.5 rounded-xl transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 text-left"
+      style={
+        active
+          ? {
+              background: "linear-gradient(135deg, rgba(99,102,241,0.92), rgba(168,85,247,0.92))",
+              border: "1px solid rgba(255,255,255,0.35)",
+              boxShadow:
+                "0 10px 26px -8px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
+              backdropFilter: "blur(14px) saturate(160%)",
+              WebkitBackdropFilter: "blur(14px) saturate(160%)",
+            }
+          : {
+              background:
+                "linear-gradient(135deg, rgba(255,255,255,0.7), rgba(255,255,255,0.4))",
+              border: "1px solid rgba(226,232,240,0.9)",
+              boxShadow:
+                "0 4px 14px -6px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.7)",
+              backdropFilter: "blur(14px) saturate(160%)",
+              WebkitBackdropFilter: "blur(14px) saturate(160%)",
+            }
+      }
+    >
+      <span className={`text-[11px] font-black tracking-tight ${active ? "text-white" : "text-slate-800"}`}>
+        {label}
+      </span>
+      <span className={`text-[9px] font-semibold mt-0.5 ${active ? "text-white/85" : "text-slate-400"}`}>
+        {hint}
+      </span>
+      {active && (
+        <span
+          className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+          style={{ background: "white", boxShadow: "0 2px 6px rgba(99,102,241,0.5)" }}
+        >
+          <Check size={9} strokeWidth={3.4} className="text-indigo-600" />
+        </span>
+      )}
+    </button>
+  );
 }
 
 // Slider con etiqueta + valor mostrado
@@ -1119,13 +1335,13 @@ function TransformSlider({ label, value, min, max, step, onChange, display, test
           {display}
         </p>
       </div>
-      <Slider
+      <GlassSlider
         value={[value]}
         min={min}
         max={max}
         step={step}
         onValueChange={([v]) => onChange(v)}
-        data-testid={testId}
+        testId={testId}
       />
     </div>
   );
@@ -1151,32 +1367,52 @@ function PositionField({ label, value, onChange, testId }) {
           data-testid={`${testId}-input`}
         />
       </div>
-      <Slider
+      <GlassSlider
         value={[Math.max(-800, Math.min(800, value))]}
         min={-800} max={800} step={1}
         onValueChange={([v]) => onChange(v)}
-        data-testid={testId}
+        testId={testId}
       />
       <p className="text-[9px] text-slate-400 font-semibold mt-1">Escribe cualquier valor (sin límite)</p>
     </div>
   );
 }
 
-// Chip toggle para opciones on/off
+// Glass toggle button para opciones on/off (glassmorphism)
 function ToggleChip({ active, onClick, children, testId, accent }) {
+  const baseStyle = {
+    backdropFilter: "blur(14px) saturate(160%)",
+    WebkitBackdropFilter: "blur(14px) saturate(160%)",
+  };
+  const activeStyle = accent
+    ? {
+        ...baseStyle,
+        background: "linear-gradient(135deg, rgba(139,92,246,0.85), rgba(236,72,153,0.85))",
+        boxShadow: "0 8px 24px -6px rgba(139,92,246,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
+        border: "1px solid rgba(255,255,255,0.35)",
+      }
+    : {
+        ...baseStyle,
+        background: "linear-gradient(135deg, rgba(99,102,241,0.88), rgba(79,70,229,0.88))",
+        boxShadow: "0 8px 22px -6px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.3)",
+        border: "1px solid rgba(255,255,255,0.3)",
+      };
+  const idleStyle = {
+    ...baseStyle,
+    background: "linear-gradient(135deg, rgba(255,255,255,0.65), rgba(255,255,255,0.35))",
+    boxShadow: "0 4px 14px -6px rgba(15,23,42,0.15), inset 0 1px 0 rgba(255,255,255,0.7)",
+    border: "1px solid rgba(226,232,240,0.9)",
+  };
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`text-[11px] font-black px-3 py-1.5 rounded-full border transition-all ${
-        active
-          ? accent
-            ? "text-white border-transparent shadow-md"
-            : "bg-indigo-600 text-white border-transparent shadow-md"
-          : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+      aria-pressed={active}
+      className={`text-[11px] font-black px-3.5 py-2 rounded-full transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
+        active ? "text-white" : "text-slate-700 hover:text-slate-900"
       }`}
-      style={active && accent ? { background: "linear-gradient(135deg,#8b5cf6,#ec4899)" } : undefined}
+      style={active ? activeStyle : idleStyle}
     >
       {children}
     </button>
