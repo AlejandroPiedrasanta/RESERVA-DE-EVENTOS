@@ -50,10 +50,14 @@ on:
 permissions:
   contents: write
 
-# Cancela runs en curso del mismo ref al pushear uno nuevo. Evita builds
-# duplicados y la carrera entre los 4 jobs publicando al mismo release.
+# Concurrency por RELEASE_TAG (no por ref) para que builds de versiones distintas
+# NO se cancelen entre sí. Antes: todos los dispatches en `refs/heads/main`
+# compartían grupo -> cada push de "Publicar cambios" cancelaba el anterior
+# antes de terminar el .exe de Windows, dejando releases sin binarios Windows.
+# Ahora: cada tag (v1.20.50, v1.20.51, ...) tiene su propio grupo. Solo se
+# cancela un build si otro dispatch apunta al MISMO release_tag (retry manual).
 concurrency:
-  group: build-exe-${{ github.ref }}
+  group: build-exe-${{ github.event.inputs.release_tag || github.ref_name }}
   cancel-in-progress: true
 
 jobs:

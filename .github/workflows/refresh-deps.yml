@@ -22,6 +22,16 @@ on:
 permissions:
   contents: write
 
+# Concurrency: solo UN refresh-deps corre a la vez.
+# Bug previo: 2 dispatches paralelos ejecutaban `gh release delete/create` a la
+# vez -> race condition, uno borraba el release mientras el otro subia assets,
+# causando fallos 404/422 en los uploads. Con cancel-in-progress=true, si el
+# usuario publica 2 veces seguidas, el segundo cancela al primero y usa la
+# version mas reciente de deps.
+concurrency:
+  group: refresh-deps
+  cancel-in-progress: true
+
 jobs:
   build-and-publish:
     # Emergent pods run on aarch64 -> use ARM runner so pip wheels match.
@@ -78,28 +88,72 @@ jobs:
 
       - name: Download pip wheels (resiliente)
         run: |
+          set +e
           mkdir -p /tmp/wheels
           # Quitar paquetes internos de Emergent que NO estan en PyPI:
           #   · emergentintegrations (paquete interno)
           #   · litellm @ URL privada
           grep -vE '^(emergentintegrations|litellm)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
           pip download --dest /tmp/wheels -r /tmp/req.txt || echo "⚠ algunas wheels no se pudieron bajar (no fatal)"
-          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels || true
+          # Asegurar que /tmp/wheels tiene al menos 1 archivo (dummy) para que
+          # el tarball nunca quede vacio y evite 'HTTP 400: Bad Content-Length'.
+          if [ -z "$(ls -A /tmp/wheels 2>/dev/null)" ]; then
+            echo "⚠ /tmp/wheels vacio — creando placeholder"
+            echo "no wheels downloaded on $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /tmp/wheels/README.txt
+          fi
+          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels
           sha256sum backend/requirements.txt | awk '{print $1}' > $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256
+          # Validar tamanos minimos (evitar assets vacios que rompan la subida)
+          echo "→ pip-wheels.tar.gz: $(du -h $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz | cut -f1)"
+          echo "→ pip-wheels.sha256: $(wc -c < $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256) bytes"
 
       - name: Recreate deps-latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Delete previous release + tag if present, then recreate cleanly.
+          set -e
+          # Validar que todos los artifacts existen y no estan vacios
+          echo "→ Verificando artifacts:"
+          for f in artifacts/node_modules.tar.zst artifacts/node_modules.tar.gz \
+                   artifacts/node_modules.tar.gz.sha16 artifacts/node_modules.sha256 \
+                   artifacts/pip-wheels.tar.gz artifacts/pip-wheels.sha256; do
+            if [ ! -s "$f" ]; then
+              echo "✗ ERROR: $f no existe o esta vacio"
+              exit 1
+            fi
+            echo "  ✓ $f ($(du -h $f | cut -f1))"
+          done
+
+          # Borrar release + tag previo (si existe) y crear release VACIO
           gh release delete deps-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create deps-latest \
             --title deps-latest \
             --prerelease \
-            --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Podado + zstd/gzip. Target env: linux/aarch64, node 20, python 3.11." \
-            artifacts/node_modules.tar.zst \
-            artifacts/node_modules.tar.gz \
-            artifacts/node_modules.tar.gz.sha16 \
-            artifacts/node_modules.sha256 \
-            artifacts/pip-wheels.tar.gz \
-            artifacts/pip-wheels.sha256
+            --notes "Auto-refreshed by CI on $(date -u +%Y-%m-%dT%H:%M:%SZ) from commit ${{ github.sha }}. Podado + zstd/gzip. Target env: linux/aarch64, node 20, python 3.11."
+
+          # Subir cada asset INDIVIDUALMENTE con retry (hasta 3 intentos).
+          # Fix para "HTTP 400: Bad Content-Length" de la API de uploads de GitHub,
+          # que ocasionalmente falla con archivos pequenos (.sha256, .sha16 ~65 bytes).
+          upload_with_retry() {
+            local file="$1"
+            local name; name=$(basename "$file")
+            for attempt in 1 2 3; do
+              if gh release upload deps-latest "$file" --clobber 2>&1; then
+                echo "  ✓ Subido: $name (intento $attempt)"
+                return 0
+              fi
+              echo "  ⚠ Fallo subida de $name (intento $attempt/3), reintentando en 5s..."
+              sleep 5
+            done
+            echo "✗ ERROR: No se pudo subir $name tras 3 intentos"
+            return 1
+          }
+
+          echo "→ Subiendo assets:"
+          upload_with_retry artifacts/node_modules.tar.zst
+          upload_with_retry artifacts/node_modules.tar.gz
+          upload_with_retry artifacts/node_modules.tar.gz.sha16
+          upload_with_retry artifacts/node_modules.sha256
+          upload_with_retry artifacts/pip-wheels.tar.gz
+          upload_with_retry artifacts/pip-wheels.sha256
+          echo "✅ Release deps-latest recreado con todos los assets"

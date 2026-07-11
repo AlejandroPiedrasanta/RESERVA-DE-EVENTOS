@@ -62,16 +62,18 @@ try_releases_tarball() {
   # Fetch the sha16 first (small, fast) so we can validate BEFORE 60MB download
   local remote_sha
   remote_sha=$(curl -fsSL --max-time 15 "$SHA16_URL" 2>/dev/null | tr -d '[:space:]')
-  if [ -n "$remote_sha" ]; then
-    local cur
-    cur=$(sha256sum frontend/package.json | cut -c1-16)
-    if [ "$remote_sha" != "$cur" ]; then
-      echo "✗ Releases tarball stale (package.json: $cur vs release: $remote_sha) — CI hasn't caught up yet"
-      return 1
-    fi
-    # Pre-write sha16 so validate_node_modules can check post-extract
-    echo "$remote_sha" > frontend/node_modules.tar.gz.sha16
+  if [ -z "$remote_sha" ]; then
+    echo "✗ Releases has no sha16 asset yet (CI not caught up) — skipping 60MB download"
+    return 1
   fi
+  local cur
+  cur=$(sha256sum frontend/package.json | cut -c1-16)
+  if [ "$remote_sha" != "$cur" ]; then
+    echo "✗ Releases tarball stale (package.json: $cur vs release: $remote_sha) — CI hasn't caught up yet"
+    return 1
+  fi
+  # Pre-write sha16 so validate_node_modules can check post-extract
+  echo "$remote_sha" > frontend/node_modules.tar.gz.sha16
   curl -fsSL --max-time 120 "$TARBALL_URL" -o /tmp/nm.tgz 2>/dev/null || { echo "✗ Releases download failed"; return 1; }
   rm -rf frontend/node_modules
   tar -xzf /tmp/nm.tgz -C frontend/ 2>/dev/null
