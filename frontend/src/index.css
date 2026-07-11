@@ -1775,10 +1775,8 @@ body.app-blur-unfocus::after {
 
 /* Popover container */
 .ultra-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 60;
+  position: fixed;
+  z-index: 9999;
   background: linear-gradient(160deg, rgba(20,15,45,0.98), rgba(30,20,60,0.98));
   border: 1px solid rgba(167,139,250,0.35);
   border-radius: 18px;
