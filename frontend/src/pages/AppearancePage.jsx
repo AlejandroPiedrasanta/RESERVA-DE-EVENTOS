@@ -115,6 +115,7 @@ export default function AppearancePage() {
     darkMode, changeDarkMode,
     fontScale, changeFontScale,
     bgIntensity, changeBgIntensity,
+    cinematic, changeCinematic,
     sidebarCompact, changeSidebarCompact,
     dateFormat, changeDateFormat,
     fontFamily, changeFontFamily,
@@ -501,50 +502,155 @@ export default function AppearancePage() {
                 },
               ]} />
 
-            {/* Island margin sliders — only when island is active */}
-            {sidebarStyle === "island" && (
+            <OptionRow label={es ? "Ambientación cinematográfica 3D" : "Cinematic 3D ambience"} testPrefix="cinematic"
+              current={cinematic || "normal"}
+              onChange={(v) => { changeCinematic(v); toast({ title: es ? "Ambientación actualizada" : "Ambience updated" }); }}
+              cols={4}
+              options={[
+                { id:"off",     label: es ? "Apagada" : "Off",       hint: es ? "Sin fondo" : "None",
+                  preview: <div className="w-14 h-9 rounded-lg bg-slate-100 flex items-center justify-center"><div className="w-4 h-px bg-slate-300" /></div> },
+                { id:"subtle",  label: es ? "Sutil" : "Subtle",      hint: es ? "Muy tenue" : "Faint",
+                  preview: <div className="w-14 h-9 rounded-lg bg-slate-100 relative overflow-hidden"><div className="absolute right-1.5 bottom-1 w-3.5 h-3.5 rounded-full border border-[var(--t-from)]/30" /></div> },
+                { id:"normal",  label: "Normal",                     hint: es ? "Equilibrada" : "Balanced",
+                  preview: <div className="w-14 h-9 rounded-lg bg-slate-100 relative overflow-hidden"><div className="absolute right-1 bottom-1 w-4 h-4 rounded-full border-2 border-[var(--t-from)]/50" /><div className="absolute left-1.5 top-1.5 w-2.5 h-2.5 rounded-full border border-[var(--t-to)]/50" /></div> },
+                { id:"intense", label: es ? "Intensa" : "Intense",   hint: es ? "Cine total" : "Full cinema",
+                  preview: <div className="w-14 h-9 rounded-lg bg-slate-100 relative overflow-hidden"><div className="absolute right-1 bottom-0.5 w-5 h-5 rounded-full border-2 border-[var(--t-from)]/70" /><div className="absolute left-1 top-1 w-3 h-3 rounded-full border-2 border-[var(--t-to)]/70" /><div className="absolute left-1/2 -top-1 w-2 h-8 bg-white/60 blur-[2px] -rotate-12" /></div> },
+              ]} />
+
+            {/* Island panel — enhanced controls + live preview, only when island is active */}
+            {sidebarStyle === "island" && (() => {
+              const im = { top: 14, bottom: 14, side: 14, radius: 28, gap: 6, ...islandMargins };
+              const SC = 0.32; // preview scale factor
+              const barW = 26;
+              const previewH = 116;
+              return (
               <motion.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="pl-3 border-l-2 border-[var(--t-from)]/30 space-y-4 mt-1"
+                className="rounded-3xl border border-[var(--t-from)]/25 p-4 sm:p-5 space-y-5 mt-1 overflow-hidden relative"
+                style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.7), rgba(255,255,255,0.45))" }}
+                data-testid="island-panel"
               >
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  {es ? "Separaciones de la isla" : "Island spacing"}
-                </p>
-                <StyleSlider
-                  label={es ? "Separación superior" : "Top gap"}
-                  value={islandMargins.top} min={0} max={60} step={2}
-                  onChange={v => changeIslandMargins("top", v)} unit="px"
-                  testId="island-top" defaultValue={14}
-                />
-                <StyleSlider
-                  label={es ? "Separación inferior" : "Bottom gap"}
-                  value={islandMargins.bottom} min={0} max={60} step={2}
-                  onChange={v => changeIslandMargins("bottom", v)} unit="px"
-                  testId="island-bottom" defaultValue={14}
-                />
-                <StyleSlider
-                  label={es ? "Separación lateral (izquierda)" : "Side gap (left)"}
-                  value={islandMargins.side} min={0} max={60} step={2}
-                  onChange={v => changeIslandMargins("side", v)} unit="px"
-                  testId="island-side" defaultValue={14}
-                />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg"
+                    style={{ background: "linear-gradient(135deg,var(--t-from),var(--t-to))", boxShadow: "0 8px 20px var(--t-shadow)" }}>
+                    <LayoutGrid size={16} className="text-white" strokeWidth={2.2} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-700 leading-tight">
+                      {es ? "Separaciones de la isla" : "Island spacing"}
+                    </p>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      {es ? "Sepárala por todos lados · se adapta a cada pantalla" : "Separate on every side · adapts to any screen"}
+                    </p>
+                  </div>
+                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    onClick={() => { ["top","bottom","side","radius","gap"].forEach(k => changeIslandMargins(k, k === "radius" ? 28 : k === "gap" ? 6 : 14)); toast({ title: es ? "Isla restablecida" : "Island reset" }); }}
+                    data-testid="island-reset-all"
+                    className="ml-auto flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-[var(--t-from)] transition-colors flex-shrink-0 bg-white/70 px-2.5 py-1 rounded-full border border-white/80"
+                    title={es ? "Restablecer isla" : "Reset island"}>
+                    <RotateCcw size={11} /> {es ? "Restablecer" : "Reset"}
+                  </motion.button>
+                </div>
+
+                {/* ── Live preview ── */}
+                <div className="relative w-full rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200/60 border border-white/70 overflow-hidden"
+                  style={{ height: previewH }} data-testid="island-preview">
+                  <span className="absolute top-2 left-3 text-[8px] font-black uppercase tracking-widest text-slate-400">
+                    {es ? "Vista previa" : "Preview"}
+                  </span>
+                  {/* island bar */}
+                  <motion.div layout
+                    className="absolute flex flex-col items-center justify-start gap-1 py-1.5"
+                    style={{
+                      top: im.top * SC + 16,
+                      bottom: im.bottom * SC + 6,
+                      left: im.side * SC + 8,
+                      width: barW,
+                      borderRadius: im.radius * SC + 4,
+                      background: "linear-gradient(160deg, rgba(255,255,255,0.95), rgba(255,255,255,0.75))",
+                      boxShadow: "0 10px 24px rgba(31,38,135,0.22)",
+                      border: "1px solid rgba(255,255,255,0.9)",
+                    }}>
+                    {[0,1,2,3].map(i => <div key={i} className="rounded-full" style={{ width: 12, height: 3, background: i === 0 ? "linear-gradient(90deg,var(--t-from),var(--t-to))" : "rgba(148,163,184,0.5)" }} />)}
+                  </motion.div>
+                  {/* content area */}
+                  <motion.div layout
+                    className="absolute rounded-xl bg-white/55 border border-white/70"
+                    style={{
+                      top: im.top * SC + 16,
+                      bottom: im.bottom * SC + 6,
+                      left: im.side * SC + 8 + barW + im.gap * SC + 4,
+                      right: 8,
+                    }}>
+                    <div className="p-2 space-y-1">
+                      <div className="h-2 w-1/3 rounded" style={{ background: "linear-gradient(90deg,var(--t-from),var(--t-to))", opacity: 0.5 }} />
+                      <div className="h-1.5 w-2/3 rounded bg-slate-200" />
+                      <div className="h-1.5 w-1/2 rounded bg-slate-200" />
+                    </div>
+                  </motion.div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-5">
+                  <StyleSlider
+                    label={es ? "Separación superior" : "Top gap"}
+                    value={im.top} min={0} max={140} step={2}
+                    onChange={v => changeIslandMargins("top", v)} unit="px"
+                    testId="island-top" defaultValue={14}
+                  />
+                  <StyleSlider
+                    label={es ? "Separación inferior" : "Bottom gap"}
+                    value={im.bottom} min={0} max={140} step={2}
+                    onChange={v => changeIslandMargins("bottom", v)} unit="px"
+                    testId="island-bottom" defaultValue={14}
+                  />
+                  <StyleSlider
+                    label={es ? "Separación izquierda" : "Left gap"}
+                    value={im.side} min={0} max={140} step={2}
+                    onChange={v => changeIslandMargins("side", v)} unit="px"
+                    testId="island-side" defaultValue={14}
+                  />
+                  <StyleSlider
+                    label={es ? "Separación derecha (contenido)" : "Right gap (content)"}
+                    value={im.gap} min={0} max={100} step={2}
+                    onChange={v => changeIslandMargins("gap", v)} unit="px"
+                    testId="island-gap" defaultValue={6} isNew
+                  />
+                  <div className="sm:col-span-2">
+                    <StyleSlider
+                      label={es ? "Redondez de esquinas" : "Corner radius"}
+                      value={im.radius} min={8} max={60} step={2}
+                      onChange={v => changeIslandMargins("radius", v)} unit="px"
+                      testId="island-radius" defaultValue={28} isNew
+                    />
+                  </div>
+                </div>
+
+                {/* Quick presets */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {[
+                    { id: "snug",     label: es ? "Ajustada" : "Snug",     v: { top: 8,  bottom: 8,  side: 8,  gap: 4,  radius: 22 } },
+                    { id: "balanced", label: es ? "Equilibrada" : "Balanced", v: { top: 14, bottom: 14, side: 14, gap: 6,  radius: 28 } },
+                    { id: "airy",     label: es ? "Aireada" : "Airy",       v: { top: 32, bottom: 32, side: 28, gap: 16, radius: 36 } },
+                    { id: "floating", label: es ? "Flotante" : "Floating",  v: { top: 60, bottom: 60, side: 48, gap: 28, radius: 44 } },
+                  ].map(p => (
+                    <motion.button key={p.id} whileHover={{ scale: 1.05, y: -1 }} whileTap={{ scale: 0.96 }}
+                      onClick={() => { Object.entries(p.v).forEach(([k, val]) => changeIslandMargins(k, val)); toast({ title: `${es ? "Isla" : "Island"}: ${p.label}` }); }}
+                      data-testid={`island-preset-${p.id}`}
+                      className="px-3 py-1.5 rounded-full text-[11px] font-bold bg-white/70 border border-white/80 text-slate-600 hover:text-[var(--t-from)] hover:border-[var(--t-from)]/40 transition-colors">
+                      {p.label}
+                    </motion.button>
+                  ))}
+                </div>
               </motion.div>
-            )}
+              );
+            })()}
 
             <div className="flex items-center justify-between">
               <div><p className="text-sm font-black text-slate-800">{es ? "Barra lateral compacta" : "Compact Sidebar"}</p><p className="text-[11px] text-slate-400 mt-0.5">{es ? "Solo iconos" : "Icons only"}</p></div>
               <Toggle value={sidebarCompact} onChange={v => { changeSidebarCompact(v); toast({ title: v ? "Sidebar compacta ✓" : "Sidebar expandida" }); }} testId="sidebar-compact-toggle" />
             </div>
-
-            <OptionRow label={es ? "Altura del encabezado" : "Header Height"} testPrefix="header-h"
-              current={as.headerHeight || "normal"} onChange={v => cs("headerHeight", v)} cols={3}
-              options={[
-                { id:"compact", label:es?"Compacto":"Compact", preview: <div className="w-10 h-3 rounded bg-slate-300" /> },
-                { id:"normal",  label:es?"Normal":"Normal",   preview: <div className="w-10 h-4 rounded bg-slate-300" /> },
-                { id:"tall",    label:es?"Alto":"Tall",       preview: <div className="w-10 h-6 rounded bg-slate-300" /> },
-              ]} />
 
             <OptionRow label={es ? "Estilo activo en sidebar" : "Active Nav Style"} testPrefix="nav-active"
               current={as.navActiveStyle || "background"} onChange={v => cs("navActiveStyle", v)} cols={4}
@@ -554,9 +660,6 @@ export default function AppearancePage() {
                 { id:"dot",         label:"Dot",                    preview: <div className="flex items-center gap-1 w-10"><div className="w-2 h-2 rounded-full btn-primary" /><div className="flex-1 h-4 rounded bg-slate-100" /></div> },
                 { id:"underline",   label:es?"Subrayado":"Underline",preview: <div className="w-10 h-4 rounded bg-slate-100 border-b-2 border-[var(--t-from)]" /> },
               ]} />
-
-            <OptionRow label={es ? "Ancho del contenido" : "Content Width"} testPrefix="width" current={pageWidth} onChange={changePageWidth} cols={4}
-              options={[{id:"narrow",label:es?"Estrecho":"Narrow"},{id:"medium",label:es?"Normal":"Normal"},{id:"wide",label:es?"Ancho":"Wide"},{id:"full",label:es?"Completo":"Full"}]} />
 
             <OptionRow label={es ? "Barra de desplazamiento" : "Scrollbar"} testPrefix="scrollbar" current={scrollbar} onChange={changeScrollbar} cols={3}
               options={[{id:"default",label:es?"Normal":"Default"},{id:"thin",label:es?"Fina":"Thin"},{id:"none",label:es?"Oculta":"Hidden"}]} />
@@ -569,15 +672,6 @@ export default function AppearancePage() {
 
             <StyleSlider label={es ? "Profundidad de sombra" : "Shadow Depth"} value={shadowDepth} min={0} max={5} step={1} onChange={changeShadowDepth} unit="" testId="shadow-depth-slider" defaultValue={2} />
 
-            <OptionRow label={es ? "Estilo de divisores" : "Divider Style"} testPrefix="divider-style"
-              current={as.dividerStyle || "subtle"} onChange={v => cs("dividerStyle", v)} cols={4}
-              options={[
-                { id:"none",    label:es?"Sin línea":"None",   preview: <div className="w-10 h-4 flex items-center"><div className="w-full h-px" /></div> },
-                { id:"subtle",  label:es?"Sutil":"Subtle",     preview: <div className="w-10 h-4 flex items-center"><div className="w-full h-px bg-slate-200" /></div> },
-                { id:"solid",   label:es?"Sólido":"Solid",     preview: <div className="w-10 h-4 flex items-center"><div className="w-full h-0.5 bg-slate-400" /></div> },
-                { id:"dashed",  label:es?"Punteado":"Dashed",  preview: <div className="w-10 h-4 flex items-center"><div className="w-full border-t border-dashed border-slate-400" /></div> },
-              ]} />
-
             <OptionRow label={es ? "Estilo de filas en tabla" : "Table Row Style"} testPrefix="table-row"
               current={as.tableRowStyle || "hover"} onChange={v => cs("tableRowStyle", v)} cols={4}
               options={[
@@ -585,15 +679,6 @@ export default function AppearancePage() {
                 { id:"striped",  label:es?"Rayado":"Striped",     preview: <div className="w-10 space-y-0.5"><div className="h-1.5 rounded bg-slate-200" /><div className="h-1.5 rounded bg-slate-50" /><div className="h-1.5 rounded bg-slate-200" /></div> },
                 { id:"bordered", label:es?"Bordes":"Bordered",    preview: <div className="w-10 space-y-0.5"><div className="h-1.5 rounded border border-slate-200 bg-white" /><div className="h-1.5 rounded border border-slate-200 bg-white" /></div> },
                 { id:"minimal",  label:es?"Mínimo":"Minimal",     preview: <div className="w-10 space-y-0.5"><div className="h-1.5 border-b border-slate-100 bg-transparent" /><div className="h-1.5 border-b border-slate-100 bg-transparent" /></div> },
-              ]} />
-
-            <OptionRow label={es ? "Efecto hover en tarjetas" : "Card Hover Effect"} testPrefix="card-hover"
-              current={as.cardHover || "lift"} onChange={v => cs("cardHover", v)} cols={4}
-              options={[
-                { id:"none",     label:es?"Ninguno":"None",      preview: <div className="w-10 h-5 rounded-xl glass" /> },
-                { id:"lift",     label:es?"Elevar":"Lift",       preview: <div className="w-10 h-5 rounded-xl glass shadow-md" /> },
-                { id:"glow",     label:"Glow",                   preview: <div className="w-10 h-5 rounded-xl glass" style={{boxShadow:"0 0 10px var(--t-from)44"}} /> },
-                { id:"border",   label:es?"Borde":"Border",      preview: <div className="w-10 h-5 rounded-xl glass border-2 border-[var(--t-from)]/40" /> },
               ]} />
 
             <OptionRow label={es ? "Estilo de badges/etiquetas" : "Badge Style"} testPrefix="badge-style"
@@ -612,37 +697,6 @@ export default function AppearancePage() {
                 { id:"center", label:es?"Centro":"Center",       preview: <div className="w-10 h-7 rounded bg-slate-100 flex flex-col items-center justify-center gap-0.5"><div className="w-4 h-1.5 rounded bg-slate-400" /></div> },
                 { id:"hidden", label:es?"Ocultar":"Hidden",      preview: <div className="w-10 h-7 rounded bg-slate-100 flex flex-col items-center justify-start pt-1 gap-0.5">{[1,2,3].map(i=><div key={i} className="w-7 h-0.5 bg-slate-300 rounded" />)}</div> },
               ]} />
-
-            <OptionRow label={es ? "Animación de carga de página" : "Page Load Animation"} testPrefix="page-load-anim"
-              current={as.pageLoadAnim || "fade"} onChange={v => cs("pageLoadAnim", v)} cols={4}
-              options={[
-                { id:"none",    label:es?"Ninguna":"None"  },
-                { id:"fade",    label:"Fade"               },
-                { id:"slide",   label:"Slide"              },
-                { id:"zoom",    label:"Zoom"               },
-              ]} />
-
-            <OptionRow label={es ? "Indicador de carga (spinner)" : "Loading Spinner Style"} testPrefix="spinner-style"
-              current={as.spinnerStyle || "ring"} onChange={v => cs("spinnerStyle", v)} cols={4}
-              options={[
-                { id:"ring",    label:"Ring",     preview: <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-indigo-500 animate-spin" /> },
-                { id:"dots",    label:"Dots",     preview: <div className="flex gap-0.5">{[0,1,2].map(i=><div key={i} className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{animationDelay:`${i*0.1}s`}} />)}</div> },
-                { id:"bar",     label:"Bar",      preview: <div className="w-10 h-1 bg-slate-200 rounded overflow-hidden"><div className="h-full w-1/2 btn-primary rounded animate-pulse" /></div> },
-                { id:"pulse",   label:"Pulse",    preview: <div className="w-4 h-4 rounded-full btn-primary animate-ping opacity-75" /> },
-              ]} />
-
-            <div>
-              <p className="text-xs font-black text-slate-600 mb-2.5">{es ? "Formato de fecha" : "Date Format"}</p>
-              <div className="flex gap-2 flex-wrap">
-                {["DD/MM/YYYY","MM/DD/YYYY","YYYY-MM-DD"].map(fmt => (
-                  <motion.button key={fmt} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} data-testid={`date-fmt-${fmt.replace(/\//g,"")}`}
-                    onClick={() => { changeDateFormat(fmt); toast({ title: `Formato: ${fmt}` }); }}
-                    className={`px-4 py-2 rounded-2xl border-2 text-xs font-bold transition-all ${dateFormat === fmt ? "border-[var(--t-from)] text-[var(--t-from)] bg-white/80" : "border-slate-200/70 text-slate-500 bg-white/40 hover:bg-white/60"}`}>
-                    {fmt}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
 
           </div>
         </Section>

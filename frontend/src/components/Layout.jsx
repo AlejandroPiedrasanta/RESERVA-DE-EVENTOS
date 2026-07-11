@@ -43,7 +43,7 @@ export default function Layout({ children }) {
   const iconPx = iconSize === "small" ? 14 : iconSize === "large" ? 22 : 18;
   const iconPxInline = iconSize === "small" ? 12 : iconSize === "large" ? 20 : 16;
 
-  const { top: mTop, bottom: mBottom, side: mSide } = islandMargins || { top: 14, bottom: 14, side: 14 };
+  const { top: mTop, bottom: mBottom, side: mSide, radius: mRadius = 28, gap: mGap = 6 } = islandMargins || { top: 14, bottom: 14, side: 14, radius: 28, gap: 6 };
   const sidebarWidth = compact ? "72px" : "240px";
 
   // Per-style inline overrides
@@ -68,7 +68,7 @@ export default function Layout({ children }) {
       left: `${mSide}px`,
       height: "auto",
       minHeight: "auto",
-      borderRadius: "28px",
+      borderRadius: `${mRadius}px`,
       boxShadow: "0 32px 80px rgba(31,38,135,0.22), 0 8px 30px rgba(0,0,0,0.1)",
       background: "rgba(255,255,255,0.88)",
       backdropFilter: "blur(28px) saturate(180%)",
@@ -83,7 +83,7 @@ export default function Layout({ children }) {
 
   const sidebarExtra = styleMap[sidebarStyle] || {};
   const mainMarginLeft = ["floating", "island"].includes(sidebarStyle)
-    ? `calc(${sidebarWidth} + ${sidebarStyle === "island" ? mSide + 12 : 14}px)`
+    ? `calc(${sidebarWidth} + ${sidebarStyle === "island" ? mSide + mGap + 6 : 14}px)`
     : sidebarWidth;
 
   const NAV_DEFS = {

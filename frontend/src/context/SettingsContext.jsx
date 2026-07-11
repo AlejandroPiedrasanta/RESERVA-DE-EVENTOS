@@ -258,6 +258,7 @@ export function SettingsProvider({ children }) {
   const [darkMode,       setDarkMode]       = useState(() => localStorage.getItem("dark_mode") === "true");
   const [fontScale,      setFontScale]      = useState(() => localStorage.getItem("font_scale") || "normal");
   const [bgIntensity,    setBgIntensity]    = useState(() => localStorage.getItem("bg_intensity") || "normal");
+  const [cinematic,      setCinematic]      = useState(() => localStorage.getItem("cinematic") || "normal");
   const [sidebarCompact, setSidebarCompact] = useState(() => localStorage.getItem("sidebar_compact") === "true");
   const [dateFormat,     setDateFormat]     = useState(() => localStorage.getItem("date_format") || "DD/MM/YYYY");
 
@@ -463,8 +464,8 @@ export function SettingsProvider({ children }) {
 
   // ── Island sidebar margins ─────────────────────────────────────────────────
   const [islandMargins, setIslandMargins] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("island_margins") || "null") || { top: 14, bottom: 14, side: 14 }; }
-    catch { return { top: 14, bottom: 14, side: 14 }; }
+    try { return JSON.parse(localStorage.getItem("island_margins") || "null") || { top: 14, bottom: 14, side: 14, radius: 28, gap: 6 }; }
+    catch { return { top: 14, bottom: 14, side: 14, radius: 28, gap: 6 }; }
   });
   const changeIslandMargins = (key, value) => {
     setIslandMargins(prev => {
@@ -602,6 +603,11 @@ export function SettingsProvider({ children }) {
   const changeSidebarCompact = (val) => {
     setSidebarCompact(val);
     localStorage.setItem("sidebar_compact", String(val));
+  };
+
+  const changeCinematic = (val) => {
+    setCinematic(val);
+    localStorage.setItem("cinematic", val);
   };
 
   const changeDateFormat = (val) => {
@@ -1074,6 +1080,7 @@ export function SettingsProvider({ children }) {
       darkMode, changeDarkMode,
       fontScale, changeFontScale,
       bgIntensity, changeBgIntensity,
+      cinematic, changeCinematic,
       sidebarCompact, changeSidebarCompact,
       dateFormat, changeDateFormat,
       // Appearance (extended)
