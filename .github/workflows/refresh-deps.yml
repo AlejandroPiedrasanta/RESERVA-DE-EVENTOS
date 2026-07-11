@@ -89,7 +89,7 @@ jobs:
       - name: Download pip wheels (resiliente)
         run: |
           set +e
-          mkdir -p /tmp/wheels
+          mkdir -p /tmp/wheels artifacts
           # Quitar paquetes internos de Emergent que NO estan en PyPI:
           #   · emergentintegrations (paquete interno)
           #   · litellm @ URL privada
@@ -101,11 +101,17 @@ jobs:
             echo "⚠ /tmp/wheels vacio — creando placeholder"
             echo "no wheels downloaded on $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /tmp/wheels/README.txt
           fi
-          cd /tmp && tar --use-compress-program="pigz -6" -cf $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz wheels
-          sha256sum backend/requirements.txt | awk '{print $1}' > $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256
+          # IMPORTANTE: sha256sum se ejecuta ANTES del cd, con paths absolutos.
+          # Antes: se hacia despues del `cd /tmp`, el path relativo
+          # 'backend/requirements.txt' no existia, sha256sum fallaba silente y
+          # creaba pip-wheels.sha256 vacio -> 'HTTP 400: Bad Content-Length'.
+          sha256sum "$GITHUB_WORKSPACE/backend/requirements.txt" | awk '{print $1}' > "$GITHUB_WORKSPACE/artifacts/pip-wheels.sha256"
+          cd /tmp && tar --use-compress-program="pigz -6" -cf "$GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz" wheels
           # Validar tamanos minimos (evitar assets vacios que rompan la subida)
           echo "→ pip-wheels.tar.gz: $(du -h $GITHUB_WORKSPACE/artifacts/pip-wheels.tar.gz | cut -f1)"
-          echo "→ pip-wheels.sha256: $(wc -c < $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256) bytes"
+          echo "→ pip-wheels.sha256: $(wc -c < $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256) bytes ($(cat $GITHUB_WORKSPACE/artifacts/pip-wheels.sha256))"
+          # Falla si sha256 quedo vacio (defensivo)
+          [ -s "$GITHUB_WORKSPACE/artifacts/pip-wheels.sha256" ] || { echo "✗ ERROR: pip-wheels.sha256 vacio tras sha256sum"; exit 1; }
 
       - name: Recreate deps-latest release
         env:
