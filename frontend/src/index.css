@@ -2050,3 +2050,30 @@ body.app-blur-unfocus::after {
     inset 0 1px 0 rgba(255,255,255,0.9);
 }
 
+
+
+/* PrettyDatePicker / PrettyTimePicker overrides when used inside light detail tiles */
+.rd-info-tile .ultra-datetime-btn {
+  padding: 4px 24px 4px 4px;
+  background: transparent;
+  border: none;
+  color: #0f172a;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  backdrop-filter: none;
+  box-shadow: none;
+  transition: color 0.2s ease;
+}
+.rd-info-tile .ultra-datetime-btn > svg:first-child { display: none; }
+.rd-info-tile .ultra-datetime-btn:hover,
+.rd-info-tile .ultra-datetime-btn.is-open,
+.rd-info-tile .ultra-datetime-btn:focus {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #6366f1;
+  transform: none;
+}
+.rd-info-tile .ultra-datetime-btn .empty { color: #cbd5e1; font-weight: 500; font-style: italic; }
+.rd-info-tile .ultra-datetime-btn .chevron { color: #94a3b8; right: 4px; }

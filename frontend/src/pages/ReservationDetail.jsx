@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
-import { getReservation, uploadReceipt, deleteReceipt, updateReservation } from "@/lib/api";
+import { getReservation, uploadReceipt, deleteReceipt, updateReservation, deleteReservation } from "@/lib/api";
 import {
   ArrowLeft, Upload, Trash2, Save, X, ImageIcon,
   Calendar as CalIcon, Clock, MapPin, Users, Package as PackageIcon,
@@ -12,8 +12,8 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
-import ReservationForm from "@/components/ReservationForm";
 import LocationsSection from "@/components/LocationsSection";
+import { PrettyDatePicker, PrettyTimePicker } from "@/components/PrettyDateTime";
 import TeamSection from "@/components/TeamSection";
 
 const STATUS_META = {
@@ -45,7 +45,8 @@ export default function ReservationDetail() {
   const [reservation, setReservation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(false);
 
   const [lightbox, setLightbox] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -53,7 +54,20 @@ export default function ReservationDetail() {
 
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
-    try { const data = await getReservation(id); setReservation(data); }
+    try {
+      const data = await getReservation(id);
+      setReservation(data);
+      setDraft({
+        client_name: data.client_name ?? "",
+        event_date: data.event_date ?? "",
+        event_time: data.event_time ?? "",
+        venue: data.venue ?? "",
+        guests_count: data.guests_count ?? "",
+        package_type: data.package_type ?? "",
+        client_phone: data.client_phone ?? "",
+        client_email: data.client_email ?? "",
+      });
+    }
     catch { toast({ title: dt.toasts?.loadError || "Error", variant: "destructive" }); }
     finally { if (!silent) setLoading(false); }
   };
@@ -89,14 +103,60 @@ export default function ReservationDetail() {
     catch { toast({ title: "Error", variant: "destructive" }); }
   };
 
-  const handleInlineSave = async (field, value) => {
+  const handleDraftChange = (field, value) => {
+    setDraft(prev => ({ ...prev, [field]: value }));
+  };
+
+  const isDirty = useMemo(() => {
+    if (!reservation) return false;
+    return Object.keys(draft).some(k => {
+      const orig = reservation[k] ?? "";
+      const cur = draft[k] ?? "";
+      return String(orig) !== String(cur);
+    });
+  }, [draft, reservation]);
+
+  const handleSaveAll = async () => {
+    if (!reservation || !isDirty || saving) return;
+    if (!String(draft.client_name || "").trim()) {
+      toast({ title: "El nombre es obligatorio", variant: "destructive" });
+      return;
+    }
+    const payload = {};
+    for (const k of Object.keys(draft)) {
+      let v = draft[k];
+      if (typeof v === "string") v = v.trim();
+      if (k === "guests_count") {
+        if (v === "" || v === null || v === undefined) v = null;
+        else {
+          const n = parseInt(v, 10);
+          if (Number.isNaN(n)) { toast({ title: "Invitados debe ser un número", variant: "destructive" }); return; }
+          v = n;
+        }
+      } else if (v === "") v = null;
+      if ((reservation[k] ?? "") !== (v ?? "")) payload[k] = v;
+    }
+    if (Object.keys(payload).length === 0) return;
+    setSaving(true);
     try {
-      await updateReservation(id, { [field]: value });
-      setReservation(prev => ({ ...prev, [field]: value }));
-      toast({ title: "Actualizado" });
+      await updateReservation(id, payload);
+      setReservation(prev => ({ ...prev, ...payload }));
+      toast({ title: "Cambios guardados" });
     } catch {
       toast({ title: "Error al guardar", variant: "destructive" });
-      throw new Error("save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteReservation = async () => {
+    if (!window.confirm("¿Eliminar reservación por completo? Esta acción no se puede deshacer.")) return;
+    try {
+      await deleteReservation(id);
+      toast({ title: "Reservación eliminada" });
+      navigate("/calendario");
+    } catch {
+      toast({ title: "Error al eliminar", variant: "destructive" });
     }
   };
 
@@ -236,14 +296,24 @@ export default function ReservationDetail() {
             className="flex items-center gap-2 flex-wrap"
           >
             <motion.button
-              whileHover={{ scale: 1.05, y: -1 }} whileTap={{ scale: 0.95 }}
-              onClick={() => setShowEdit(true)}
-              data-testid="edit-btn"
-              className="rd-edit-btn"
+              whileHover={{ scale: isDirty ? 1.05 : 1, y: isDirty ? -1 : 0 }} whileTap={{ scale: 0.95 }}
+              onClick={handleSaveAll}
+              disabled={!isDirty || saving}
+              data-testid="save-btn"
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white shadow-md transition-all ${(!isDirty || saving) ? "bg-slate-300 cursor-not-allowed" : "bg-gradient-to-br from-indigo-500 to-violet-600 hover:shadow-lg hover:from-indigo-600 hover:to-violet-700"}`}
             >
               <Save size={14} />
-              <span>Guardar</span>
-              <span className="rd-edit-glow" />
+              <span>{saving ? "Guardando..." : "Guardar"}</span>
+              {isDirty && !saving && <span className="w-1.5 h-1.5 rounded-full bg-white/90 animate-pulse" />}
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05, y: -1 }} whileTap={{ scale: 0.95 }}
+              onClick={handleDeleteReservation}
+              data-testid="delete-reservation-btn"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-br from-red-500 to-rose-600 shadow-md hover:shadow-lg hover:from-red-600 hover:to-rose-700 transition-all"
+            >
+              <Trash2 size={14} />
+              <span>Eliminar</span>
             </motion.button>
           </motion.div>
         </div>
@@ -266,16 +336,22 @@ export default function ReservationDetail() {
               <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">{dt.eventInfo}</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              <EditableInfoTile icon={User} color="violet" label={dt.clientName || "Nombre"} value={reservation.client_name}
-                field="client_name" type="text" onSave={handleInlineSave} delay={0.1} required />
-              <InfoTile icon={CalIcon}    color="indigo"  label={dt.eventDate} value={formatDate(reservation.event_date)} delay={0.12} />
-              {reservation.event_time    && <InfoTile icon={Clock}       color="cyan"    label={dt.time}     value={reservation.event_time} delay={0.15} />}
-              {reservation.venue         && <InfoTile icon={MapPin}      color="rose"    label={dt.venue}    value={reservation.venue} delay={0.18} />}
-              {reservation.guests_count  && <InfoTile icon={Users}       color="amber"   label={dt.guests}   value={`${reservation.guests_count} ${dt.persons}`} delay={0.2} />}
-              {reservation.package_type  && <InfoTile icon={PackageIcon} color="fuchsia" label="Paquete"     value={reservation.package_type} delay={0.22} />}
-              <EditableInfoTile icon={Phone} color="emerald" label={dt.phone} value={reservation.client_phone}
-                field="client_phone" type="tel" placeholder="Número de teléfono" onSave={handleInlineSave} delay={0.24} />
-              {reservation.client_email  && <InfoTile icon={Mail}        color="sky"     label={dt.email}    value={reservation.client_email} delay={0.26} />}
+              <FieldTile icon={User} color="violet" label={dt.clientName || "Nombre"} value={draft.client_name}
+                field="client_name" type="text" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.1} required />
+              <FieldTile icon={CalIcon} color="indigo" label={dt.eventDate} value={draft.event_date}
+                field="event_date" type="date" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.12} required />
+              <FieldTile icon={Clock} color="cyan" label={dt.time} value={draft.event_time}
+                field="event_time" type="time" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.15} />
+              <FieldTile icon={MapPin} color="rose" label={dt.venue} value={draft.venue}
+                field="venue" type="text" placeholder="Lugar" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.18} />
+              <FieldTile icon={Users} color="amber" label={dt.guests} value={draft.guests_count}
+                field="guests_count" type="number" placeholder="0" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.2} />
+              <FieldTile icon={PackageIcon} color="fuchsia" label="Paquete" value={draft.package_type}
+                field="package_type" type="text" placeholder="Paquete" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.22} />
+              <FieldTile icon={Phone} color="emerald" label={dt.phone} value={draft.client_phone}
+                field="client_phone" type="tel" placeholder="Número de teléfono" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.24} />
+              <FieldTile icon={Mail} color="sky" label={dt.email} value={draft.client_email}
+                field="client_email" type="email" placeholder="correo@ejemplo.com" onChange={handleDraftChange} onEnter={handleSaveAll} delay={0.26} />
             </div>
             {reservation.notes && (
               <motion.div
@@ -523,7 +599,6 @@ export default function ReservationDetail() {
       document.body
       )}
 
-      {showEdit && <ReservationForm reservation={reservation} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load({ silent: true }); }} />}
     </div>
   );
 }
@@ -559,6 +634,44 @@ function InfoTile({ icon: Icon, color, label, value, delay = 0 }) {
     </motion.div>
   );
 }
+
+function FieldTile({ icon: Icon, color, label, value, field, type = "text", placeholder, onChange, onEnter, delay = 0, required = false }) {
+  const c = TILE_COLORS[color] || TILE_COLORS.indigo;
+  const isDate = type === "date";
+  const isTime = type === "time";
+  const handlePickerChange = (e) => onChange(field, e.target.value);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, ease: easeOut }}
+      className="rd-info-tile group"
+    >
+      <div className={`w-9 h-9 rounded-xl ${c.bg} flex items-center justify-center flex-shrink-0`}>
+        <Icon size={16} className={c.text} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">
+          {label}{required && <span className="text-rose-400 ml-0.5">*</span>}
+        </p>
+        {isDate ? (
+          <PrettyDatePicker value={value || ""} onChange={handlePickerChange} testId={`field-input-${field}`} />
+        ) : isTime ? (
+          <PrettyTimePicker value={value || ""} onChange={handlePickerChange} testId={`field-input-${field}`} />
+        ) : (
+          <input
+            type={type}
+            value={value ?? ""}
+            onChange={e => onChange(field, e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && onEnter) { e.preventDefault(); onEnter(); } }}
+            placeholder={placeholder || label}
+            data-testid={`field-input-${field}`}
+            className="w-full text-sm font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-400 focus:outline-none py-0.5 transition-colors placeholder:text-slate-300 placeholder:italic placeholder:font-normal"
+          />
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 
 function EditableInfoTile({ icon: Icon, color, label, value, field, type = "text", placeholder, onSave, delay = 0, required = false }) {
   const c = TILE_COLORS[color] || TILE_COLORS.indigo;
