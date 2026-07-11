@@ -2347,59 +2347,133 @@ async def _find_release_asset(asset_name: str) -> dict:
 
 
 def _spawn_inno_installer_silent(setup_exe_path: Path, current_exe_path: Path) -> None:
-    """Lanza el nuevo `CinemaProductions-Setup.exe` en modo silencioso.
+    """Lanza el nuevo `CinemaProductions-Setup.exe` en modo silencioso y RELANZA
+    la app explícitamente al terminar.
 
-    Estrategia:
-      1. Cierra este proceso (Inno Setup se encargará del resto vía
-         `CloseApplications=force` + `RestartApplications=yes` en installer.iss).
-      2. Inno reemplaza los archivos, actualiza el registro y relanza la app.
-      3. Se limpia el instalador temporal al finalizar.
+    BUGFIX ("se queda en 'Recargando aplicación…' y no vuelve a abrir"):
+      Antes se confiaba en `/RESTARTAPPLICATIONS` de Inno Setup para relanzar la
+      app tras el upgrade. Eso NO funciona en el auto-updater porque:
+        · Nosotros hacemos `taskkill /F` del proceso ANTES de correr el Setup,
+          así que el Restart Manager de Inno nunca lo registró → no tiene nada
+          que reiniciar.
+        · El `[Run] postinstall` de installer.iss tiene `skipifsilent`, por lo
+          que en modo `/VERYSILENT` tampoco lanza la app.
+      Resultado: tras un upgrade silencioso la app NO se relanzaba → el frontend
+      quedaba colgado en "Recargando aplicación…".
 
-    Flags Inno Setup:
-      · /VERYSILENT         → sin wizard, sin progress bar visible
-      · /SUPPRESSMSGBOXES   → sin diálogos
-      · /NORESTART          → no reinicia el sistema
-      · /NOCANCEL           → usuario no puede cancelar
-      · /CLOSEAPPLICATIONS  → cierra la app en ejecución antes de copiar
-      · /RESTARTAPPLICATIONS→ relanza la app tras terminar
+    Nueva estrategia (robusta, misma filosofía que `_spawn_swap_helper`):
+      1. Cierra la instancia actual (taskkill).
+      2. Corre el Setup con `/VERYSILENT` (SIN `/RESTARTAPPLICATIONS`).
+      3. Verifica el exit code del instalador y que el .exe instalado exista.
+      4. RELANZA el .exe instalado explícitamente vía `explorer.exe` (desescala
+         privilegios y usa la sesión del usuario), con reintentos + verificación
+         por `tasklist` y fallback a `start`.
+      5. Consola VISIBLE + `_cp_update_failed.flag` en caso de error, para que el
+         usuario vea el motivo y la app lo reporte al volver a arrancar.
     """
     if sys.platform != "win32":
         raise RuntimeError("Inno silent install sólo aplica a Windows")
     import subprocess as _sp
-    # Escribimos un pequeño .bat que:
-    #   - espera 2 s (para que el proceso Python actual libere handles)
-    #   - lanza el Setup.exe con flags silenciosos
-    #   - borra el Setup.exe y se auto-elimina
     install_dir = current_exe_path.parent
     bat = install_dir / "_cp_setup_apply.bat"
     log = install_dir / "_cp_setup_apply.log"
+    fail_flag = install_dir / "_cp_update_failed.flag"
+    app_exe = str(current_exe_path)
+    exe_name = current_exe_path.name
+    setup = str(setup_exe_path)
     script = (
         "@echo off\r\n"
-        f'echo [%DATE% %TIME%] === Cinema Productions installer swap === > "{log}"\r\n'
-        f'echo setup={setup_exe_path} >> "{log}"\r\n'
+        "setlocal enabledelayedexpansion\r\n"
+        "title Actualizando Cinema Productions...\r\n"
+        f'set "LOG={log}"\r\n'
+        f'set "FAILFLAG={fail_flag}"\r\n'
+        f'set "APPEXE={app_exe}"\r\n'
+        f'set "APPDIR={install_dir}"\r\n'
+        f'set "EXENAME={exe_name}"\r\n'
+        f'del "{fail_flag}" >nul 2>&1\r\n'
+        'echo [%DATE% %TIME%] === Cinema Productions installer update === > "!LOG!"\r\n'
+        f'echo setup={setup} >> "!LOG!"\r\n'
+        'echo appexe=!APPEXE! >> "!LOG!"\r\n'
+        "echo.\r\n"
+        "echo   ============================================\r\n"
+        "echo    Actualizando Cinema Productions\r\n"
+        "echo    No cierres esta ventana. Tardara un momento.\r\n"
+        "echo   ============================================\r\n"
+        "echo.\r\n"
+        "echo   Cerrando la aplicacion...\r\n"
         "ping -n 3 127.0.0.1 >nul\r\n"
-        # Cerrar la app en ejecución (por si /CLOSEAPPLICATIONS no la detecta rápido)
-        f'taskkill /F /IM "{current_exe_path.name}" >nul 2>&1\r\n'
+        'taskkill /F /IM "!EXENAME!" >nul 2>&1\r\n'
         "ping -n 2 127.0.0.1 >nul\r\n"
-        # Lanzar el instalador silencioso
-        f'"{setup_exe_path}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /LOG="{log}.inno" >> "{log}" 2>&1\r\n'
-        f'echo [%TIME%] installer exit code=%ERRORLEVEL% >> "{log}"\r\n'
-        # Borrar el setup temporal (dejamos el log para debug)
-        f'del /F /Q "{setup_exe_path}" >nul 2>&1\r\n'
-        # Auto-borrar este .bat (deja el .log)
+        "echo   Instalando la nueva version (silencioso)...\r\n"
+        f'"{setup}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /CLOSEAPPLICATIONS /LOG="{log}.inno" >> "!LOG!" 2>&1\r\n'
+        'set "IEC=!ERRORLEVEL!"\r\n'
+        'echo [!TIME!] installer exit code=!IEC! >> "!LOG!"\r\n'
+        'if not "!IEC!"=="0" (\r\n'
+        '  echo instalador: el Setup.exe termino con codigo !IEC!. > "!FAILFLAG!"\r\n'
+        "  goto :fail\r\n"
+        ")\r\n"
+        f'del /F /Q "{setup}" >nul 2>&1\r\n'
+        # Esperar a que el instalador libere el nuevo .exe
+        "ping -n 3 127.0.0.1 >nul\r\n"
+        'if not exist "!APPEXE!" (\r\n'
+        '  echo instalador: no se encontro el ejecutable instalado tras el upgrade. > "!FAILFLAG!"\r\n'
+        "  goto :fail\r\n"
+        ")\r\n"
+        "echo   Reiniciando la aplicacion...\r\n"
+        # ── Relanzamiento robusto: explorer.exe (desescala privilegios) + retries
+        "set RTRIES=0\r\n"
+        ":relaunch\r\n"
+        "set /a RTRIES+=1\r\n"
+        'echo [!TIME!] Relanzando via explorer (intento !RTRIES!/3) >> "!LOG!"\r\n'
+        'explorer "!APPEXE!"\r\n'
+        "ping -n 13 127.0.0.1 >nul\r\n"
+        'tasklist /FI "IMAGENAME eq !EXENAME!" 2>nul | find /I "!EXENAME!" >nul\r\n'
+        "if !ERRORLEVEL! EQU 0 goto :launched\r\n"
+        "if !RTRIES! LSS 3 goto :relaunch\r\n"
+        'echo [!TIME!] fallback final: start directo >> "!LOG!"\r\n'
+        'start "" /D "!APPDIR!" "!APPEXE!"\r\n'
+        "ping -n 13 127.0.0.1 >nul\r\n"
+        'tasklist /FI "IMAGENAME eq !EXENAME!" 2>nul | find /I "!EXENAME!" >nul\r\n'
+        "if !ERRORLEVEL! EQU 0 goto :launched\r\n"
+        'echo relanzamiento: la nueva version no arranco sola tras la actualizacion. > "!FAILFLAG!"\r\n'
+        "goto :fail\r\n"
+        ":launched\r\n"
+        'echo [!TIME!] === update completo, app relanzada === >> "!LOG!"\r\n'
+        "echo.\r\n"
+        "echo   Listo! La aplicacion se esta abriendo de nuevo.\r\n"
+        "echo   Esta ventana se cerrara sola...\r\n"
+        "ping -n 3 127.0.0.1 >nul\r\n"
         '(goto) 2>nul & del "%~f0"\r\n'
+        "exit /b 0\r\n"
+        ":fail\r\n"
+        'echo [!TIME!] ERROR en la actualizacion via instalador >> "!LOG!"\r\n'
+        "echo.\r\n"
+        "echo   ============================================\r\n"
+        "echo    NO SE PUDO COMPLETAR LA ACTUALIZACION\r\n"
+        "echo   ============================================\r\n"
+        "echo.\r\n"
+        "echo   Motivo:\r\n"
+        '  type "!FAILFLAG!" 2>nul\r\n'
+        "echo.\r\n"
+        f'  echo   Detalles tecnicos en: {log}\r\n'
+        "echo.\r\n"
+        "echo   Solucion: abre Cinema Productions manualmente desde el\r\n"
+        "echo   acceso directo del escritorio. Tus datos estan intactos.\r\n"
+        "echo.\r\n"
+        "pause\r\n"
+        'del "%~f0" >nul 2>&1\r\n'
+        "exit /b 1\r\n"
     )
     bat.write_text(script, encoding="ascii")
-    DETACHED_PROCESS = 0x00000008
+    # CREATE_NEW_CONSOLE: ventana VISIBLE para que el usuario vea el progreso y,
+    # sobre todo, cualquier ERROR (antes se cerraba en silencio).
+    CREATE_NEW_CONSOLE = 0x00000010
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     _sp.Popen(
         ["cmd", "/c", str(bat)],
         cwd=str(install_dir),
-        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        creationflags=CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
-        stdin=_sp.DEVNULL,
-        stdout=_sp.DEVNULL,
-        stderr=_sp.DEVNULL,
     )
 
 
@@ -2611,6 +2685,53 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
                          start_new_session=True, close_fds=True)
 
 
+# ── Progreso de descarga/instalación del auto-update (barra en el modal) ──────
+# Estado compartido consultado por el frontend vía GET /api/github/update-progress
+# tanto en modo portable (binary_swap) como instalador (inno_silent).
+import threading as _pg_threading
+_update_progress = {"active": False, "stage": "idle", "downloaded": 0, "total": 0,
+                    "percent": 0, "name": "", "error": None}
+_update_progress_lock = _pg_threading.Lock()
+
+
+def _reset_update_progress(name: str = "", total: int = 0):
+    with _update_progress_lock:
+        _update_progress.update({
+            "active": True, "stage": "starting", "downloaded": 0,
+            "total": int(total or 0), "percent": 0, "name": name, "error": None,
+        })
+
+
+def _set_update_progress(downloaded=None, total=None, stage=None, error=None):
+    with _update_progress_lock:
+        if downloaded is not None:
+            _update_progress["downloaded"] = int(downloaded)
+        if total is not None and total:
+            _update_progress["total"] = int(total)
+        if stage is not None:
+            _update_progress["stage"] = stage
+        if error is not None:
+            _update_progress["error"] = error
+            _update_progress["active"] = False
+        t = _update_progress["total"]
+        d = _update_progress["downloaded"]
+        _update_progress["percent"] = int(d * 100 / t) if t > 0 else (100 if stage == "done" else 0)
+        if stage == "done":
+            _update_progress["percent"] = 100
+            _update_progress["active"] = False
+        elif stage == "error":
+            _update_progress["active"] = False
+
+
+@api_router.get("/github/update-progress")
+async def github_update_progress():
+    """Estado actual de la descarga/instalación del auto-update para la barra
+    del modal (modo escritorio: portable e instalador)."""
+    with _update_progress_lock:
+        return dict(_update_progress)
+
+
+
 async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False):
     """Actualiza un binario compilado descargando el asset correspondiente desde
     GitHub Releases y programando el swap + relanzamiento. Los datos del usuario
@@ -2679,24 +2800,6 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
     if token:
         dl_headers["Authorization"] = f"Bearer {token}"
 
-    def _download():
-        req = urllib.request.Request(rel["url"], headers=dl_headers)
-        with urllib.request.urlopen(req, timeout=600) as resp, open(new_path, "wb") as f:
-            shutil.copyfileobj(resp, f)
-
-    try:
-        if new_path.exists():
-            new_path.unlink()
-        await asyncio.to_thread(_download)
-    except Exception as e:
-        # Limpiar el .new parcial si quedó a medias
-        try:
-            if new_path.exists():
-                new_path.unlink()
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=f"Descarga del binario falló: {e}")
-
     # Validación: tamaño + "magic bytes" del binario. Evita que una respuesta
     # de error (HTML/JSON) se guarde como si fuera el ejecutable, lo que
     # "arruinaría" el exe al hacer el swap.
@@ -2718,15 +2821,32 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
         except Exception:
             return False
 
-    if not _valid_binary(new_path):
-        try:
-            new_path.unlink()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500,
-            detail="El binario descargado es inválido o está corrupto; no se aplicó la actualización.")
+    total_size = int(rel.get("size") or 0)
 
+    # ── DRY RUN: descarga + valida de forma síncrona, sin swap ni progreso ──
     if dry_run:
+        def _download_dry():
+            req = urllib.request.Request(rel["url"], headers=dl_headers)
+            with urllib.request.urlopen(req, timeout=600) as resp, open(new_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+        try:
+            if new_path.exists():
+                new_path.unlink()
+            await asyncio.to_thread(_download_dry)
+        except Exception as e:
+            try:
+                if new_path.exists():
+                    new_path.unlink()
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Descarga del binario falló: {e}")
+        if not _valid_binary(new_path):
+            try:
+                new_path.unlink()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500,
+                detail="El binario descargado es inválido o está corrupto; no se aplicó la actualización.")
         try:
             new_path.unlink()
         except Exception:
@@ -2736,27 +2856,71 @@ async def _apply_binary_update_frozen(dry_run: bool = False, force: bool = False
                 "asset": asset_name, "install_dir": str(install_dir),
                 "message": "DRY RUN — binario descargado y verificado; no se aplicó el swap."}
 
-    # ── Dos flujos: (a) instalador Inno (Setup.exe silencioso) o (b) swap directo
-    if _is_inno_installed() and asset_name.lower().endswith("setup.exe"):
-        _spawn_inno_installer_silent(new_path, exe_path)
-        install_mode = "inno_silent"
-    else:
-        _spawn_swap_helper(exe_path, new_path)
-        install_mode = "binary_swap"
+    # ── FLUJO REAL: descarga CON PROGRESO + instalación en segundo plano ──────
+    # Devolvemos de inmediato con status="installing" para que el modal empiece
+    # a hacer polling a /github/update-progress y muestre la barra (Descargando
+    # %, luego "Instalando…" y "Reiniciando…") tanto en portable como instalador.
+    _reset_update_progress(name=asset_name, total=total_size)
+    is_installer = _is_inno_installed() and asset_name.lower().endswith("setup.exe")
+    install_mode = "inno_silent" if is_installer else "binary_swap"
 
-    def _shutdown():
-        # 3s: suficiente para que el cliente HTTP reciba la respuesta y para
-        # que el swap helper haya sido spawn-eado como proceso independiente.
-        _time.sleep(3.0)
-        _os._exit(0)
-    threading.Thread(target=_shutdown, daemon=True).start()
+    def _worker():
+        import time as _t, os as _o, urllib.request as _u
+        try:
+            if new_path.exists():
+                new_path.unlink()
+            _set_update_progress(stage="downloading", downloaded=0, total=total_size)
+            req = _u.Request(rel["url"], headers=dl_headers)
+            with _u.urlopen(req, timeout=600) as resp, open(new_path, "wb") as f:
+                try:
+                    total = int(resp.headers.get("Content-Length") or total_size or 0)
+                except Exception:
+                    total = total_size
+                done = 0
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    _set_update_progress(downloaded=done, total=total, stage="downloading")
+            if not _valid_binary(new_path):
+                try:
+                    new_path.unlink()
+                except Exception:
+                    pass
+                _set_update_progress(stage="error",
+                    error="El binario descargado es inválido o está corrupto.")
+                return
+            # Descarga OK → instalar (installer silencioso o swap portable)
+            _set_update_progress(stage="installing")
+            _t.sleep(0.4)
+            if is_installer:
+                _spawn_inno_installer_silent(new_path, exe_path)
+            else:
+                _spawn_swap_helper(exe_path, new_path)
+            _set_update_progress(stage="done")
+            # Damos margen a que el helper detached quede lanzado antes de morir.
+            _t.sleep(1.5)
+            _o._exit(0)
+        except Exception as e:
+            logger.warning(f"Auto-actualización ({install_mode}) falló: {e}")
+            try:
+                if new_path.exists():
+                    new_path.unlink()
+            except Exception:
+                pass
+            _set_update_progress(stage="error", error=str(e))
+
+    threading.Thread(target=_worker, daemon=True).start()
 
     return {"success": True, "restarted": True, "is_desktop": True,
+            "status": "installing",
             "files_updated": 1,
             "old_version": _local_version, "new_version": new_version,
             "asset": asset_name, "install_dir": str(install_dir),
             "install_mode": install_mode,
-            "message": "Descarga completa. La app se cerrará y se actualizará automáticamente en unos segundos."}
+            "message": "Descargando e instalando la nueva versión…"}
 
 
 @api_router.get("/updates/last-result")
