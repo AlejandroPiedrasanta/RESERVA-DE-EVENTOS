@@ -6,6 +6,8 @@ import { useSettings } from "@/context/SettingsContext";
 import WelcomeTour from "@/components/WelcomeTour";
 import SectionUnlockModal from "@/components/SectionUnlockModal";
 import GithubUpdateNotifier from "@/components/GithubUpdateNotifier";
+import UpdateFailureDialog from "@/components/UpdateFailureDialog";
+import UpdateProgressToast from "@/components/UpdateProgressToast";
 import FloatingDecor from "@/components/FloatingDecor";
 import { useAdvancedSecurity } from "@/hooks/useAdvancedSecurity";
 
@@ -104,6 +106,8 @@ export default function Layout({ children }) {
     <div className="flex min-h-screen" style={{ position: "relative", zIndex: 1 }}>
       <FloatingDecor />
       <GithubUpdateNotifier />
+      <UpdateFailureDialog />
+      <UpdateProgressToast />
       <WelcomeTour />
       {/* Desktop Sidebar */}
       <aside

@@ -318,9 +318,12 @@ if "%CUR_SIZE%"=="0" (
 
 REM 4) Relanzar la app FIJANDO el directorio de trabajo original.
 echo [%date% %time%] swap OK — relanzando %CUR_BIN% (CWD=%CUR_DIR%) >> "%LOG%"
+set "FAIL_FLAG=%LOG%.failed.flag"
+if exist "%FAIL_FLAG%" del /F /Q "%FAIL_FLAG%" >> "%LOG%" 2>&1
 start "" /D "%CUR_DIR%" "%CUR_BIN%"
 if errorlevel 1 (
   echo [%date% %time%] ERROR: start falló — rollback y relanzar backup >> "%LOG%"
+  > "%FAIL_FLAG%" echo start_failed
   if exist "%CUR_BIN%.bak" (
     del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
     move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
@@ -328,6 +331,40 @@ if errorlevel 1 (
   )
   goto :fail
 )
+
+REM 4b) WATCHDOG post-launch: verificar que el nuevo .exe realmente arrancó.
+REM     El nuevo binario puede fallar por DLL faltante, incompatibilidad de
+REM     runtime, cuarentena de AV, etc. — en ese caso hacemos rollback.
+REM     Damos 3s de gracia inicial y luego hacemos polling durante 15s más.
+echo [%date% %time%] watchdog: esperando arranque de %APP_NAME% (max 18s) >> "%LOG%"
+timeout /t 3 /nobreak > nul
+set /a wd=0
+:wd_loop
+tasklist /FI "IMAGENAME eq %APP_NAME%" | find /I "%APP_NAME%" > nul
+if not errorlevel 1 goto :wd_ok
+set /a wd+=1
+if !wd! GEQ 15 goto :wd_fail
+timeout /t 1 /nobreak > nul
+goto :wd_loop
+
+:wd_fail
+echo [%date% %time%] ERROR: nuevo .exe no arrancó tras 18s — ROLLBACK >> "%LOG%"
+> "%FAIL_FLAG%" echo launch_timeout
+REM Matar cualquier proceso residual del nuevo .exe (por si arrancó y crasheó silencioso).
+taskkill /F /IM "%APP_NAME%" >> "%LOG%" 2>&1
+timeout /t 1 /nobreak > nul
+if exist "%CUR_BIN%.bak" (
+  del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
+  move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
+  echo [%date% %time%] rollback OK — relanzando versión previa >> "%LOG%"
+  start "" /D "%CUR_DIR%" "%CUR_BIN%"
+) else (
+  echo [%date% %time%] ERROR: no hay .bak para rollback >> "%LOG%"
+)
+goto :fail
+
+:wd_ok
+echo [%date% %time%] watchdog OK — nuevo .exe corriendo tras !wd!s >> "%LOG%"
 
 REM 5) Limpieza: borrar backup + archivo nuevo + este batch.
 if exist "%CUR_BIN%.bak" del /F /Q "%CUR_BIN%.bak" >> "%LOG%" 2>&1
@@ -374,11 +411,25 @@ def apply_update_windows(
         encoding="ascii",
     )
 
-    # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP = 0x00000008 | 0x00000200
-    CREATE_FLAGS = 0x00000008 | 0x00000200
+    # CREATE_NO_WINDOW (0x08000000) evita que aparezca la ventana negra de cmd.
+    # CREATE_NEW_PROCESS_GROUP (0x00000200) desacopla el batch del proceso actual
+    # para que sobreviva a `os._exit(0)`.
+    # NOTA: DETACHED_PROCESS es MUTUAMENTE EXCLUYENTE con CREATE_NO_WINDOW, por lo
+    # que se elimina en favor de este último (el batch queda igualmente huérfano
+    # gracias a CREATE_NEW_PROCESS_GROUP + close_fds + stdio redirigido a NUL).
+    CREATE_NO_WINDOW = 0x08000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    CREATE_FLAGS = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+
+    # Refuerzo: STARTUPINFO con SW_HIDE por si el shell heredase alguna consola.
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0  # SW_HIDE
+
     subprocess.Popen(
         ["cmd.exe", "/c", str(batch)],
         creationflags=CREATE_FLAGS,
+        startupinfo=startupinfo,
         close_fds=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

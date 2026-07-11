@@ -2460,19 +2460,24 @@ def _spawn_inno_installer_silent(setup_exe_path: Path, current_exe_path: Path) -
         "echo   Solucion: abre Cinema Productions manualmente desde el\r\n"
         "echo   acceso directo del escritorio. Tus datos estan intactos.\r\n"
         "echo.\r\n"
-        "pause\r\n"
+        "timeout /t 3 /nobreak > nul\r\n"
         'del "%~f0" >nul 2>&1\r\n'
         "exit /b 1\r\n"
     )
     bat.write_text(script, encoding="ascii")
-    # CREATE_NEW_CONSOLE: ventana VISIBLE para que el usuario vea el progreso y,
-    # sobre todo, cualquier ERROR (antes se cerraba en silencio).
-    CREATE_NEW_CONSOLE = 0x00000010
+    # CREATE_NO_WINDOW: ejecuta el batch en background SIN mostrar ventana de cmd.
+    # Los errores quedan en el .log y en el flag file; la app los reporta al reabrir.
+    CREATE_NO_WINDOW = 0x08000000
     CREATE_NEW_PROCESS_GROUP = 0x00000200
+    _si = _sp.STARTUPINFO()
+    _si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+    _si.wShowWindow = 0  # SW_HIDE
     _sp.Popen(
         ["cmd", "/c", str(bat)],
         cwd=str(install_dir),
-        creationflags=CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,
+        creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+        startupinfo=_si,
+        stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         close_fds=True,
     )
 
@@ -2502,7 +2507,7 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
         # antes el helper corría DETACHED (sin ventana) y, si el relanzamiento
         # fallaba, se auto-borraba en SILENCIO → el usuario no veía nada ni sabía
         # por qué. Ahora:
-        #   · La ventana es VISIBLE (CREATE_NEW_CONSOLE) y muestra el progreso.
+        #   · La ventana está OCULTA (CREATE_NO_WINDOW); errores por log/flag.
         #   · El relanzamiento es más robusto (verifica y reintenta hasta 4 veces).
         #   · Si algo falla, se escribe un FLAG de error + se hace PAUSE para que
         #     el usuario LEA el motivo (no cierre silencioso). La app, al volver a
@@ -2562,8 +2567,7 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             "ping -n 2 127.0.0.1 >nul\r\n"
             "goto moveloop\r\n"
             ":moveok\r\n"
-            f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) >> "!LOG!"\r\n'
-            f'del "{bak}" >nul 2>&1\r\n'
+            f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) (bak retenido para rollback) >> "!LOG!"\r\n'
             "echo   Version instalada. Reiniciando la app...\r\n"
             # ── Relanzamiento robusto ──
             #
@@ -2608,7 +2612,8 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
             "goto :fail_relaunch\r\n"
             ":launched\r\n"
-            f'echo [!TIME!] === update completo, app relanzada === >> "!LOG!"\r\n'
+            f'echo [!TIME!] === update completo, app relanzada — descartando bak === >> "!LOG!"\r\n'
+            f'del "{bak}" >nul 2>&1\r\n'
             "echo.\r\n"
             "echo   Listo! La aplicacion se esta abriendo de nuevo.\r\n"
             "echo   Esta ventana se cerrara sola...\r\n"
@@ -2617,8 +2622,27 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             "exit /b 0\r\n"
             # ── Relanzamiento fallo: NO cerrar en silencio ──
             ":fail_relaunch\r\n"
-            f'echo [!TIME!] ERROR: la app no se pudo relanzar automaticamente >> "!LOG!"\r\n'
-            '  echo relanzamiento: la nueva version no arranco sola tras la actualizacion. > "!FAILFLAG!"\r\n'
+            f'echo [!TIME!] ERROR: la app no se pudo relanzar automaticamente — iniciando ROLLBACK >> "!LOG!"\r\n'
+            '  echo launch_timeout: la nueva version no arranco tras la actualizacion. Se restauro la version anterior. > "!FAILFLAG!"\r\n'
+            # Matar cualquier proceso residual del .exe nuevo (por si arranco y crasheo silencioso)
+            f'taskkill /F /IM "{exe_name}" >nul 2>&1\r\n'
+            "ping -n 2 127.0.0.1 >nul\r\n"
+            # Rollback: restaurar .bak sobre el .exe actual
+            f'if exist "{bak}" (\r\n'
+            f'  del /F /Q "{old}" >nul 2>&1\r\n'
+            f'  move /Y "{bak}" "{old}" >nul 2>&1\r\n'
+            f'  echo [!TIME!] rollback OK — relanzando version previa >> "!LOG!"\r\n'
+            f'  explorer "{old}"\r\n'
+            f'  ping -n 8 127.0.0.1 >nul\r\n'
+            f'  tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'  if !ERRORLEVEL! EQU 0 (\r\n'
+            f'    echo [!TIME!] rollback exitoso, version previa corriendo >> "!LOG!"\r\n'
+            f'  ) else (\r\n'
+            f'    echo [!TIME!] rollback: version previa tampoco arranco automaticamente >> "!LOG!"\r\n'
+            f'  )\r\n'
+            f') else (\r\n'
+            f'  echo [!TIME!] ERROR: no hay .bak para hacer rollback >> "!LOG!"\r\n'
+            f')\r\n'
             ":fail\r\n"
             "echo.\r\n"
             "echo   ============================================\r\n"
@@ -2633,17 +2657,23 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             "echo   Solucion: abre Cinema Productions manualmente desde el\r\n"
             "echo   acceso directo del escritorio. Tus datos estan intactos.\r\n"
             "echo.\r\n"
-            "pause\r\n"
+            "timeout /t 3 /nobreak > nul\r\n"
             'del "%~f0" >nul 2>&1\r\n'
             "exit /b 1\r\n"
         )
         bat.write_text(script, encoding="ascii")
-        # CREATE_NEW_CONSOLE (0x10): ventana VISIBLE para que el usuario vea el
-        # progreso y, sobre todo, cualquier ERROR (antes se cerraba en silencio).
-        CREATE_NEW_CONSOLE = 0x00000010
+        # CREATE_NO_WINDOW (0x08000000): batch en background, ventana OCULTA.
+        # Los errores se registran en el .log y en el flag file para reportarlos
+        # por GUI al reabrir la app.
+        CREATE_NO_WINDOW = 0x08000000
         CREATE_NEW_PROCESS_GROUP = 0x00000200
+        _si = subprocess.STARTUPINFO()
+        _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        _si.wShowWindow = 0  # SW_HIDE
         subprocess.Popen(["cmd", "/c", str(bat)], cwd=str(install_dir),
-                         creationflags=CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,
+                         creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+                         startupinfo=_si,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          close_fds=True)
     else:
         sh = install_dir / "_cp_update.sh"

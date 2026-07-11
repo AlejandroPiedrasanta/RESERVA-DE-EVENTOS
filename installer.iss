@@ -68,6 +68,21 @@ CloseApplications=force
 RestartApplications=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 
+; ── Mutex nombrado ────────────────────────────────────────────────
+; AppMutex: si la app está corriendo cuando arranca el setup, Inno detecta
+;           el mutex y pide al usuario cerrarla antes de continuar (más
+;           limpio y seguro que CloseApplications=force, que puede
+;           corromper datos si la app está escribiendo).
+; SetupMutex: evita que dos instancias del instalador corran a la vez
+;             (previene race conditions al copiar el binario).
+AppMutex=CinemaProductionsAppMutex
+SetupMutex=CinemaProductionsSetupMutex_{#MyAppId}
+
+; ── Requisitos mínimos ────────────────────────────────────────────
+; Windows 10 1809 (10.0.17763). Requerido por WinToast, ETW logging
+; y APIs modernas de subprocess flags que usa el updater.
+MinVersion=10.0.17763
+
 ; Imágenes del wizard (BMP)
 WizardImageFile=wizard_big.bmp
 WizardSmallImageFile=wizard_small.bmp
