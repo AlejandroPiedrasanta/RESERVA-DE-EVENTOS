@@ -386,7 +386,7 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.3 }}
-        className="glass rounded-3xl overflow-hidden"
+        className="glass rounded-3xl overflow-hidden relative"
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/40">
           <div className="flex items-center gap-3">
@@ -889,134 +889,132 @@ export default function Dashboard() {
             })}
           </div>
         )}
+
+        {/* ── Sub-sección: Tipos de Evento (unificado con Próximas Reservas) ── */}
+        {!loading && typeEntries.length > 0 && (
+          <div
+            className="relative border-t border-white/40 px-6 py-6 overflow-hidden"
+            data-testid="charts-section"
+          >
+            {/* Soft color accents */}
+            <motion.div
+              className="absolute -right-20 -top-20 w-72 h-72 rounded-full pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(circle, rgba(236,72,153,0.14), transparent 70%)",
+              }}
+              animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <motion.div
+              className="absolute -left-16 -bottom-16 w-64 h-64 rounded-full pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%)",
+              }}
+              animate={{ scale: [1, 1.2, 1], opacity: [0.6, 0.9, 0.6] }}
+              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+            />
+
+            {/* Header */}
+            <div className="relative z-10 flex flex-wrap items-center gap-4 mb-6">
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.55 }}
+                className="relative w-11 h-11 rounded-2xl flex items-center justify-center"
+                style={{
+                  background: "linear-gradient(135deg,#ec4899,#a855f7)",
+                  boxShadow: "0 8px 20px -6px rgba(168,85,247,0.55)",
+                }}
+              >
+                <BarChart2 size={18} className="text-white relative" strokeWidth={2.2} />
+              </motion.div>
+              <div className="flex-1 min-w-[180px]">
+                <h2
+                  className="text-xl font-black text-slate-900 leading-tight"
+                  style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                >
+                  {language === "es" ? "Tipos de Evento" : "Event Types"}
+                </h2>
+                <p className="text-xs text-slate-500 font-semibold flex items-center gap-1.5 mt-0.5">
+                  <motion.span
+                    className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"
+                    animate={{ opacity: [1, 0.3, 1], scale: [1, 1.3, 1] }}
+                    transition={{ duration: 1.6, repeat: Infinity }}
+                  />
+                  {activeForTypes.length} {language === "es" ? "reservas" : "reservations"}
+                  <span className="text-slate-300 mx-1">·</span>
+                  {typeEntriesFiltered.length} {language === "es" ? "categorías" : "categories"}
+                  <span className="text-slate-300 mx-1">·</span>
+                  <span className="text-slate-500">
+                    {typeFilter === "all"
+                      ? (language === "es" ? "Todos" : "All")
+                      : (language === "es" ? `Mes: ${currentMonthName}` : `Month: ${currentMonthName}`)}
+                  </span>
+                </p>
+              </div>
+
+              {/* Segmented filter: Mes / Todos */}
+              <div
+                className="flex items-center gap-1 p-1 rounded-full bg-white/70 border border-slate-200/70 backdrop-blur-sm shadow-sm"
+                data-testid="event-types-filter"
+              >
+                {[
+                  { key: "month", label: language === "es" ? "Mes" : "Month" },
+                  { key: "all",   label: language === "es" ? "Todos" : "All"  },
+                ].map(opt => {
+                  const isActive = typeFilter === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setTypeFilter(opt.key)}
+                      data-testid={`event-types-filter-${opt.key}`}
+                      className={`relative px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-full transition-colors ${
+                        isActive ? "text-white" : "text-slate-600 hover:text-slate-900"
+                      }`}
+                      style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                    >
+                      {isActive && (
+                        <motion.span
+                          layoutId="event-types-filter-pill"
+                          className="absolute inset-0 rounded-full"
+                          style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
+                          transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                        />
+                      )}
+                      <span className="relative z-10">{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Grid of animated cards */}
+            {typeEntriesFiltered.length > 0 ? (
+              <motion.div
+                key={typeFilter}
+                variants={container}
+                initial="hidden"
+                animate="show"
+                className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+              >
+                {typeEntriesFiltered.map(([type, count], idx) => (
+                  <AnimatedEventTypeCard key={type} type={type} count={count} total={activeForTypes.length} index={idx} />
+                ))}
+              </motion.div>
+            ) : (
+              <div className="relative z-10 py-10 text-center text-sm text-slate-500 font-semibold">
+                {language === "es"
+                  ? "No hay reservas para este periodo."
+                  : "No reservations for this period."}
+              </div>
+            )}
+          </div>
+        )}
       </motion.div>
 
-      {/* Event Types Breakdown — Clean, readable, animated */}
-      {!loading && typeEntries.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.4 }}
-          className="glass rounded-[32px] p-7 mt-5 relative overflow-hidden"
-          data-testid="charts-section"
-        >
-          {/* Soft color accent in background */}
-          <motion.div
-            className="absolute -right-20 -top-20 w-72 h-72 rounded-full pointer-events-none"
-            style={{
-              background:
-                "radial-gradient(circle, rgba(236,72,153,0.14), transparent 70%)",
-            }}
-            animate={{ scale: [1, 1.15, 1], opacity: [0.7, 1, 0.7] }}
-            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <motion.div
-            className="absolute -left-16 -bottom-16 w-64 h-64 rounded-full pointer-events-none"
-            style={{
-              background:
-                "radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%)",
-            }}
-            animate={{ scale: [1, 1.2, 1], opacity: [0.6, 0.9, 0.6] }}
-            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          />
-
-          {/* Header */}
-          <div className="relative z-10 flex flex-wrap items-center gap-4 mb-6">
-            <motion.div
-              initial={{ scale: 0, rotate: -20 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.55 }}
-              className="relative w-11 h-11 rounded-2xl flex items-center justify-center"
-              style={{
-                background: "linear-gradient(135deg,#ec4899,#a855f7)",
-                boxShadow: "0 8px 20px -6px rgba(168,85,247,0.55)",
-              }}
-            >
-              <BarChart2 size={18} className="text-white relative" strokeWidth={2.2} />
-            </motion.div>
-            <div className="flex-1 min-w-[180px]">
-              <h2
-                className="text-xl font-black text-slate-900 leading-tight"
-                style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-              >
-                {language === "es" ? "Tipos de Evento" : "Event Types"}
-              </h2>
-              <p className="text-xs text-slate-500 font-semibold flex items-center gap-1.5 mt-0.5">
-                <motion.span
-                  className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"
-                  animate={{ opacity: [1, 0.3, 1], scale: [1, 1.3, 1] }}
-                  transition={{ duration: 1.6, repeat: Infinity }}
-                />
-                {activeForTypes.length} {language === "es" ? "reservas" : "reservations"}
-                <span className="text-slate-300 mx-1">·</span>
-                {typeEntriesFiltered.length} {language === "es" ? "categorías" : "categories"}
-                <span className="text-slate-300 mx-1">·</span>
-                <span className="text-slate-500">
-                  {typeFilter === "all"
-                    ? (language === "es" ? "Todos" : "All")
-                    : (language === "es" ? `Mes: ${currentMonthName}` : `Month: ${currentMonthName}`)}
-                </span>
-              </p>
-            </div>
-
-            {/* Segmented filter: Mes / Año / Todos */}
-            <div
-              className="flex items-center gap-1 p-1 rounded-full bg-white/70 border border-slate-200/70 backdrop-blur-sm shadow-sm"
-              data-testid="event-types-filter"
-            >
-              {[
-                { key: "month", label: language === "es" ? "Mes" : "Month" },
-                { key: "all",   label: language === "es" ? "Todos" : "All"  },
-              ].map(opt => {
-                const isActive = typeFilter === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setTypeFilter(opt.key)}
-                    data-testid={`event-types-filter-${opt.key}`}
-                    className={`relative px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-full transition-colors ${
-                      isActive ? "text-white" : "text-slate-600 hover:text-slate-900"
-                    }`}
-                    style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
-                  >
-                    {isActive && (
-                      <motion.span
-                        layoutId="event-types-filter-pill"
-                        className="absolute inset-0 rounded-full"
-                        style={{ background: "linear-gradient(135deg,#ec4899,#a855f7)" }}
-                        transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                      />
-                    )}
-                    <span className="relative z-10">{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Grid of animated cards */}
-          {typeEntriesFiltered.length > 0 ? (
-            <motion.div
-              key={typeFilter}
-              variants={container}
-              initial="hidden"
-              animate="show"
-              className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-            >
-              {typeEntriesFiltered.map(([type, count], idx) => (
-                <AnimatedEventTypeCard key={type} type={type} count={count} total={activeForTypes.length} index={idx} />
-              ))}
-            </motion.div>
-          ) : (
-            <div className="relative z-10 py-10 text-center text-sm text-slate-500 font-semibold">
-              {language === "es"
-                ? "No hay reservas para este periodo."
-                : "No reservations for this period."}
-            </div>
-          )}
-        </motion.div>
-      )}
 
       {showForm && (
         <ReservationForm

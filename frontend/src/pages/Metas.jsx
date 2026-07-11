@@ -2,11 +2,13 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getMetasProgress, upsertMeta } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award, Plane, Car, Home, Globe } from "lucide-react";
+import { Target, TrendingUp, Wallet, DollarSign, Trophy, Flame, ChevronLeft, ChevronRight, Sparkles, Rocket, Star, X, Edit3, Check, Award, Plane, Car, Home, Globe, ImagePlus, Upload, Camera, Trash2, Zap } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { celebrateGoalReached, fireConfetti, triggerSidebarSweep } from "@/lib/celebrations";
 import PageHeader from "@/components/PageHeader";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/slider";
 
 const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const MONTHS_SHORT = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
@@ -529,6 +531,502 @@ function MonthCard({ month, data, type, index, formatCurrency, onSave, celebrate
   );
 }
 
+/* ============================================================
+ * GoalDreamImage — Carrusel de imágenes de metas con transform editor
+ *
+ * Features:
+ *  · Múltiples imágenes, cualquier formato (PNG/WebP/GIF/JPG con alpha).
+ *  · Auto-rotación tipo carrusel con intervalo configurable.
+ *  · Al click sobre la imagen: abre modal para subir/reordenar/eliminar,
+ *    ajustar intervalo, y modificar tamaño, posición y rotación por imagen.
+ *  · Persiste todo en localStorage por año+tipo.
+ * ============================================================ */
+function GoalDreamImage({ year, type }) {
+  const LS_KEY = `cp:metas:dreamImageV2:${type}:${year}`;
+  const DEFAULT_STATE = { images: [], intervalSec: 5 };
+
+  const [state, setState] = useState(DEFAULT_STATE);
+  const [idx, setIdx] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  // Cargar / migrar
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setState({
+          images: Array.isArray(parsed.images) ? parsed.images : [],
+          intervalSec: Number(parsed.intervalSec) > 0 ? Number(parsed.intervalSec) : 5,
+        });
+      } else {
+        // Migración desde versión previa (una sola imagen)
+        const legacyKey = `cp:metas:dreamImage:${type}:${year}`;
+        const legacy = localStorage.getItem(legacyKey);
+        if (legacy) {
+          setState({
+            images: [{ id: cryptoId(), src: legacy, scale: 1, x: 0, y: 0, rotation: 0 }],
+            intervalSec: 5,
+          });
+        } else {
+          setState(DEFAULT_STATE);
+        }
+      }
+      setIdx(0);
+    } catch { setState(DEFAULT_STATE); }
+  }, [LS_KEY]);
+
+  const persist = (newState) => {
+    setState(newState);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(newState)); }
+    catch { /* quota; ignore */ }
+  };
+
+  // Auto-carrusel
+  useEffect(() => {
+    if (state.images.length < 2) return;
+    const ms = Math.max(1, state.intervalSec) * 1000;
+    const t = setInterval(() => setIdx(i => (i + 1) % state.images.length), ms);
+    return () => clearInterval(t);
+  }, [state.images.length, state.intervalSec]);
+
+  const current = state.images[idx] || null;
+
+  return (
+    <>
+      <div
+        className="relative w-full sm:w-48 md:w-52 lg:w-56 aspect-[4/5] flex-shrink-0 cursor-pointer group"
+        onClick={() => setModalOpen(true)}
+        data-testid="goal-dream-image"
+        title={current ? "Editar imágenes de meta" : "Subir imagen de meta"}
+      >
+        <AnimatePresence mode="wait">
+          {current ? (
+            <motion.img
+              key={current.id + "-" + idx}
+              src={current.src}
+              alt="Meta"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"
+              draggable={false}
+              style={{
+                transform: `translate(${current.x || 0}px, ${current.y || 0}px) rotate(${current.rotation || 0}deg) scale(${current.scale || 1})`,
+                transformOrigin: "center center",
+              }}
+              initial={{ opacity: 0, scale: (current.scale || 1) * 0.92 }}
+              animate={{
+                opacity: 1,
+                y: [current.y || 0, (current.y || 0) - 4, current.y || 0],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{
+                opacity: { duration: 0.6, ease: "easeOut" },
+                y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
+              }}
+              data-testid="goal-image-preview"
+            />
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center text-slate-300 group-hover:text-slate-400 transition-colors"
+              data-testid="goal-image-empty"
+            >
+              <motion.div
+                animate={{ y: [0, -4, 0], rotate: [0, 3, -3, 0] }}
+                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <ImagePlus size={32} strokeWidth={1.5} />
+              </motion.div>
+              <p className="text-[10px] font-bold uppercase tracking-widest mt-2">Imagen de tu meta</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Contador discreto abajo si hay >1 imagen */}
+        {state.images.length > 1 && (
+          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1 pb-1">
+            {state.images.map((_, i) => (
+              <span
+                key={i}
+                className="h-1 rounded-full transition-all"
+                style={{
+                  width: i === idx ? 14 : 4,
+                  background: i === idx ? "rgba(15,23,42,0.7)" : "rgba(148,163,184,0.5)",
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <GoalImageModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        state={state}
+        onChange={persist}
+        activeIdx={idx}
+        setActiveIdx={setIdx}
+      />
+    </>
+  );
+}
+
+// Helper: id compacto sin dependencias
+function cryptoId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+// Convierte un File a dataURL preservando transparencia (PNG/WebP/GIF/SVG)
+// y limitando dimensiones para no reventar localStorage.
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return reject(new Error("no file"));
+    const mime = (file.type || "").toLowerCase();
+    const isGifOrSvg = /gif|svg/i.test(mime);
+    // JPEG es el ÚNICO formato común sin alpha. Todo lo demás → tratamos como transparente.
+    const isJpeg = /jpe?g/i.test(mime);
+
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (ev) => {
+      const rawDataUrl = ev.target.result;
+      // GIF/SVG: no procesar (perdería animación/vector). Devolver original.
+      if (isGifOrSvg) { resolve(rawDataUrl); return; }
+
+      // Si el archivo es pequeño (< 1.5 MB), no recodificar → conserva alpha y calidad exactos.
+      const SMALL_LIMIT = 1.5 * 1024 * 1024;
+      if (file.size && file.size <= SMALL_LIMIT) {
+        resolve(rawDataUrl);
+        return;
+      }
+
+      // Redimensionar para archivos grandes.
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 900;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+          else                { width  = Math.round(width  * (maxDim / height)); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        // alpha:true (default) — pero lo hacemos explícito por seguridad
+        const ctx = canvas.getContext("2d", { alpha: true });
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        // Todo lo que NO sea JPEG explícito → PNG (preserva alpha)
+        const out = isJpeg
+          ? canvas.toDataURL("image/jpeg", 0.85)
+          : canvas.toDataURL("image/png");
+        resolve(out);
+      };
+      img.onerror = () => resolve(rawDataUrl); // fallback: dataURL crudo
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+ * GoalImageModal — editor completo (upload/reorder/remove + transform)
+ * ============================================================ */
+function GoalImageModal({ open, onClose, state, onChange, activeIdx, setActiveIdx }) {
+  const fileInputRef = useRef(null);
+  const [selectedIdx, setSelectedIdx] = useState(activeIdx);
+
+  useEffect(() => { if (open) setSelectedIdx(activeIdx); }, [open, activeIdx]);
+
+  const selected = state.images[selectedIdx] || null;
+
+  const updateSelected = (patch) => {
+    if (!selected) return;
+    const images = state.images.map((im, i) => i === selectedIdx ? { ...im, ...patch } : im);
+    onChange({ ...state, images });
+  };
+
+  const setInterval_ = (v) => onChange({ ...state, intervalSec: Math.max(1, Math.min(60, v)) });
+
+  const handleFiles = async (files) => {
+    const arr = Array.from(files || []);
+    if (!arr.length) return;
+    const newOnes = [];
+    for (const f of arr) {
+      if (!f.type.startsWith("image/")) continue;
+      try {
+        const src = await fileToDataUrl(f);
+        newOnes.push({ id: cryptoId(), src, scale: 1, x: 0, y: 0, rotation: 0 });
+      } catch { /* skip */ }
+    }
+    if (!newOnes.length) return;
+    const images = [...state.images, ...newOnes];
+    onChange({ ...state, images });
+    setSelectedIdx(images.length - newOnes.length); // seleccionar la primera nueva
+  };
+
+  const onPick = (e) => {
+    handleFiles(e.target.files);
+    e.target.value = "";
+  };
+
+  const removeImage = (i) => {
+    const images = state.images.filter((_, j) => j !== i);
+    onChange({ ...state, images });
+    if (activeIdx >= images.length) setActiveIdx(Math.max(0, images.length - 1));
+    setSelectedIdx(Math.max(0, Math.min(selectedIdx, images.length - 1)));
+  };
+
+  const moveImage = (from, to) => {
+    if (to < 0 || to >= state.images.length) return;
+    const images = [...state.images];
+    const [item] = images.splice(from, 1);
+    images.splice(to, 0, item);
+    onChange({ ...state, images });
+    setSelectedIdx(to);
+  };
+
+  const resetTransform = () => updateSelected({ scale: 1, x: 0, y: 0, rotation: 0 });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose?.()}>
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[92vh] overflow-hidden p-0 bg-white/95 backdrop-blur-xl border border-white/60 rounded-3xl shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 via-white to-fuchsia-50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md" style={{ background: "linear-gradient(135deg,#8b5cf6,#ec4899)" }}>
+              <ImagePlus size={18} className="text-white" strokeWidth={2.2} />
+            </div>
+            <div>
+              <DialogTitle className="text-lg font-black text-slate-900" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                Imágenes de tu meta
+              </DialogTitle>
+              <p className="text-xs text-slate-500 font-semibold">Sube, ordena y edita tamaño, posición y rotación</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors"
+            data-testid="goal-modal-close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-0 max-h-[calc(92vh-72px)] overflow-hidden">
+          {/* Preview + transform controls */}
+          <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+            <div
+              className="relative w-full aspect-[4/5] max-h-[420px] mx-auto rounded-2xl overflow-hidden"
+              style={{
+                background:
+                  "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 22px 22px",
+                border: "1px solid rgba(148,163,184,0.25)",
+              }}
+              data-testid="goal-modal-preview"
+            >
+              {selected ? (
+                <img
+                  key={selected.id}
+                  src={selected.src}
+                  alt="Preview"
+                  className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+                  draggable={false}
+                  style={{
+                    transform: `translate(${selected.x || 0}px, ${selected.y || 0}px) rotate(${selected.rotation || 0}deg) scale(${selected.scale || 1})`,
+                    transformOrigin: "center center",
+                  }}
+                />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                  <ImagePlus size={40} strokeWidth={1.4} />
+                  <p className="text-xs font-bold mt-2">Sube tu primera imagen</p>
+                </div>
+              )}
+            </div>
+
+            {/* Transform controls */}
+            {selected && (
+              <div className="space-y-3">
+                <TransformSlider
+                  label="Tamaño"
+                  value={selected.scale || 1}
+                  min={0.3} max={3} step={0.02}
+                  onChange={(v) => updateSelected({ scale: v })}
+                  display={`${Math.round((selected.scale || 1) * 100)}%`}
+                  testId="tr-scale"
+                />
+                <TransformSlider
+                  label="Rotación"
+                  value={selected.rotation || 0}
+                  min={-180} max={180} step={1}
+                  onChange={(v) => updateSelected({ rotation: v })}
+                  display={`${Math.round(selected.rotation || 0)}°`}
+                  testId="tr-rot"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <TransformSlider
+                    label="Posición X"
+                    value={selected.x || 0}
+                    min={-120} max={120} step={1}
+                    onChange={(v) => updateSelected({ x: v })}
+                    display={`${Math.round(selected.x || 0)}`}
+                    testId="tr-x"
+                  />
+                  <TransformSlider
+                    label="Posición Y"
+                    value={selected.y || 0}
+                    min={-120} max={120} step={1}
+                    onChange={(v) => updateSelected({ y: v })}
+                    display={`${Math.round(selected.y || 0)}`}
+                    testId="tr-y"
+                  />
+                </div>
+                <button
+                  onClick={resetTransform}
+                  className="text-[11px] font-black uppercase tracking-wider text-slate-500 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                  data-testid="tr-reset"
+                >
+                  <X size={11} /> Restablecer transformación
+                </button>
+              </div>
+            )}
+
+            {/* Intervalo del carrusel */}
+            <div className="pt-2 border-t border-slate-100">
+              <TransformSlider
+                label={`Intervalo del carrusel · ${state.intervalSec}s`}
+                value={state.intervalSec}
+                min={1} max={30} step={1}
+                onChange={(v) => setInterval_(v)}
+                display={`${state.intervalSec}s`}
+                testId="tr-interval"
+                icon={Zap}
+              />
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">
+                Con {state.images.length < 2 ? "1 imagen no rota" : "2+ imágenes rota automáticamente"}
+              </p>
+            </div>
+          </div>
+
+          {/* Lista de imágenes */}
+          <div className="border-t md:border-t-0 md:border-l border-slate-100 bg-slate-50/60 p-4 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                Galería · {state.images.length}
+              </p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-[11px] font-black text-white px-3 py-1.5 rounded-full shadow-md hover:shadow-lg transition-all flex items-center gap-1.5"
+                style={{ background: "linear-gradient(135deg,#8b5cf6,#ec4899)" }}
+                data-testid="goal-modal-upload"
+              >
+                <Upload size={11} strokeWidth={2.6} />
+                Subir
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={onPick}
+                data-testid="goal-modal-file-input"
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {state.images.length === 0 && (
+                <div className="text-center py-10 text-slate-400 text-xs font-semibold">
+                  Aún no tienes imágenes.<br/>Sube una para empezar.
+                </div>
+              )}
+              {state.images.map((im, i) => (
+                <div
+                  key={im.id}
+                  onClick={() => setSelectedIdx(i)}
+                  className={`relative group flex items-center gap-2 p-2 rounded-xl cursor-pointer transition-all ${
+                    i === selectedIdx
+                      ? "bg-white shadow-md border border-indigo-200"
+                      : "bg-white/60 hover:bg-white border border-transparent"
+                  }`}
+                  data-testid={`goal-modal-thumb-${i}`}
+                >
+                  <div
+                    className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0"
+                    style={{
+                      background:
+                        "repeating-conic-gradient(#e2e8f0 0% 25%, #f8fafc 0% 50%) 50% / 8px 8px",
+                    }}
+                  >
+                    <img src={im.src} alt="" className="w-full h-full object-contain" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-black text-slate-700">#{i + 1}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold truncate">
+                      {Math.round((im.scale || 1) * 100)}% · {Math.round(im.rotation || 0)}°
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); moveImage(i, i - 1); }}
+                      className="w-6 h-6 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500"
+                      title="Subir"
+                    >
+                      <ChevronLeft size={12} className="-rotate-90" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); moveImage(i, i + 1); }}
+                      className="w-6 h-6 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500"
+                      title="Bajar"
+                    >
+                      <ChevronRight size={12} className="rotate-90" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                      className="w-6 h-6 rounded-md hover:bg-rose-50 flex items-center justify-center text-rose-500"
+                      title="Eliminar"
+                      data-testid={`goal-modal-remove-${i}`}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Slider con etiqueta + valor mostrado
+function TransformSlider({ label, value, min, max, step, onChange, display, testId, icon: Icon }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1">
+          {Icon && <Icon size={10} strokeWidth={2.6} className="text-indigo-500" />}
+          {label}
+        </p>
+        <p className="text-[11px] font-black text-slate-900 tabular-nums" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+          {display}
+        </p>
+      </div>
+      <Slider
+        value={[value]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={([v]) => onChange(v)}
+        data-testid={testId}
+      />
+    </div>
+  );
+}
+
 export default function Metas() {
   const now = new Date();
   const [year,    setYear]    = useState(now.getFullYear());
@@ -811,25 +1309,42 @@ export default function Metas() {
       <motion.div
         initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="relative overflow-hidden rounded-3xl p-6 mb-6 shadow-xl"
+        className="relative overflow-hidden rounded-[28px] p-6 sm:p-7 mb-6 shadow-2xl"
         style={{
-          background: `linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.6))`,
-          backdropFilter: "blur(20px)",
-          border: "1px solid rgba(255,255,255,0.6)",
+          background: `
+            radial-gradient(circle at 15% 15%, rgba(255,255,255,0.95), rgba(255,255,255,0.7) 40%, rgba(255,255,255,0.55) 100%)
+          `,
+          backdropFilter: "blur(24px)",
+          border: "1px solid rgba(255,255,255,0.7)",
         }}
         data-testid="annual-goal-card"
       >
-        {/* Animated background rays */}
+        {/* Capa decorativa 1: gran orbe gradient del tipo */}
         <motion.div
-          className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-20 pointer-events-none"
-          style={{ background: `linear-gradient(135deg, var(--from), var(--to))` }}
+          className="absolute -top-24 -right-24 w-80 h-80 rounded-full opacity-25 pointer-events-none"
           animate={{ scale: [1, 1.2, 1], rotate: [0, 45, 0] }}
           transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
         >
-          <div className={`w-full h-full rounded-full bg-gradient-to-br ${typeCfg.grad} blur-2xl`} />
+          <div className={`w-full h-full rounded-full bg-gradient-to-br ${typeCfg.grad} blur-3xl`} />
         </motion.div>
+        {/* Capa decorativa 2: orbe secundario */}
+        <motion.div
+          className="absolute -bottom-20 -left-16 w-64 h-64 rounded-full opacity-20 pointer-events-none"
+          animate={{ scale: [1.1, 1, 1.1], rotate: [0, -30, 0] }}
+          transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+        >
+          <div className={`w-full h-full rounded-full bg-gradient-to-br ${typeCfg.grad} blur-3xl`} />
+        </motion.div>
+        {/* Grid sutil */}
+        <div
+          className="absolute inset-0 opacity-[0.04] pointer-events-none"
+          style={{
+            backgroundImage: "linear-gradient(rgba(0,0,0,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.6) 1px, transparent 1px)",
+            backgroundSize: "28px 28px",
+          }}
+        />
 
-        <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+        <div className="relative flex flex-col lg:flex-row items-stretch lg:items-center gap-6 lg:gap-8">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <motion.div animate={{ rotate: [0, 20, -20, 0] }} transition={{ duration: 4, repeat: Infinity }}>
@@ -953,6 +1468,11 @@ export default function Metas() {
             </p>
           </div>
 
+          {/* Dream image — imagen inspiracional de la meta */}
+          <div className="flex justify-center lg:justify-start">
+            <GoalDreamImage year={year} type={type} />
+          </div>
+
           {/* Circular progress */}
           <div className="relative w-40 h-40 flex-shrink-0 mx-auto lg:mx-0">
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
@@ -990,8 +1510,6 @@ export default function Metas() {
           </div>
         </div>
 
-        {/* Motivation journey — rewards you unlock as you progress */}
-        <MotivationJourney pct={animAnnualPct} accent={typeCfg.key} />
       </motion.div>
       )}
 
@@ -1037,152 +1555,3 @@ export default function Metas() {
 }
 
 
-/* ============================================================
- * Motivation journey — anima 4 recompensas que se desbloquean
- * conforme la meta anual avanza. Muestra qué se está logrando.
- * ============================================================ */
-const REWARDS = [
-  { pct: 25,  icon: Plane, label: "Viaje soñado",   from: "#38bdf8", to: "#0ea5e9" },
-  { pct: 50,  icon: Car,   label: "Auto nuevo",     from: "#f59e0b", to: "#ef4444" },
-  { pct: 75,  icon: Home,  label: "Tu casa",        from: "#a78bfa", to: "#ec4899" },
-  { pct: 100, icon: Globe, label: "Vuelta al mundo", from: "#10b981", to: "#0d9488" },
-];
-
-function MotivationJourney({ pct = 0, accent = "ventas" }) {
-  const safe = Math.max(0, Math.min(100, pct));
-  const trackGrad = accent === "ganancias"
-    ? "linear-gradient(90deg,#a78bfa,#ec4899,#f59e0b,#10b981)"
-    : accent === "gastos"
-    ? "linear-gradient(90deg,#f59e0b,#f43f5e,#ec4899,#8b5cf6)"
-    : "linear-gradient(90deg,#38bdf8,#f59e0b,#a78bfa,#10b981)";
-
-  // Recompensa "actual" en la que estamos trabajando (siguiente por desbloquear)
-  const nextReward = REWARDS.find(r => safe < r.pct) || REWARDS[REWARDS.length - 1];
-
-  return (
-    <div className="relative mt-6 pt-5 border-t border-slate-200/70" data-testid="motivation-journey">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <motion.div
-            animate={{ y: [0, -3, 0] }}
-            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <Sparkles size={13} className="text-amber-500" />
-          </motion.div>
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-            Lo que estás logrando
-          </p>
-        </div>
-        <p className="text-[10px] font-bold text-slate-500">
-          Próximo: <span className="font-black text-slate-800">{nextReward.label}</span>
-        </p>
-      </div>
-
-      {/* Track with milestones */}
-      <div className="relative h-16 sm:h-20">
-        {/* Base track */}
-        <div
-          className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-1.5 rounded-full"
-          style={{ background: "rgba(148,163,184,0.22)" }}
-        />
-        {/* Filled portion */}
-        <motion.div
-          className="absolute left-2 top-1/2 -translate-y-1/2 h-1.5 rounded-full"
-          style={{ background: trackGrad, maxWidth: "calc(100% - 16px)" }}
-          initial={{ width: 0 }}
-          animate={{ width: `calc(${safe}% - ${(safe / 100) * 16}px)` }}
-          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
-        />
-        {/* Traveler dot (rocket) that rides the progress */}
-        <motion.div
-          className="absolute top-1/2 -translate-y-1/2"
-          initial={{ left: "0.5rem" }}
-          animate={{ left: `calc(${safe}% - ${(safe / 100) * 16}px + 0.5rem - 12px)` }}
-          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <motion.div
-            className="w-6 h-6 rounded-full flex items-center justify-center shadow-lg"
-            style={{ background: "linear-gradient(135deg,#f59e0b,#ec4899)" }}
-            animate={{ scale: [1, 1.15, 1], rotate: [0, 8, -8, 0] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <Rocket size={12} className="text-white" strokeWidth={2.4} />
-          </motion.div>
-        </motion.div>
-
-        {/* Milestone nodes */}
-        {REWARDS.map((r, i) => {
-          const unlocked = safe >= r.pct;
-          const Icon = r.icon;
-          return (
-            <div
-              key={r.pct}
-              className="absolute top-0 h-full flex flex-col items-center"
-              style={{
-                left: `calc(${r.pct}% - ${(r.pct / 100) * 16}px + 0.5rem)`,
-                transform: "translateX(-50%)",
-              }}
-              data-testid={`journey-milestone-${r.pct}`}
-            >
-              <motion.div
-                initial={{ scale: 0, rotate: -30 }}
-                animate={{
-                  scale: unlocked ? [1, 1.12, 1] : 1,
-                  rotate: 0,
-                  y: unlocked ? [0, -3, 0] : 0,
-                }}
-                transition={{
-                  scale: unlocked
-                    ? { duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: i * 0.15 }
-                    : { type: "spring", stiffness: 260, damping: 18, delay: 0.3 + i * 0.1 },
-                  y: unlocked
-                    ? { duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: i * 0.15 }
-                    : { duration: 0 },
-                }}
-                className="relative w-10 h-10 rounded-2xl flex items-center justify-center shadow-md"
-                style={{
-                  background: unlocked
-                    ? `linear-gradient(135deg, ${r.from}, ${r.to})`
-                    : "rgba(255,255,255,0.85)",
-                  border: unlocked ? "2px solid rgba(255,255,255,0.9)" : "1.5px dashed rgba(148,163,184,0.55)",
-                  filter: unlocked ? "none" : "grayscale(0.5)",
-                  opacity: unlocked ? 1 : 0.55,
-                }}
-              >
-                <Icon
-                  size={16}
-                  className={unlocked ? "text-white" : "text-slate-400"}
-                  strokeWidth={2.2}
-                />
-                {unlocked && (
-                  <motion.span
-                    className="absolute inset-0 rounded-2xl pointer-events-none"
-                    style={{ background: `linear-gradient(135deg, ${r.from}, ${r.to})` }}
-                    animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut", delay: 0.2 * i }}
-                  />
-                )}
-                {unlocked && (
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1, rotate: 360 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 15 }}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shadow"
-                  >
-                    <Check size={9} className="text-white" strokeWidth={3.5} />
-                  </motion.div>
-                )}
-              </motion.div>
-              <p
-                className={`hidden sm:block absolute top-full mt-1 text-[9px] font-black uppercase tracking-wider whitespace-nowrap ${unlocked ? "text-slate-700" : "text-slate-400"}`}
-                style={{ letterSpacing: "0.06em" }}
-              >
-                {r.label}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
