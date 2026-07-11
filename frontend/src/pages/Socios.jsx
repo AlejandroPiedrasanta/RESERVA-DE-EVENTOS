@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { getSocios, deleteSocio, getReservations, getFinancials, updateReservation } from "@/lib/api";
-import { Plus, Trash2, Edit2, Camera, Video, Users, TrendingUp, DollarSign, CheckCircle, Clock, GripVertical, CalendarPlus, X, ChevronDown, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Trash2, Edit2, Camera, Video, Users, TrendingUp, DollarSign, CheckCircle, Clock, GripVertical, CalendarPlus, X, ChevronDown, ToggleLeft, ToggleRight, Search, Sparkles, Calendar } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -22,11 +22,41 @@ function AssignEventPanel({ socio, reservations, formatCurrency, onAssigned, onC
   const [selectedRes, setSelectedRes] = useState("");
   const [payment, setPayment]         = useState("");
   const [saving, setSaving]           = useState(false);
+  const [showAll, setShowAll]         = useState(false);
+  const [query, setQuery]             = useState("");
   const { toast } = useToast();
-  const available = reservations.filter(r =>
+
+  // Solo eventos activos donde el socio no está asignado
+  const availableAll = reservations.filter(r =>
     r.status !== "Cancelado" &&
     !(r.assigned_partners || []).some(p => p.socio_id === socio.id)
   );
+
+  // Ordenar por fecha: próximos primero (los futuros ascendentes), luego pasados descendentes
+  const today = new Date().toISOString().slice(0, 10);
+  const sorted = [...availableAll].sort((a, b) => {
+    const ad = a.event_date || ""; const bd = b.event_date || "";
+    const aFuture = ad >= today; const bFuture = bd >= today;
+    if (aFuture && bFuture) return ad.localeCompare(bd);
+    if (aFuture && !bFuture) return -1;
+    if (!aFuture && bFuture) return 1;
+    return bd.localeCompare(ad);
+  });
+
+  // Aplicar filtro de búsqueda si escribe
+  const filtered = query.trim()
+    ? sorted.filter(r =>
+        (r.event_type || "").toLowerCase().includes(query.toLowerCase()) ||
+        (r.client_name || "").toLowerCase().includes(query.toLowerCase())
+      )
+    : sorted;
+
+  // Mostrar solo los primeros 5 recientes/próximos por defecto
+  const list = showAll ? filtered : filtered.slice(0, 5);
+  const hiddenCount = filtered.length - list.length;
+
+  const selectedEvent = reservations.find(r => r.id === selectedRes);
+
   const handleAssign = async () => {
     if (!selectedRes) return;
     setSaving(true);
@@ -39,37 +69,177 @@ function AssignEventPanel({ socio, reservations, formatCurrency, onAssigned, onC
     } catch { toast({ title: "Error al asignar evento", variant: "destructive" }); }
     finally { setSaving(false); }
   };
+
+  const fmtDate = (d) => {
+    if (!d) return "Sin fecha";
+    const dt = new Date(d + "T00:00");
+    const now = new Date(); now.setHours(0,0,0,0);
+    const diff = Math.round((dt - now) / 86400000);
+    if (diff === 0) return "Hoy";
+    if (diff === 1) return "Mañana";
+    if (diff > 1 && diff <= 7) return `En ${diff} días`;
+    if (diff < 0 && diff >= -7) return `Hace ${-diff}d`;
+    return d.split("-").reverse().join("/");
+  };
+
   return (
-    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-      className="mt-3 bg-indigo-50/80 border border-indigo-200/60 rounded-2xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-black text-indigo-700 uppercase tracking-widest">Asignar a evento</p>
-        <button onClick={onClose} className="p-1 rounded-lg hover:bg-indigo-100 transition-colors"><X size={12} className="text-indigo-400" /></button>
-      </div>
-      {available.length === 0 ? (
-        <p className="text-xs text-indigo-400 text-center py-2">Ya asignado a todos los eventos activos</p>
-      ) : (
-        <>
-          <select value={selectedRes} onChange={e => setSelectedRes(e.target.value)}
-            className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300">
-            <option value="">— Selecciona un evento —</option>
-            {available.map(r => (
-              <option key={r.id} value={r.id}>{r.event_type} · {r.event_date?.split("-").reverse().join("/")} · {r.client_name}</option>
-            ))}
-          </select>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <input type="number" value={payment} onChange={e => setPayment(e.target.value)}
-                placeholder="Honorario (opcional)" min="0" step="0.01"
-                className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-            </div>
-            <button onClick={handleAssign} disabled={!selectedRes || saving}
-              className="px-4 py-2 rounded-xl bg-indigo-500 text-white text-xs font-black disabled:opacity-40 hover:bg-indigo-600 transition-colors flex items-center gap-1.5">
-              {saving ? <><Clock size={11} className="animate-spin" /> Asignando...</> : <><CheckCircle size={11} /> Asignar</>}
-            </button>
+    <motion.div
+      initial={{ opacity: 0, y: -8, height: 0 }}
+      animate={{ opacity: 1, y: 0, height: "auto" }}
+      exit={{ opacity: 0, y: -8, height: 0 }}
+      className="mt-3 overflow-hidden"
+      data-testid={`assign-panel-${socio.id}`}
+    >
+      <div
+        className="rounded-2xl p-4 space-y-3 relative"
+        style={{
+          background: "linear-gradient(135deg, rgba(238,242,255,0.9), rgba(245,243,255,0.85))",
+          border: "1px solid rgba(129,140,248,0.25)",
+          boxShadow: "0 8px 30px -12px rgba(99,102,241,0.25)",
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles size={12} className="text-indigo-500" />
+            <p className="text-[10px] font-black text-indigo-700 uppercase tracking-[0.2em]">Asignar a evento</p>
           </div>
-        </>
-      )}
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/70 transition-colors" data-testid={`assign-close-${socio.id}`}>
+            <X size={12} className="text-indigo-400" />
+          </button>
+        </div>
+
+        {availableAll.length === 0 ? (
+          <div className="text-center py-4">
+            <div className="w-10 h-10 rounded-2xl bg-white/70 flex items-center justify-center mx-auto mb-2">
+              <CheckCircle size={16} className="text-indigo-400" />
+            </div>
+            <p className="text-xs text-indigo-500 font-semibold">Ya está en todos los eventos activos</p>
+          </div>
+        ) : (
+          <>
+            {/* Buscador solo si hay muchos */}
+            {availableAll.length > 5 && (
+              <div className="relative">
+                <Search size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" />
+                <input
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); setShowAll(true); }}
+                  placeholder="Buscar evento o cliente..."
+                  className="w-full bg-white/70 border border-indigo-200/60 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-700 placeholder:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:bg-white transition-all"
+                  data-testid={`assign-search-${socio.id}`}
+                />
+              </div>
+            )}
+
+            {/* Lista de eventos como tarjetas */}
+            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1" data-testid={`assign-events-list-${socio.id}`}>
+              {list.length === 0 ? (
+                <p className="text-xs text-indigo-400 text-center py-3">Sin resultados</p>
+              ) : (
+                list.map(r => {
+                  const isSel = selectedRes === r.id;
+                  const isFuture = (r.event_date || "") >= today;
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedRes(isSel ? "" : r.id)}
+                      data-testid={`assign-event-option-${r.id}`}
+                      className={`w-full text-left rounded-xl px-3 py-2.5 transition-all border ${
+                        isSel
+                          ? "bg-white border-indigo-400 shadow-md"
+                          : "bg-white/60 border-white/80 hover:bg-white hover:border-indigo-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isFuture ? "bg-emerald-400" : "bg-slate-300"}`} />
+                        <p className="text-xs font-black text-slate-900 flex-1 truncate">{r.event_type}</p>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                          isFuture
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {fmtDate(r.event_date)}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5 ml-3.5 truncate">{r.client_name}</p>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Toggle mostrar todos */}
+            {hiddenCount > 0 && (
+              <button
+                onClick={() => setShowAll(true)}
+                data-testid={`assign-show-all-${socio.id}`}
+                className="w-full text-[10px] font-bold text-indigo-500 hover:text-indigo-700 py-1 transition-colors"
+              >
+                Ver {hiddenCount} más ↓
+              </button>
+            )}
+            {showAll && filtered.length > 5 && !query && (
+              <button
+                onClick={() => setShowAll(false)}
+                data-testid={`assign-show-less-${socio.id}`}
+                className="w-full text-[10px] font-bold text-indigo-400 hover:text-indigo-600 py-1 transition-colors"
+              >
+                Ver menos ↑
+              </button>
+            )}
+
+            {/* Panel de honorario - protagonista cuando hay evento seleccionado */}
+            <AnimatePresence>
+              {selectedRes && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: "auto" }}
+                  exit={{ opacity: 0, y: -6, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div
+                    className="rounded-xl p-3 mt-1"
+                    style={{
+                      background: "linear-gradient(135deg,#4f46e5,#7c3aed)",
+                      boxShadow: "0 10px 30px -8px rgba(79,70,229,0.5)",
+                    }}
+                  >
+                    <p className="text-[9px] uppercase tracking-[0.22em] text-white/70 font-black mb-2">¿Cuánto se le va a pagar?</p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center bg-white/95 rounded-xl px-3 h-11">
+                        <DollarSign size={16} className="text-indigo-500 shrink-0" />
+                        <input
+                          type="number"
+                          value={payment}
+                          onChange={e => setPayment(e.target.value)}
+                          placeholder="0"
+                          min="0"
+                          step="0.01"
+                          autoFocus
+                          className="w-full bg-transparent border-none focus:outline-none text-lg font-black text-slate-900 placeholder:text-slate-300"
+                          style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                          data-testid={`assign-payment-input-${socio.id}`}
+                        />
+                      </div>
+                      <button
+                        onClick={handleAssign}
+                        disabled={saving}
+                        data-testid={`assign-confirm-${socio.id}`}
+                        className="px-4 h-11 rounded-xl bg-white text-indigo-700 text-xs font-black disabled:opacity-50 hover:bg-indigo-50 transition-colors flex items-center gap-1.5 whitespace-nowrap shadow-lg"
+                      >
+                        {saving ? <><Clock size={12} className="animate-spin" /> ...</> : <><CheckCircle size={12} /> Confirmar</>}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-white/60 font-semibold mt-1.5">
+                      Déjalo en 0 si aún no lo defines · {selectedEvent?.event_type}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+      </div>
     </motion.div>
   );
 }
@@ -185,6 +355,7 @@ export default function Socios() {
           const el = document.querySelector(`[data-testid="socio-card-${socioId}"]`);
           if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
         }}
+        onTogglePayment={togglePayment}
       />
 
       {loading ? (
@@ -290,7 +461,17 @@ export default function Socios() {
                         const partnerInEv = (ev.assigned_partners || []).find(p => p.socio_id === socio.id);
                         const isPaid = partnerInEv?.payment_status === "Pagado";
                         return (
-                          <div key={ev.id} className="bg-white/40 rounded-xl px-3 py-2.5 border border-white/60">
+                          <div
+                            key={ev.id}
+                            onClick={() => togglePayment(ev, socio.id)}
+                            data-testid={`event-row-${ev.id}-${socio.id}`}
+                            title={isPaid ? "Click para marcar como Pendiente" : "Click para marcar como Pagado"}
+                            className={`group cursor-pointer rounded-xl px-3 py-2.5 border transition-all ${
+                              isPaid
+                                ? "bg-emerald-50/60 border-emerald-200/60 hover:bg-amber-50/60 hover:border-amber-200/60"
+                                : "bg-white/40 border-white/60 hover:bg-emerald-50/60 hover:border-emerald-300/70"
+                            }`}
+                          >
                             <div className="flex items-center gap-2 mb-1.5">
                               <p className="text-xs font-black text-slate-800 flex-1">{ev.event_type}</p>
                               <span className="text-[10px] text-slate-400">{ev.event_date?.split("-").reverse().join("/")}</span>
@@ -301,13 +482,22 @@ export default function Socios() {
                                 <span className="text-xs font-black text-slate-700">{formatCurrency(partnerInEv.payment)}</span>
                               )}
                               {/* Toggle Pendiente ↔ Pagado */}
-                              <button onClick={() => togglePayment(ev, socio.id)}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); togglePayment(ev, socio.id); }}
                                 data-testid={`toggle-payment-${ev.id}-${socio.id}`}
-                                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all ${isPaid ? "bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-700" : "bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700"}`}>
-                                {isPaid ? <><CheckCircle size={9} /> Pagado</> : <><Clock size={9} /> Pendiente</>}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all ${
+                                  isPaid
+                                    ? "bg-emerald-100 text-emerald-700 group-hover:bg-amber-100 group-hover:text-amber-700"
+                                    : "bg-amber-100 text-amber-700 group-hover:bg-emerald-500 group-hover:text-white group-hover:shadow-md"
+                                }`}
+                              >
+                                {isPaid
+                                  ? <><CheckCircle size={9} /><span className="group-hover:hidden">Pagado</span><span className="hidden group-hover:inline">Marcar pendiente</span></>
+                                  : <><CheckCircle size={9} /><span className="group-hover:hidden">Pendiente</span><span className="hidden group-hover:inline">Pagar ahora</span></>
+                                }
                               </button>
                               {/* Quitar del evento */}
-                              <button onClick={() => removeFromEvent(ev, socio.id)}
+                              <button onClick={(e) => { e.stopPropagation(); removeFromEvent(ev, socio.id); }}
                                 data-testid={`remove-from-event-${ev.id}-${socio.id}`}
                                 className="p-1 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors">
                                 <X size={10} />
@@ -320,18 +510,43 @@ export default function Socios() {
                   )}
                 </AnimatePresence>
 
-                {/* Mini preview eventos (cuando no expandido) */}
+                {/* Mini preview eventos (cuando no expandido) — clicables con botón Pagar al hover */}
                 {!isExpanded && !isAssigning && events.length > 0 && (
                   <div className="space-y-1">
                     {events.slice(0, 2).map(ev => {
                       const partnerInEv = (ev.assigned_partners || []).find(p => p.socio_id === socio.id);
                       const evPaid = partnerInEv?.payment_status === "Pagado";
                       return (
-                        <div key={ev.id} className="flex items-center gap-2 bg-white/20 rounded-xl px-2.5 py-1.5 text-xs">
-                          <span className="font-bold text-slate-700 flex-1 truncate">{ev.event_type}</span>
-                          <span className="text-slate-400">{ev.event_date?.split("-").reverse().join("/")}</span>
-                          <span className={`font-bold text-[9px] px-1.5 py-0.5 rounded-full ${evPaid ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}>{evPaid ? "Pagado" : "Pendiente"}</span>
-                        </div>
+                        <button
+                          key={ev.id}
+                          type="button"
+                          onClick={() => togglePayment(ev, socio.id)}
+                          data-testid={`mini-event-${ev.id}-${socio.id}`}
+                          title={evPaid ? "Click para marcar como Pendiente" : "Click para marcar como Pagado"}
+                          className={`group w-full flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs transition-all border ${
+                            evPaid
+                              ? "bg-emerald-50/50 border-emerald-200/50 hover:bg-amber-50/70 hover:border-amber-300/60"
+                              : "bg-white/20 border-transparent hover:bg-emerald-50/70 hover:border-emerald-300/60 hover:shadow-sm"
+                          }`}
+                        >
+                          <span className="font-bold text-slate-700 flex-1 truncate text-left">{ev.event_type}</span>
+                          <span className="text-slate-400 group-hover:hidden">{ev.event_date?.split("-").reverse().join("/")}</span>
+                          {/* Estado por defecto */}
+                          <span className={`font-bold text-[9px] px-1.5 py-0.5 rounded-full group-hover:hidden ${evPaid ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"}`}>
+                            {evPaid ? "Pagado" : "Pendiente"}
+                          </span>
+                          {/* Botón revelado al hover */}
+                          <span
+                            className={`hidden group-hover:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black transition-all ${
+                              evPaid
+                                ? "bg-amber-500 text-white"
+                                : "bg-emerald-500 text-white shadow"
+                            }`}
+                          >
+                            <CheckCircle size={9} />
+                            {evPaid ? "Marcar pendiente" : "Pagar"}
+                          </span>
+                        </button>
                       );
                     })}
                     {events.length > 2 && <p className="text-[10px] text-slate-400 text-center">+{events.length - 2} más — toca ver todos</p>}

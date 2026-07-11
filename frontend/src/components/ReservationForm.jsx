@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { createReservation, updateReservation } from "@/lib/api";
+import { createReservation, updateReservation, getSocios } from "@/lib/api";
 import {
   ArrowLeft, X, Sparkles, User, Phone, Mail, Calendar as CalIcon, Clock, MapPin,
   Users, DollarSign, Package, StickyNote, PartyPopper, Heart, Cake, Briefcase,
-  Mic2, Star, CheckCircle2, Loader2, Wallet, Tag, Pencil, RotateCcw, Zap
+  Mic2, Star, CheckCircle2, Loader2, Wallet, Tag, Pencil, RotateCcw, Zap,
+  Camera, Video
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -60,6 +61,17 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
     { key: "Pagado",    label: "Pagado" },
   ];
   const [saving, setSaving] = useState(false);
+  const [socios, setSocios] = useState([]);
+  const [partnerSocioId, setPartnerSocioId] = useState("");
+  const [partnerPayment, setPartnerPayment] = useState("");
+
+  // Cargar socios (solo en modo creación; en edición ya se gestiona desde Socios.jsx)
+  useEffect(() => {
+    if (isEdit) return;
+    let alive = true;
+    getSocios().then(list => { if (alive) setSocios(list || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, [isEdit]);
 
   // Snapshot original values for dirty tracking (edit mode)
   const originalRef = useRef(null);
@@ -157,6 +169,14 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
       total_amount: parseFloat(form.total_amount),
       advance_paid: parseFloat(form.advance_paid) || 0,
     };
+    // Al crear: si se eligió un socio, adjuntarlo como assigned_partners
+    if (!isEdit && partnerSocioId) {
+      payload.assigned_partners = [{
+        socio_id: partnerSocioId,
+        payment: parseFloat(partnerPayment) || 0,
+        payment_status: "Pendiente",
+      }];
+    }
     try {
       if (isEdit) {
         await updateReservation(reservation.id, payload);
@@ -458,12 +478,20 @@ export default function ReservationForm({ reservation, onClose, onSaved }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 mt-2.5">
                 {ff.venue !== false && (
-                  <div className="md:col-span-2">
-                    <UField icon={MapPin} label={f.venue} dirty={isDirtyField("venue")} testId="field-venue">
-                      <input value={form.venue} onChange={set("venue")} placeholder="Salón / Hotel / Ubicación"
-                             data-testid="input-venue" />
-                    </UField>
-                  </div>
+                  <UField icon={MapPin} label={f.venue} dirty={isDirtyField("venue")} testId="field-venue">
+                    <input value={form.venue} onChange={set("venue")} placeholder="Salón / Hotel / Ubicación"
+                           data-testid="input-venue" />
+                  </UField>
+                )}
+                {!isEdit && (
+                  <PartnerPickerField
+                    socios={socios}
+                    value={partnerSocioId}
+                    onChange={setPartnerSocioId}
+                    payment={partnerPayment}
+                    onPaymentChange={setPartnerPayment}
+                    currencySymbol={currencySymbol}
+                  />
                 )}
                 {ff.guests !== false && (
                   <UField icon={Users} label={f.guests} dirty={isDirtyField("guests_count")} testId="field-guests">
@@ -564,6 +592,258 @@ function UField({ icon: Icon, label, children, dirty = false, testId }) {
         {children}
         {dirty && <span className="dirty-dot" data-testid="dirty-dot" />}
       </div>
+    </div>
+  );
+}
+
+// Socio/Fotógrafo picker — se muestra al lado de "Lugar del evento" al crear una reserva
+function PartnerPickerField({ socios, value, onChange, payment, onPaymentChange, currencySymbol }) {
+  const [open, setOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [rect, setRect] = useState(null); // bounding rect del botón para posicionar el popup
+  const wrapRef = useRef(null);
+  const btnRef  = useRef(null);
+  const selected = socios.find(s => s.id === value);
+  const ROLE_ICON = { "Fotógrafo": Camera, "Videógrafo": Video, "Asistente": Users };
+
+  // Recalcula posición cuando abre / al hacer scroll o resize
+  const updateRect = () => {
+    if (btnRef.current) setRect(btnRef.current.getBoundingClientRect());
+  };
+  useEffect(() => {
+    if (!open && !payOpen) return;
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open, payOpen]);
+
+  // Cerrar dropdowns al hacer click fuera
+  useEffect(() => {
+    if (!open && !payOpen) return;
+    const onDoc = (e) => {
+      const inWrap = wrapRef.current && wrapRef.current.contains(e.target);
+      const inPop  = e.target.closest?.("[data-partner-popup]");
+      if (!inWrap && !inPop) { setOpen(false); setPayOpen(false); }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open, payOpen]);
+
+  const handlePick = (id) => {
+    onChange(id);
+    setOpen(false);
+    if (id) setTimeout(() => { updateRect(); setPayOpen(true); }, 120);
+  };
+
+  // Estilo común para popups renderizados por portal (fixed, con coords del botón)
+  const popupPos = rect ? {
+    position: "fixed",
+    top:  rect.bottom + 4,
+    left: rect.left,
+    width: rect.width,
+    zIndex: 1000,
+  } : { display: "none" };
+
+  return (
+    <div className="ultra-field" data-testid="field-partner" ref={wrapRef}>
+      <label className="ultra-label">
+        <Camera size={12} /> Fotógrafo / Socio
+        {selected && payment && parseFloat(payment) > 0 && (
+          <span className="ml-auto text-[9px] font-black text-emerald-300 normal-case tracking-normal">
+            {currencySymbol}{parseFloat(payment).toLocaleString()}
+          </span>
+        )}
+      </label>
+
+      <div className="relative">
+        <Camera size={16} className="ultra-field-icon" />
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={() => { updateRect(); setOpen(o => !o); setPayOpen(false); }}
+          data-testid="partner-picker-btn"
+          className="w-full text-left"
+          style={{
+            padding: "11px 14px 11px 40px",
+            background: selected ? "rgba(139,92,246,0.14)" : "rgba(255,255,255,0.06)",
+            border: `1.5px solid ${selected ? "rgba(167,139,250,0.55)" : "rgba(255,255,255,0.14)"}`,
+            color: "#fff",
+            borderRadius: 13,
+            fontSize: 13.5,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            minHeight: 44,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            transition: "all 0.25s cubic-bezier(0.22,1,0.36,1)",
+          }}
+        >
+          {selected ? (
+            <>
+              {selected.photo && selected.photo_content_type ? (
+                <img
+                  src={`data:${selected.photo_content_type};base64,${selected.photo}`}
+                  alt=""
+                  className="w-5 h-5 rounded-md object-cover shrink-0"
+                />
+              ) : (
+                <div
+                  className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 text-[9px] font-black text-white"
+                  style={{ background: "linear-gradient(135deg,#8b5cf6,#ec4899)" }}
+                >
+                  {selected.name?.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="flex-1 min-w-0 truncate text-white text-[13px] font-bold">
+                {selected.name}
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); onChange(""); onPaymentChange(""); setPayOpen(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onChange(""); onPaymentChange(""); setPayOpen(false); } }}
+                className="p-0.5 rounded-md hover:bg-white/15 shrink-0"
+                data-testid="partner-picker-clear"
+                aria-label="Quitar socio"
+              >
+                <X size={11} className="text-white/70" />
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="flex-1 truncate text-white/45 font-semibold">
+                {socios.length === 0 ? "Sin socios registrados" : "Sin asignar (opcional)"}
+              </span>
+              <span className="text-[10px] text-white/40 font-bold">▾</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Popups vía PORTAL → escapan del stacking context del formulario */}
+      {createPortal(
+        <>
+          <AnimatePresence>
+            {open && socios.length > 0 && rect && (
+              <motion.div
+                key="partner-list"
+                data-partner-popup
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18 }}
+                className="rounded-2xl overflow-hidden max-h-60 overflow-y-auto"
+                style={{
+                  ...popupPos,
+                  background: "linear-gradient(160deg, rgba(30,20,60,0.98), rgba(20,15,45,0.98))",
+                  border: "1px solid rgba(167,139,250,0.35)",
+                  boxShadow: "0 20px 50px -10px rgba(139,92,246,0.6)",
+                }}
+                data-testid="partner-picker-list"
+              >
+                {socios.map(s => {
+                  const Icon = ROLE_ICON[s.role] || Users;
+                  const isSel = value === s.id;
+                  return (
+                    <button
+                      type="button"
+                      key={s.id}
+                      onClick={() => handlePick(s.id)}
+                      data-testid={`partner-picker-option-${s.id}`}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/[0.08] transition-colors text-left"
+                      style={{ background: isSel ? "rgba(139,92,246,0.22)" : "transparent" }}
+                    >
+                      {s.photo && s.photo_content_type ? (
+                        <img
+                          src={`data:${s.photo_content_type};base64,${s.photo}`}
+                          alt=""
+                          className="w-7 h-7 rounded-lg object-cover shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[11px] font-black text-white"
+                          style={{ background: "linear-gradient(135deg,#8b5cf6,#ec4899)" }}
+                        >
+                          {s.name?.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-black text-white truncate">{s.name}</p>
+                        <p className="text-[10px] text-white/50 truncate flex items-center gap-1">
+                          <Icon size={9} /> {s.role}
+                        </p>
+                      </div>
+                      {isSel && <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {payOpen && selected && rect && (
+              <motion.div
+                key="partner-pay"
+                data-partner-popup
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.18 }}
+                className="rounded-xl overflow-hidden"
+                style={{
+                  ...popupPos,
+                  background: "linear-gradient(135deg, rgba(30,20,60,0.98), rgba(20,15,45,0.98))",
+                  border: "1px solid rgba(167,139,250,0.5)",
+                  boxShadow: "0 20px 50px -10px rgba(139,92,246,0.55)",
+                  padding: 10,
+                }}
+                data-testid="partner-payment-popup"
+              >
+                <p className="text-[9px] font-black text-white/60 uppercase tracking-[0.2em] mb-1.5">
+                  ¿Cuánto se le pagará?
+                </p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-1 bg-white/10 border border-white/15 rounded-lg px-2.5 h-9">
+                    <span className="text-sm font-black text-white/80">{currencySymbol}</span>
+                    <input
+                      type="number"
+                      value={payment}
+                      onChange={e => onPaymentChange(e.target.value)}
+                      placeholder="0"
+                      min="0"
+                      step="0.01"
+                      autoFocus
+                      data-testid="partner-payment-input"
+                      className="w-full bg-transparent border-none focus:outline-none text-sm font-black text-white placeholder:text-white/30"
+                      style={{ padding: 0 }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPayOpen(false)}
+                    data-testid="partner-payment-confirm"
+                    className="px-3 h-9 rounded-lg text-[11px] font-black text-white transition-all"
+                    style={{ background: "linear-gradient(135deg,#8b5cf6,#ec4899)" }}
+                  >
+                    Listo
+                  </button>
+                </div>
+                <p className="text-[9px] text-white/40 font-semibold mt-1.5">
+                  Puedes editarlo luego · déjalo en 0 si aún no lo defines
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>,
+        document.body
+      )}
     </div>
   );
 }

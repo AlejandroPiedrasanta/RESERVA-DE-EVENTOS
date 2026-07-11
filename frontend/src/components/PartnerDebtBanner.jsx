@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Wallet, Sparkles, AlertCircle, Camera, Video, Users, ArrowRight, Flame, TrendingDown } from "lucide-react";
+import { Wallet, Sparkles, AlertCircle, Camera, Video, Users, ArrowRight, Flame, TrendingDown, CheckCircle, Clock, ChevronDown } from "lucide-react";
 
 /**
  * Big animated banner for the Socios (partners) page.
@@ -56,7 +56,10 @@ export default function PartnerDebtBanner({
   reservations = [],
   formatCurrency = (v) => `$${v?.toFixed(2) ?? 0}`,
   onScrollTo,
+  onTogglePayment,
 }) {
+  const [expandedSocioId, setExpandedSocioId] = useState(null);
+  const [togglingKey, setTogglingKey] = useState(null);
   // Build debt per socio
   const debts = useMemo(() => {
     const map = new Map();
@@ -65,9 +68,10 @@ export default function PartnerDebtBanner({
         if (p.payment_status === "Pagado") return;
         const amount = parseFloat(p.payment) || 0;
         if (amount <= 0) return;
-        const entry = map.get(p.socio_id) || { socio_id: p.socio_id, pending: 0, count: 0, next: null };
+        const entry = map.get(p.socio_id) || { socio_id: p.socio_id, pending: 0, count: 0, next: null, events: [] };
         entry.pending += amount;
         entry.count += 1;
+        entry.events.push({ reservation: r, amount });
         // pick the most upcoming event as "next"
         if (r.event_date) {
           if (!entry.next || r.event_date < entry.next.event_date) entry.next = r;
@@ -77,6 +81,8 @@ export default function PartnerDebtBanner({
     });
     const arr = Array.from(map.values()).map((d) => {
       const s = socios.find((x) => x.id === d.socio_id);
+      // sort each socio's events by date ascending
+      d.events.sort((a, b) => (a.reservation.event_date || "").localeCompare(b.reservation.event_date || ""));
       return { ...d, socio: s };
     }).filter((d) => d.socio);
     // sort by biggest debt first
@@ -482,48 +488,136 @@ export default function PartnerDebtBanner({
 
             {top.length > 0 ? (
               <div className="space-y-1.5 relative z-10" data-testid="banner-debt-breakdown">
-                {top.map((d, i) => (
-                  <motion.button
-                    key={d.socio_id}
-                    onClick={() => { setIdx(debts.findIndex(x => x.socio_id === d.socio_id)); onScrollTo?.(d.socio_id); }}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.6 + i * 0.08 }}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-left hover:bg-white/[0.10] transition-colors"
-                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
-                    data-testid={`banner-debt-row-${d.socio_id}`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {d.socio.photo && d.socio.photo_content_type ? (
-                        <img
-                          src={`data:${d.socio.photo_content_type};base64,${d.socio.photo}`}
-                          alt=""
-                          className="w-6 h-6 rounded-lg object-cover shrink-0"
-                        />
-                      ) : (
-                        <div
-                          className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black text-white"
-                          style={{ background: "linear-gradient(135deg,#f43f5e,#a855f7)" }}
-                        >
-                          {d.socio.name?.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <span className="text-white/90 text-xs font-black truncate">
-                        {d.socio.name}
-                      </span>
-                    </div>
-                    <span
-                      className="text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap"
-                      style={{
-                        background: "linear-gradient(135deg,#fda4af,#fdba74)",
-                        color: "#7f1d1d",
-                      }}
+                {top.map((d, i) => {
+                  const isExpanded = expandedSocioId === d.socio_id;
+                  return (
+                    <motion.div
+                      key={d.socio_id}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.6 + i * 0.08 }}
+                      className="rounded-xl overflow-hidden"
+                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+                      data-testid={`banner-debt-row-${d.socio_id}`}
                     >
-                      {formatCurrency(d.pending)}
-                    </span>
-                    <ArrowRight size={12} className="text-white/50 shrink-0" />
-                  </motion.button>
-                ))}
+                      <div className="flex items-stretch">
+                        <button
+                          onClick={() => { setIdx(debts.findIndex(x => x.socio_id === d.socio_id)); setExpandedSocioId(isExpanded ? null : d.socio_id); }}
+                          className="flex-1 flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-white/[0.10] transition-colors"
+                          data-testid={`banner-debt-row-toggle-${d.socio_id}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {d.socio.photo && d.socio.photo_content_type ? (
+                              <img
+                                src={`data:${d.socio.photo_content_type};base64,${d.socio.photo}`}
+                                alt=""
+                                className="w-6 h-6 rounded-lg object-cover shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black text-white"
+                                style={{ background: "linear-gradient(135deg,#f43f5e,#a855f7)" }}
+                              >
+                                {d.socio.name?.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <span className="text-white/90 text-xs font-black truncate">
+                              {d.socio.name}
+                            </span>
+                            <span className="text-white/40 text-[10px] font-bold shrink-0">
+                              · {d.count}
+                            </span>
+                          </div>
+                          <span
+                            className="text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap"
+                            style={{
+                              background: "linear-gradient(135deg,#fda4af,#fdba74)",
+                              color: "#7f1d1d",
+                            }}
+                          >
+                            {formatCurrency(d.pending)}
+                          </span>
+                          <motion.span
+                            animate={{ rotate: isExpanded ? 180 : 0 }}
+                            transition={{ duration: 0.2 }}
+                          >
+                            <ChevronDown size={12} className="text-white/60 shrink-0" />
+                          </motion.span>
+                        </button>
+                        {onScrollTo && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onScrollTo(d.socio_id); }}
+                            className="px-2 hover:bg-white/[0.10] transition-colors border-l border-white/10"
+                            title="Ir a la tarjeta del socio"
+                            data-testid={`banner-goto-${d.socio_id}`}
+                          >
+                            <ArrowRight size={12} className="text-white/50" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Expanded: lista de eventos con toggle pagado/pendiente */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div
+                              className="p-2 space-y-1 border-t border-white/10"
+                              style={{ background: "rgba(0,0,0,0.18)" }}
+                              data-testid={`banner-events-${d.socio_id}`}
+                            >
+                              {d.events.map(({ reservation: ev, amount }) => {
+                                const key = `${ev.id}-${d.socio_id}`;
+                                const isToggling = togglingKey === key;
+                                return (
+                                  <div key={ev.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/[0.04]">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-[11px] font-black text-white/90 truncate">{ev.event_type}</p>
+                                      <p className="text-[9px] text-white/50 font-semibold truncate">
+                                        {ev.client_name}
+                                        {ev.event_date ? ` · ${ev.event_date.split("-").reverse().join("/")}` : ""}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className="text-[10px] font-black text-white/90 whitespace-nowrap"
+                                      style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}
+                                    >
+                                      {formatCurrency(amount)}
+                                    </span>
+                                    <button
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        if (!onTogglePayment || isToggling) return;
+                                        setTogglingKey(key);
+                                        try { await onTogglePayment(ev, d.socio_id); }
+                                        finally { setTogglingKey(null); }
+                                      }}
+                                      disabled={isToggling || !onTogglePayment}
+                                      data-testid={`banner-toggle-payment-${ev.id}-${d.socio_id}`}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black transition-all bg-amber-100 text-amber-800 hover:bg-emerald-100 hover:text-emerald-800 disabled:opacity-50"
+                                      title="Marcar como pagado"
+                                    >
+                                      {isToggling
+                                        ? <Clock size={9} className="animate-spin" />
+                                        : <><Clock size={9} /> Pagar</>}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                              <p className="text-[9px] text-white/40 font-semibold text-center pt-1">
+                                Toca “Pagar” para marcar cada evento como pagado
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
                 {debts.length > top.length && (
                   <p className="text-white/50 text-[10px] font-bold text-center pt-1">
                     +{debts.length - top.length} socios más

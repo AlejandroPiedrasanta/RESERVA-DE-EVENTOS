@@ -333,6 +333,7 @@ class ReservationCreate(BaseModel):
     status: str = "Reservado"
     notes: Optional[str] = None
     package_type: Optional[str] = None
+    assigned_partners: Optional[list] = None
 
 
 class ReservationUpdate(BaseModel):

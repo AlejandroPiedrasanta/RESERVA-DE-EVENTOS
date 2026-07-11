@@ -223,22 +223,37 @@ def download_and_verify(
 # 4) Safe swap (Windows) via helper batch
 # ─────────────────────────────────────────────────────────────────────
 _WIN_BATCH_TEMPLATE = r"""@echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "NEW_BIN={new_bin}"
 set "CUR_BIN={cur_bin}"
 set "LOG={log}"
 set "APP_NAME={app_name}"
 
+for %%I in ("%CUR_BIN%") do set "CUR_DIR=%%~dpI"
+
 echo [%date% %time%] updater.bat start > "%LOG%"
 echo   NEW_BIN=%NEW_BIN% >> "%LOG%"
 echo   CUR_BIN=%CUR_BIN% >> "%LOG%"
+echo   CUR_DIR=%CUR_DIR% >> "%LOG%"
+
+REM 0) Sanidad: el nuevo binario debe existir y no estar vacío.
+if not exist "%NEW_BIN%" (
+  echo [%date% %time%] ERROR: NEW_BIN no existe >> "%LOG%"
+  goto :fail
+)
+for %%F in ("%NEW_BIN%") do set "NEW_SIZE=%%~zF"
+if "%NEW_SIZE%"=="0" (
+  echo [%date% %time%] ERROR: NEW_BIN tamano 0 >> "%LOG%"
+  goto :fail
+)
+echo   NEW_SIZE=%NEW_SIZE% >> "%LOG%"
 
 REM 1) Esperar a que el proceso actual libere el .exe (max 60 s).
 set /a tries=0
 :waitloop
 tasklist /FI "IMAGENAME eq %APP_NAME%" | find /I "%APP_NAME%" > nul
-if errorlevel 1 goto :do_swap
+if errorlevel 1 goto :post_wait
 set /a tries+=1
 if %tries% GEQ 120 (
   echo [%date% %time%] timeout esperando cierre de %APP_NAME% >> "%LOG%"
@@ -249,33 +264,75 @@ goto :waitloop
 
 :force_kill
 taskkill /F /IM "%APP_NAME%" >> "%LOG%" 2>&1
+timeout /t 2 /nobreak > nul
+
+:post_wait
+REM 1b) Windows a veces tarda extra en liberar el lock — pausa de gracia.
+timeout /t 2 /nobreak > nul
 
 :do_swap
-REM 2) Backup del .exe actual (por si el reemplazo falla).
+REM 2) Backup del .exe actual (por si el reemplazo falla) — con reintentos.
 if exist "%CUR_BIN%.bak" del /F /Q "%CUR_BIN%.bak" >> "%LOG%" 2>&1
 if exist "%CUR_BIN%" (
+  set /a mv=0
+  :mv_retry
   move /Y "%CUR_BIN%" "%CUR_BIN%.bak" >> "%LOG%" 2>&1
-  if errorlevel 1 (
-    echo [%date% %time%] ERROR backup >> "%LOG%"
+  if not errorlevel 1 goto :mv_ok
+  set /a mv+=1
+  if !mv! GEQ 8 (
+    echo [%date% %time%] ERROR backup tras !mv! intentos >> "%LOG%"
     goto :fail
   )
+  echo [%date% %time%] move falló, reintento !mv! >> "%LOG%"
+  timeout /t 1 /nobreak > nul
+  goto :mv_retry
 )
+:mv_ok
 
-REM 3) Copiar el nuevo binario en su lugar.
+REM 3) Copiar el nuevo binario en su lugar — con reintentos.
+set /a cp=0
+:cp_retry
 copy /Y "%NEW_BIN%" "%CUR_BIN%" >> "%LOG%" 2>&1
-if errorlevel 1 (
-  echo [%date% %time%] ERROR copy — restaurando backup >> "%LOG%"
+if not errorlevel 1 goto :cp_ok
+set /a cp+=1
+if !cp! GEQ 5 (
+  echo [%date% %time%] ERROR copy tras !cp! intentos — restaurando backup >> "%LOG%"
   if exist "%CUR_BIN%.bak" move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
   goto :fail
 )
+echo [%date% %time%] copy falló, reintento !cp! >> "%LOG%"
+timeout /t 1 /nobreak > nul
+goto :cp_retry
+:cp_ok
 
-REM 4) Relanzar la app.
-echo [%date% %time%] swap OK — relanzando %CUR_BIN% >> "%LOG%"
-start "" "%CUR_BIN%"
+REM 3b) Verifica que la copia quedó bien (tamaño > 0).
+for %%F in ("%CUR_BIN%") do set "CUR_SIZE=%%~zF"
+if "%CUR_SIZE%"=="0" (
+  echo [%date% %time%] ERROR: CUR_BIN quedó vacío — rollback >> "%LOG%"
+  if exist "%CUR_BIN%.bak" (
+    del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
+    move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
+  )
+  goto :fail
+)
+
+REM 4) Relanzar la app FIJANDO el directorio de trabajo original.
+echo [%date% %time%] swap OK — relanzando %CUR_BIN% (CWD=%CUR_DIR%) >> "%LOG%"
+start "" /D "%CUR_DIR%" "%CUR_BIN%"
+if errorlevel 1 (
+  echo [%date% %time%] ERROR: start falló — rollback y relanzar backup >> "%LOG%"
+  if exist "%CUR_BIN%.bak" (
+    del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
+    move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
+    start "" /D "%CUR_DIR%" "%CUR_BIN%"
+  )
+  goto :fail
+)
 
 REM 5) Limpieza: borrar backup + archivo nuevo + este batch.
 if exist "%CUR_BIN%.bak" del /F /Q "%CUR_BIN%.bak" >> "%LOG%" 2>&1
 if exist "%NEW_BIN%" del /F /Q "%NEW_BIN%" >> "%LOG%" 2>&1
+echo [%date% %time%] updater.bat OK >> "%LOG%"
 (goto) 2>nul & del /Q "%~f0"
 exit /b 0
 
