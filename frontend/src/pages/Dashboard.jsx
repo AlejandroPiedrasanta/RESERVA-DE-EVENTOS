@@ -11,6 +11,7 @@ import EventNotificationPopup from "@/components/EventNotificationPopup";
 import NextEventReminderPopup from "@/components/NextEventReminderPopup";
 import AnimatedEventTypeCard from "@/components/AnimatedEventTypeCard";
 import PageHeader from "@/components/PageHeader";
+import EventHoverCard from "@/components/EventHoverCard";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
@@ -431,10 +432,20 @@ export default function Dashboard() {
               const firstPartner = partners[0];
               const isPaid = firstPartner?.payment_status === "Pagado";
               return (
-                <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.06 }}
-                  whileHover={{ y: -2, boxShadow: "0 8px 28px rgba(0,0,0,0.09)" }}
-                  className="w-full bg-white/60 border border-white/70 rounded-2xl p-5 cursor-pointer transition-all"
-                  onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`recent-row-${r.id}`}>
+                <EventHoverCard
+                  key={r.id}
+                  event={r}
+                  socio={firstPartner?.socio ? { ...firstPartner.socio, payment_status: firstPartner.payment_status } : null}
+                  partnersCount={partners.length}
+                  onNavigate={() => navigate(`/reservaciones/${r.id}`)}
+                  formatCurrency={formatCurrency}
+                  statusLabel={tr.statuses[r.status] || r.status}
+                  language={language}
+                  testId={`recent-row-${r.id}`}
+                >
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.06 }}
+                    whileHover={{ y: -2, boxShadow: "0 8px 28px rgba(0,0,0,0.09)" }}
+                    className="w-full bg-white/60 border border-white/70 rounded-2xl p-5 cursor-pointer transition-all">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: cfg.fg + "18" }}>
@@ -471,7 +482,8 @@ export default function Dashboard() {
                       <span className="text-sm text-slate-300 font-medium">{language === "es" ? "Sin fotógrafo asignado" : "No photographer assigned"}</span>
                     </div>
                   )}
-                </motion.div>
+                  </motion.div>
+                </EventHoverCard>
               );
             })}
           </div>
@@ -485,10 +497,20 @@ export default function Dashboard() {
               const firstPartner = partners[0];
               const isPaid = firstPartner?.payment_status === "Pagado";
               return (
-                <motion.div key={r.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.35 + idx * 0.05 }}
-                  whileHover={{ backgroundColor: "rgba(255,255,255,0.35)" }}
-                  className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-colors"
-                  onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`recent-row-${r.id}`}>
+                <EventHoverCard
+                  key={r.id}
+                  event={r}
+                  socio={firstPartner?.socio ? { ...firstPartner.socio, payment_status: firstPartner.payment_status } : null}
+                  partnersCount={partners.length}
+                  onNavigate={() => navigate(`/reservaciones/${r.id}`)}
+                  formatCurrency={formatCurrency}
+                  statusLabel={tr.statuses[r.status] || r.status}
+                  language={language}
+                  testId={`recent-row-${r.id}`}
+                >
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.35 + idx * 0.05 }}
+                    whileHover={{ backgroundColor: "rgba(255,255,255,0.35)" }}
+                    className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-colors">
                   <div className="flex items-center gap-3 w-[30%] min-w-0">
                     <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: cfg.fg + "18" }}>
                       <EvIcon size={20} style={{ color: cfg.fg }} strokeWidth={1.8} />
@@ -515,7 +537,8 @@ export default function Dashboard() {
                     <span className="text-base font-bold text-slate-500 whitespace-nowrap">{formatDate(r.event_date)}</span>
                     <span className={`text-xs px-3 py-1.5 rounded-full border font-bold whitespace-nowrap ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status] || r.status}</span>
                   </div>
-                </motion.div>
+                  </motion.div>
+                </EventHoverCard>
               );
             })}
           </div>
@@ -524,20 +547,32 @@ export default function Dashboard() {
           <div className="px-4 py-3 space-y-1">
             {recent.map((r, idx) => {
               const cfg = getEventConfig(r.event_type);
-              const firstPartner = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio)[0];
+              const partners = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio);
+              const firstPartner = partners[0];
               const isPaid = firstPartner?.payment_status === "Pagado";
               return (
-                <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.04 }}
-                  whileHover={{ backgroundColor: "rgba(255,255,255,0.5)" }}
-                  className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-colors"
-                  onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`recent-row-${r.id}`}>
+                <EventHoverCard
+                  key={r.id}
+                  event={r}
+                  socio={firstPartner?.socio ? { ...firstPartner.socio, payment_status: firstPartner.payment_status } : null}
+                  partnersCount={partners.length}
+                  onNavigate={() => navigate(`/reservaciones/${r.id}`)}
+                  formatCurrency={formatCurrency}
+                  statusLabel={tr.statuses[r.status] || r.status}
+                  language={language}
+                  testId={`recent-row-${r.id}`}
+                >
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.04 }}
+                    whileHover={{ backgroundColor: "rgba(255,255,255,0.5)" }}
+                    className="flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-colors">
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cfg.fg }} />
                   <span className="text-sm font-black flex-1 truncate" style={{ color: cfg.fg }}>{r.event_type}</span>
                   {firstPartner && <span className="text-xs text-slate-500 truncate max-w-[100px]">{firstPartner.socio.name} · <span className={isPaid ? "text-emerald-600" : "text-amber-600"}>{formatCurrency(firstPartner.payment)}</span></span>}
                   {r.total_amount > 0 && <span className="text-xs font-bold text-slate-700 flex-shrink-0">{formatCurrency(r.total_amount)}</span>}
                   <span className="text-xs text-slate-400 flex-shrink-0">{formatDate(r.event_date)}</span>
                   <span className={`text-[9px] px-2 py-0.5 rounded-full border font-bold flex-shrink-0 ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status] || r.status}</span>
-                </motion.div>
+                  </motion.div>
+                </EventHoverCard>
               );
             })}
           </div>
@@ -551,10 +586,20 @@ export default function Dashboard() {
               const firstPartner = partners[0];
               const isPaid = firstPartner?.payment_status === "Pagado";
               return (
-                <motion.div key={r.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05 }}
-                  whileHover={{ backgroundColor: "rgba(255,255,255,0.35)" }}
-                  className="flex items-stretch cursor-pointer transition-colors overflow-hidden"
-                  onClick={() => navigate(`/reservaciones/${r.id}`)} data-testid={`recent-row-${r.id}`}>
+                <EventHoverCard
+                  key={r.id}
+                  event={r}
+                  socio={firstPartner?.socio ? { ...firstPartner.socio, payment_status: firstPartner.payment_status } : null}
+                  partnersCount={partners.length}
+                  onNavigate={() => navigate(`/reservaciones/${r.id}`)}
+                  formatCurrency={formatCurrency}
+                  statusLabel={tr.statuses[r.status] || r.status}
+                  language={language}
+                  testId={`recent-row-${r.id}`}
+                >
+                  <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.05 }}
+                    whileHover={{ backgroundColor: "rgba(255,255,255,0.35)" }}
+                    className="flex items-stretch cursor-pointer transition-colors overflow-hidden">
                   <div className="w-1.5 flex-shrink-0" style={{ background: cfg.fg }} />
                   <div className="flex items-center gap-5 px-5 py-4 flex-1">
                     <p className="text-xl font-black w-[28%] min-w-0 truncate" style={{ fontFamily: "Cabinet Grotesk, sans-serif", color: cfg.fg }}>{r.event_type || "Evento"}</p>
@@ -571,7 +616,8 @@ export default function Dashboard() {
                       <span className={`text-xs px-2.5 py-1 rounded-full border font-bold ${statusColors[r.status] || FALLBACK_COLOR}`}>{tr.statuses[r.status] || r.status}</span>
                     </div>
                   </div>
-                </motion.div>
+                  </motion.div>
+                </EventHoverCard>
               );
             })}
           </div>
@@ -616,15 +662,23 @@ export default function Dashboard() {
               const paidPercent = r.total_amount > 0 ? Math.min(100, ((r.advance_paid || 0) / r.total_amount) * 100) : 0;
 
               return (
-                <motion.div
+                <EventHoverCard
                   key={r.id}
+                  event={r}
+                  socio={firstPartner?.socio ? { ...firstPartner.socio, payment_status: firstPartner.payment_status } : null}
+                  partnersCount={partners.length}
+                  onNavigate={() => navigate(`/reservaciones/${r.id}`)}
+                  formatCurrency={formatCurrency}
+                  statusLabel={tr.statuses[r.status] || r.status}
+                  language={language}
+                  testId={`recent-row-${r.id}`}
+                >
+                <motion.div
                   initial={{ opacity: 0, y: 20, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ delay: 0.35 + idx * 0.08, type: "spring", stiffness: 180, damping: 22 }}
                   whileHover={{ y: -3, scale: 1.008 }}
                   className="group relative cursor-pointer"
-                  onClick={() => navigate(`/reservaciones/${r.id}`)}
-                  data-testid={`recent-row-${r.id}`}
                 >
                   {/* Glow blur atrás en hover */}
                   <motion.div
@@ -829,6 +883,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </motion.div>
+                </EventHoverCard>
               );
             })}
           </div>

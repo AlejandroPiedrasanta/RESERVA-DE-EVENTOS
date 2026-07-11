@@ -2491,27 +2491,45 @@ def _spawn_swap_helper(exe_path: Path, new_path: Path):
             f'echo [!TIME!] SWAP OK en !MTRIES! intento(s) >> "!LOG!"\r\n'
             f'del "{bak}" >nul 2>&1\r\n'
             "echo   Version instalada. Reiniciando la app...\r\n"
-            # ── Relanzamiento robusto: hasta 4 rondas, verificando el proceso ──
+            # ── Relanzamiento robusto ──
+            #
+            # Estrategia (probada contra el bug "no arranca sola, hay que abrirla a mano"):
+            #
+            # 1) USAR EXPLORER.EXE como método PRINCIPAL, no como último recurso.
+            #    Cuando el .exe está en C:\Program Files\... el proceso padre
+            #    (backend Python) suele correr ELEVADO. El CMD spawn hereda esa
+            #    elevación. `start ""` desde un CMD elevado a veces falla en
+            #    sesión distinta o queda pendiente de un consent UAC invisible.
+            #    `explorer.exe <path>` SIEMPRE se ejecuta en la sesión del usuario
+            #    logueado y DESESCALA privilegios → es el método MÁS ROBUSTO.
+            #
+            # 2) NO disparar múltiples métodos concurrentes. El bootloader de
+            #    PyInstaller --onefile tarda 5-10s en extraer y aparecer en
+            #    tasklist. Antes el batch chequeaba a 3s, no encontraba el
+            #    proceso, disparaba powershell (2do launch), reintentaba `start`
+            #    (3er launch)... 3-4 instancias compitiendo por el puerto 8001 →
+            #    todas crasheaban → 0 apps corriendo.
+            #
+            # 3) Esperar suficiente entre intentos: 12s por intento (bootloader).
             "set RTRIES=0\r\n"
             ":relaunch\r\n"
             "set /a RTRIES+=1\r\n"
-            f'echo [!TIME!] Relanzando app (ronda !RTRIES!) >> "!LOG!"\r\n'
-            f'start "" /D "{install_dir}" "{old}"\r\n'
-            f'ping -n 4 127.0.0.1 >nul\r\n'
-            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
-            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
-            # Fallback dentro de la misma ronda: powershell + explorer
-            f'powershell -NoProfile -WindowStyle Hidden -Command '
-            f'"Start-Process -FilePath \'{old}\' -WorkingDirectory \'{install_dir}\'" '
-            f'>> "!LOG!" 2>&1\r\n'
-            f'ping -n 3 127.0.0.1 >nul\r\n'
-            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
-            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
-            "if !RTRIES! LSS 4 goto :relaunch\r\n"
-            # Último recurso: explorer (usa la shell del usuario, evita restricciones)
-            f'echo [!TIME!] fallback final: explorer >> "!LOG!"\r\n'
+            f'echo [!TIME!] Relanzando app via explorer (intento !RTRIES!/3) >> "!LOG!"\r\n'
+            # explorer.exe desescala privilegios y usa la shell del usuario
             f'explorer "{old}"\r\n'
-            f'ping -n 4 127.0.0.1 >nul\r\n'
+            # Esperar 12s: tiempo suficiente para que el bootloader PyInstaller
+            # extraiga el payload y el proceso final aparezca en tasklist.
+            f'ping -n 13 127.0.0.1 >nul\r\n'
+            f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
+            f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
+            f'echo [!TIME!] Intento !RTRIES! sin proceso visible aun, reintentando >> "!LOG!"\r\n'
+            "if !RTRIES! LSS 3 goto :relaunch\r\n"
+            # Último recurso tras 3 intentos con explorer: `start` directo.
+            # Sólo se dispara una vez, no en bucle, para no crear procesos
+            # zombies compitiendo por el puerto 8001.
+            f'echo [!TIME!] fallback final: start directo >> "!LOG!"\r\n'
+            f'start "" /D "{install_dir}" "{old}"\r\n'
+            f'ping -n 13 127.0.0.1 >nul\r\n'
             f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul | find /I "{exe_name}" >nul\r\n'
             f'if !ERRORLEVEL! EQU 0 goto :launched\r\n'
             "goto :fail_relaunch\r\n"
