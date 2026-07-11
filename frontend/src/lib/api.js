@@ -118,6 +118,13 @@ export const restoreBackup = (file) => {
   form.append("file", file);
   return api.post("/backup/restore", form).then(r => r.data);
 };
+export const previewBackup = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api.post("/backup/preview", form, { timeout: 45000 }).then(r => r.data);
+};
+export const createCloudBackup = () => api.post("/backup/cloud/create", null, { timeout: 60000 }).then(r => r.data);
+export const listCloudBackups = () => api.get("/backup/cloud/list").then(r => r.data);
 
 // Updates
 export const getUpdatesHistory = () => api.get("/updates/history").then(r => r.data);

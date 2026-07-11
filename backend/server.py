@@ -1415,6 +1415,173 @@ async def restore_backup(file: UploadFile = File(...)):
             "message": f"Restaurado correctamente: {total} documentos en {len(restored)} colecciones"}
 
 
+# ─── Cloud backup (dentro del propio MongoDB del usuario) ─────
+CLOUD_BACKUP_COLLECTION = "_backups_cloud"
+CLOUD_BACKUP_MAX = 10
+
+
+@api_router.post("/backup/cloud/create")
+async def create_cloud_backup():
+    """Guarda un snapshot completo COMO DOCUMENTO en la propia MongoDB del usuario.
+    Así el respaldo también vive en la nube (si su URL apunta a Atlas)."""
+    try:
+        names = await _all_collections()
+        # Excluir la propia colección de backups para no anidar
+        names = [n for n in names if n != CLOUD_BACKUP_COLLECTION]
+        snapshot: dict = {}
+        total_docs = 0
+        for cname in names:
+            docs = await db[cname].find({}).to_list(100000)
+            clean = [doc_to_dict(d) for d in docs]
+            snapshot[cname] = clean
+            total_docs += len(clean)
+
+        payload_json = json.dumps(snapshot, ensure_ascii=False, default=_json_safe)
+        size_bytes = len(payload_json.encode("utf-8"))
+        now = datetime.now(timezone.utc)
+
+        doc = {
+            "created_at": now.isoformat(),
+            "label": "cloud_manual",
+            "collections": names,
+            "total_docs": total_docs,
+            "size_bytes": size_bytes,
+            "snapshot": snapshot,
+        }
+        result = await db[CLOUD_BACKUP_COLLECTION].insert_one(doc)
+
+        # Mantener solo los últimos N
+        existing = await db[CLOUD_BACKUP_COLLECTION].find({}, {"_id": 1, "created_at": 1}) \
+            .sort("created_at", -1).to_list(1000)
+        to_delete = [x["_id"] for x in existing[CLOUD_BACKUP_MAX:]]
+        if to_delete:
+            await db[CLOUD_BACKUP_COLLECTION].delete_many({"_id": {"$in": to_delete}})
+
+        # Determinar si estamos en Atlas
+        mongo_url = os.environ.get("MONGO_URL", "")
+        is_atlas = "mongodb+srv" in mongo_url or "mongodb.net" in mongo_url
+
+        size_str = (
+            f"{size_bytes} B" if size_bytes < 1024
+            else f"{size_bytes/1024:.1f} KB" if size_bytes < 1024*1024
+            else f"{size_bytes/(1024*1024):.2f} MB"
+        )
+        return {
+            "success": True,
+            "backup_id": str(result.inserted_id),
+            "total_docs": total_docs,
+            "collections_count": len(names),
+            "size": size_str,
+            "size_bytes": size_bytes,
+            "is_atlas": is_atlas,
+            "created_at": now.isoformat(),
+            "message": f"Respaldo guardado en {'la nube' if is_atlas else 'MongoDB local'}: {total_docs} documentos",
+        }
+    except Exception as e:
+        logger.error(f"Cloud backup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al crear respaldo en la nube: {e}")
+
+
+@api_router.get("/backup/cloud/list")
+async def list_cloud_backups():
+    """Lista respaldos guardados dentro del propio MongoDB."""
+    try:
+        docs = await db[CLOUD_BACKUP_COLLECTION].find(
+            {}, {"snapshot": 0}
+        ).sort("created_at", -1).to_list(CLOUD_BACKUP_MAX)
+        result = []
+        for d in docs:
+            size_bytes = d.get("size_bytes", 0)
+            size_str = (
+                f"{size_bytes} B" if size_bytes < 1024
+                else f"{size_bytes/1024:.1f} KB" if size_bytes < 1024*1024
+                else f"{size_bytes/(1024*1024):.2f} MB"
+            )
+            result.append({
+                "id": str(d["_id"]),
+                "created_at": d.get("created_at"),
+                "total_docs": d.get("total_docs", 0),
+                "collections_count": len(d.get("collections", [])),
+                "size": size_str,
+                "label": d.get("label", "cloud_manual"),
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al listar respaldos en la nube: {e}")
+
+
+@api_router.post("/backup/preview")
+async def preview_backup(file: UploadFile = File(...)):
+    """Analiza un .json de respaldo SIN restaurar. Devuelve diff por colección
+    (documentos en el archivo vs. documentos actuales)."""
+    if not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser .json")
+    try:
+        content = await file.read()
+        backup_data = json.loads(content)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Archivo JSON inválido o corrupto")
+
+    meta = backup_data.get("_meta") if isinstance(backup_data.get("_meta"), dict) else {}
+    diff = []
+    total_backup = 0
+    total_current = 0
+    for cname, docs in backup_data.items():
+        if cname == "_meta" or not isinstance(docs, list):
+            continue
+        backup_count = len(docs)
+        try:
+            current_count = await db[cname].count_documents({})
+        except Exception:
+            current_count = 0
+        total_backup += backup_count
+        total_current += current_count
+        diff.append({
+            "collection": cname,
+            "backup_count": backup_count,
+            "current_count": current_count,
+            "delta": backup_count - current_count,
+        })
+
+    # Colecciones actuales no presentes en el backup (se borrarán en restore)
+    current_collections = await _all_collections()
+    backup_collections = {d["collection"] for d in diff}
+    for cname in current_collections:
+        if cname in backup_collections or cname == CLOUD_BACKUP_COLLECTION:
+            continue
+        try:
+            current_count = await db[cname].count_documents({})
+        except Exception:
+            current_count = 0
+        if current_count > 0:
+            total_current += current_count
+            diff.append({
+                "collection": cname,
+                "backup_count": 0,
+                "current_count": current_count,
+                "delta": -current_count,
+                "warning": "no_en_respaldo",
+            })
+
+    size_bytes = len(content)
+    size_str = (
+        f"{size_bytes} B" if size_bytes < 1024
+        else f"{size_bytes/1024:.1f} KB" if size_bytes < 1024*1024
+        else f"{size_bytes/(1024*1024):.2f} MB"
+    )
+
+    return {
+        "success": True,
+        "filename": file.filename,
+        "size": size_str,
+        "meta": meta,
+        "total_backup_docs": total_backup,
+        "total_current_docs": total_current,
+        "collections_count": len([d for d in diff if d["backup_count"] > 0]),
+        "diff": sorted(diff, key=lambda x: -x["backup_count"]),
+    }
+
+
 @api_router.get("/stats")
 async def get_stats():
     total = await db.reservations.count_documents({})
