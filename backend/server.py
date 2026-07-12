@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 import csv
 import io
 import re
+import time
 import asyncio
 import httpx
 from starlette.middleware.cors import CORSMiddleware
@@ -6617,8 +6618,22 @@ def _bundle_kind() -> str:
     return "portable"
 
 
+# Cache in-memory del último check a GitHub (evita rate-limit 403 → 502).
+_github_check_cache: Optional[dict] = None
+
+
 @api_router.get("/github/check-updates")
 async def check_github_updates():
+    # Cache in-memory (60s) para no agotar el rate limit de GitHub (60 req/h
+    # sin token, 5000/h con token). Antes: cada llamada del polling del
+    # frontend + de cada usuario que abre Settings golpeaba GitHub → 403
+    # rate_limited → el endpoint devolvía 502 → Cloudflare interceptaba
+    # con HTML → frontend no podía parsear el JSON.
+    global _github_check_cache
+    now = time.time()
+    if _github_check_cache and (now - _github_check_cache["ts"] < 60):
+        return _github_check_cache["data"]
+
     cfg = await _get_github_config()
     repo_url = cfg.get("repo_url", "") or f"https://github.com/{_github_exe_repo()}"
 
@@ -6640,14 +6655,34 @@ async def check_github_updates():
         try:
             r = await http.get(api_url, headers=headers, params={"sha": branch, "per_page": 20})
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Error conectando a GitHub: {e}")
+            # No devolver 502: Cloudflare intercepta 5xx del backend y sirve su
+            # propia página HTML → el frontend recibe HTML en vez de JSON y
+            # rompe. Devolvemos 200 con shape estable para que el polling
+            # simplemente reintente en el siguiente ciclo.
+            data = {"has_updates": False, "commits": [], "local_sha": local_sha,
+                    "remote_sha": "", "branch": branch, "error": "network",
+                    "error_detail": str(e)[:200]}
+            _github_check_cache = {"ts": now, "data": data}
+            return data
 
     if r.status_code == 404:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado (¿es privado y falta token?)")
     if r.status_code == 401:
         raise HTTPException(status_code=401, detail="Token de GitHub inválido o insuficiente")
+    if r.status_code == 403:
+        # Rate limit típico (60/h sin token). No es un error del backend — es
+        # una limitación externa. Cacheamos 60s y devolvemos shape estable.
+        data = {"has_updates": False, "commits": [], "local_sha": local_sha,
+                "remote_sha": "", "branch": branch, "error": "rate_limited",
+                "error_detail": r.text[:200]}
+        _github_check_cache = {"ts": now, "data": data}
+        return data
     if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"GitHub API respondió {r.status_code}: {r.text[:200]}")
+        data = {"has_updates": False, "commits": [], "local_sha": local_sha,
+                "remote_sha": "", "branch": branch, "error": "upstream",
+                "error_detail": f"GitHub {r.status_code}: {r.text[:180]}"}
+        _github_check_cache = {"ts": now, "data": data}
+        return data
 
     commits_data = r.json()
     if not commits_data:
@@ -6741,7 +6776,7 @@ async def check_github_updates():
         if not has_updates:
             new_commits = []
 
-    return {
+    result = {
         "has_updates": has_updates,
         "local_sha": local_sha,
         "local_sha_short": local_sha[:7] if local_sha else "",
@@ -6754,6 +6789,8 @@ async def check_github_updates():
         "commits": new_commits,
         "repo_url": repo_url,
     }
+    _github_check_cache = {"ts": now, "data": result}
+    return result
 
 
 # ── Estado de progreso de descarga/instalación desktop (para barra en el modal)

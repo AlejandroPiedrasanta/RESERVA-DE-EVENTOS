@@ -3911,6 +3911,7 @@ def _iter_desktop_push_files():
 async def _do_desktop_push(payload: dict):
     """Ejecuta el push vía GitHub API. Actualiza `_desktop_push_state` en vivo."""
     import base64
+    import httpx
     _desktop_push_state["result"] = None
     _desktop_push_state["error"] = None
     _desktop_push_state["started_at"] = datetime.now(timezone.utc).isoformat()

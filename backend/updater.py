@@ -320,14 +320,14 @@ REM 4) Relanzar la app FIJANDO el directorio de trabajo original.
 echo [%date% %time%] swap OK — relanzando %CUR_BIN% (CWD=%CUR_DIR%) >> "%LOG%"
 set "FAIL_FLAG=%LOG%.failed.flag"
 if exist "%FAIL_FLAG%" del /F /Q "%FAIL_FLAG%" >> "%LOG%" 2>&1
-start "" /D "%CUR_DIR%" "%CUR_BIN%"
+start "" /B /D "%CUR_DIR%" "%CUR_BIN%"
 if errorlevel 1 (
   echo [%date% %time%] ERROR: start falló — rollback y relanzar backup >> "%LOG%"
   > "%FAIL_FLAG%" echo start_failed
   if exist "%CUR_BIN%.bak" (
     del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
     move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
-    start "" /D "%CUR_DIR%" "%CUR_BIN%"
+    start "" /B /D "%CUR_DIR%" "%CUR_BIN%"
   )
   goto :fail
 )
@@ -357,7 +357,7 @@ if exist "%CUR_BIN%.bak" (
   del /F /Q "%CUR_BIN%" >> "%LOG%" 2>&1
   move /Y "%CUR_BIN%.bak" "%CUR_BIN%" >> "%LOG%" 2>&1
   echo [%date% %time%] rollback OK — relanzando versión previa >> "%LOG%"
-  start "" /D "%CUR_DIR%" "%CUR_BIN%"
+  start "" /B /D "%CUR_DIR%" "%CUR_BIN%"
 ) else (
   echo [%date% %time%] ERROR: no hay .bak para rollback >> "%LOG%"
 )
@@ -398,7 +398,9 @@ def apply_update_windows(
     cur = current_exe_path or sys.executable
     tmp = Path(tempfile.gettempdir()) / "CinemaProductions_update"
     tmp.mkdir(parents=True, exist_ok=True)
-    batch = tmp / f"updater_{int(time.time())}.bat"
+    ts = int(time.time())
+    batch = tmp / f"updater_{ts}.bat"
+    vbs = tmp / f"updater_{ts}.vbs"
     log = tmp / "updater.log"
 
     batch.write_text(
@@ -411,23 +413,29 @@ def apply_update_windows(
         encoding="ascii",
     )
 
-    # CREATE_NO_WINDOW (0x08000000) evita que aparezca la ventana negra de cmd.
-    # CREATE_NEW_PROCESS_GROUP (0x00000200) desacopla el batch del proceso actual
-    # para que sobreviva a `os._exit(0)`.
-    # NOTA: DETACHED_PROCESS es MUTUAMENTE EXCLUYENTE con CREATE_NO_WINDOW, por lo
-    # que se elimina en favor de este último (el batch queda igualmente huérfano
-    # gracias a CREATE_NEW_PROCESS_GROUP + close_fds + stdio redirigido a NUL).
+    # Wrapper VBS ejecutado por wscript.exe (GUI, sin consola).
+    # Run(cmd, 0, False)  →  0 = ventana oculta,  False = no esperar (detached).
+    # Es la forma más fiable en Windows de lanzar un .bat SIN que se vea la
+    # ventana negra, incluso si el proceso padre tiene consola adjunta.
+    batch_esc = str(batch.resolve()).replace('"', '""')
+    vbs.write_text(
+        f'Set WSH = CreateObject("WScript.Shell")\r\n'
+        f'WSH.Run "cmd /c ""{batch_esc}""", 0, False\r\n',
+        encoding="ascii",
+    )
+
     CREATE_NO_WINDOW = 0x08000000
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     CREATE_FLAGS = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
 
-    # Refuerzo: STARTUPINFO con SW_HIDE por si el shell heredase alguna consola.
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startupinfo.wShowWindow = 0  # SW_HIDE
 
+    # wscript.exe es una app GUI: no crea NUNCA una ventana de consola,
+    # ni siquiera transitoria. El .vbs lanza el .bat oculto y retorna.
     subprocess.Popen(
-        ["cmd.exe", "/c", str(batch)],
+        ["wscript.exe", "//B", "//Nologo", str(vbs)],
         creationflags=CREATE_FLAGS,
         startupinfo=startupinfo,
         close_fds=True,

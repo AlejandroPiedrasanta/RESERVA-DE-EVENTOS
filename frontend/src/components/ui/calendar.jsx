@@ -5,6 +5,20 @@ import { DayPicker } from "react-day-picker"
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
+// Componentes extraídos fuera de Calendar: si se definen dentro del render,
+// React crea un tipo distinto en cada render y desmonta+remonta todo el
+// subtree (pérdida de foco, animaciones, estado interno del DayPicker).
+const CalendarIconLeft = ({ className, ...props }) => (
+  <ChevronLeft className={cn("h-4 w-4", className)} {...props} />
+)
+const CalendarIconRight = ({ className, ...props }) => (
+  <ChevronRight className={cn("h-4 w-4", className)} {...props} />
+)
+const CALENDAR_COMPONENTS = {
+  IconLeft: CalendarIconLeft,
+  IconRight: CalendarIconRight,
+}
+
 function Calendar({
   className,
   classNames,
@@ -55,14 +69,7 @@ function Calendar({
         day_hidden: "invisible",
         ...classNames,
       }}
-      components={{
-        IconLeft: ({ className, ...props }) => (
-          <ChevronLeft className={cn("h-4 w-4", className)} {...props} />
-        ),
-        IconRight: ({ className, ...props }) => (
-          <ChevronRight className={cn("h-4 w-4", className)} {...props} />
-        ),
-      }}
+      components={CALENDAR_COMPONENTS}
       {...props} />
   );
 }
