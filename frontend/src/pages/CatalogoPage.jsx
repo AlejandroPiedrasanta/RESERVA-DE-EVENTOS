@@ -257,229 +257,141 @@ function MediaTile({ media, onDelete, onPreview, index }) {
 // Todo el área acepta drop. Botón "Añadir" compacto.
 // ─────────────────────────────────────────────────────────────
 function MediaBanner({ media, onDelete, onOpenLightbox, onFilesDrop, uploading, progress }) {
-  const [idx, setIdx] = useState(0);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
-  const stripRef = useRef(null);
-
-  // Reset al cambiar de servicio o si el actual desaparece
-  useEffect(() => {
-    if (idx >= media.length) setIdx(Math.max(0, media.length - 1));
-  }, [media.length, idx]);
-
-  const current = media[idx];
 
   const pick = () => inputRef.current?.click();
   const handleDrop = (e) => {
     e.preventDefault(); setDrag(false);
     if (e.dataTransfer?.files?.length) onFilesDrop(e.dataTransfer.files);
   };
-  const nav = (d) => setIdx((i) => Math.max(0, Math.min(media.length - 1, i + d)));
 
-  // Auto-scroll al thumb activo
-  useEffect(() => {
-    const el = stripRef.current?.querySelector(`[data-thumb="${idx}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-  }, [idx]);
-
-  // Dragstart del visor grande — permite arrastrarlo a WhatsApp Web
-  const onDragStartCurrent = (e) => {
-    if (!current) return;
-    if (current.kind === "image") return; // nativo
+  // Arrastre a WhatsApp Web (video/pdf necesitan DownloadURL; imagen es nativo)
+  const onDragStartTile = (e, m) => {
+    if (m.kind === "image") return;
     try {
-      const dl = `${current.mime || "application/octet-stream"}:${current.filename}:${current.url}`;
+      const dl = `${m.mime || "application/octet-stream"}:${m.filename}:${m.url}`;
       e.dataTransfer.setData("DownloadURL", dl);
       e.dataTransfer.effectAllowed = "copy";
     } catch { /* ignore */ }
   };
 
+  const openItem = (m) => {
+    if (m.kind === "pdf") { window.open(m.url, "_blank", "noopener"); return; }
+    onOpenLightbox(m);
+  };
+
   return (
-    <div>
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={handleDrop}
+      data-testid="media-banner"
+      className={`relative rounded-2xl transition-all ${drag ? "ring-4 ring-indigo-400 ring-offset-2" : ""}`}
+    >
       <input ref={inputRef} type="file" accept="image/*,video/*,application/pdf" multiple className="hidden"
         onChange={(e) => { if (e.target.files?.length) onFilesDrop(e.target.files); e.target.value = ""; }}
         data-testid="upload-input" />
 
-      {/* Visor grande */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={handleDrop}
-        data-testid="media-banner"
-        className={`relative rounded-3xl overflow-hidden glass transition-all ${drag ? "ring-4 ring-indigo-400" : ""}`}
-        style={{ aspectRatio: "4 / 3" }}
-      >
-        {/* Overlay dropzone activa */}
-        <AnimatePresence>
-          {drag && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-30 bg-indigo-500/25 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-              <div className="bg-white rounded-full px-5 py-3 shadow-xl inline-flex items-center gap-2">
-                <UploadCloud size={20} className="text-indigo-500" />
-                <span className="text-sm font-black text-slate-800">Suelta para agregar</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Overlay de progreso */}
-        <AnimatePresence>
-          {uploading && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-30 bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-              <Loader2 size={32} className="text-white animate-spin" />
-              <p className="text-sm font-black text-white">Guardando… {progress}%</p>
-              <div className="w-48 h-1.5 bg-white/25 rounded-full overflow-hidden">
-                <div className="h-full bg-white transition-all" style={{ width: `${progress}%` }} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Contenido */}
-        {media.length === 0 ? (
-          <button onClick={pick} data-testid="banner-empty-add"
-            className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-500 hover:bg-white/40 transition-colors">
-            <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 2.5, repeat: Infinity }}
-              className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{ background: "linear-gradient(135deg,#818cf8,#8b5cf6)" }}>
-              <UploadCloud size={28} className="text-white" />
-            </motion.div>
-            <p className="text-base font-black text-slate-800">Arrastra o toca para agregar</p>
-            <p className="text-xs text-slate-400 font-medium">JPG · PNG · MP4 · MOV · PDF · guardado local</p>
-          </button>
-        ) : (
-          <>
-            <AnimatePresence mode="wait">
-              <motion.div key={current?.id}
-                initial={{ opacity: 0, scale: 1.02 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
-                transition={{ duration: 0.28 }}
-                className="absolute inset-0 flex items-center justify-center bg-slate-900"
-                data-testid="banner-current"
-                draggable={!!current}
-                onDragStart={onDragStartCurrent}
-              >
-                {current?.kind === "image" && (
-                  <img src={current.url} alt={current.filename} draggable
-                    className="max-w-full max-h-full object-contain cursor-grab active:cursor-grabbing" />
-                )}
-                {current?.kind === "video" && (
-                  <video key={current.id} src={current.url} controls
-                    className="max-w-full max-h-full object-contain" />
-                )}
-                {current?.kind === "pdf" && (
-                  <button onClick={() => window.open(current.url, "_blank", "noopener")}
-                    className="w-full h-full flex flex-col items-center justify-center gap-3 text-rose-400 hover:text-rose-300 transition-colors">
-                    <FileText size={72} strokeWidth={1.4} />
-                    <span className="text-lg font-black uppercase tracking-wide">PDF</span>
-                    <span className="text-xs font-medium text-slate-400">Toca para abrir</span>
-                  </button>
-                )}
-              </motion.div>
-            </AnimatePresence>
-
-            {/* Contador */}
-            <div className="absolute top-3 left-3 z-20 text-[11px] font-black tracking-wider text-white bg-black/50 backdrop-blur rounded-full px-3 py-1.5">
-              {idx + 1} / {media.length}
+      {/* Overlay dropzone activa */}
+      <AnimatePresence>
+        {drag && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-30 bg-indigo-500/20 backdrop-blur-sm rounded-2xl flex items-center justify-center pointer-events-none">
+            <div className="bg-white rounded-full px-5 py-3 shadow-xl inline-flex items-center gap-2">
+              <UploadCloud size={20} className="text-indigo-500" />
+              <span className="text-sm font-black text-slate-800">Suelta para agregar</span>
             </div>
-
-            {/* Tipo */}
-            <span className={`absolute top-3 left-1/2 -translate-x-1/2 z-20 text-[10px] font-black uppercase tracking-wider rounded-full px-2.5 py-1 backdrop-blur ${
-              current?.kind === "video" ? "bg-purple-500/90 text-white" :
-              current?.kind === "pdf" ? "bg-rose-500/90 text-white" :
-              "bg-white/90 text-slate-700"
-            }`}>
-              {current?.kind === "video" ? "Video" : current?.kind === "pdf" ? "PDF" : "Foto"}
-            </span>
-
-            {/* Acciones */}
-            <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5">
-              {current && current.kind !== "pdf" && (
-                <button onClick={() => onOpenLightbox(current)} data-testid="banner-fullscreen"
-                  className="w-9 h-9 rounded-full bg-white/90 backdrop-blur hover:bg-white text-slate-700 flex items-center justify-center shadow"
-                  title="Ver en pantalla completa">
-                  <Maximize2 size={15} />
-                </button>
-              )}
-              {current && (
-                <button onClick={() => CL.downloadMedia(current.id, current.filename)} data-testid="banner-download"
-                  className="w-9 h-9 rounded-full bg-white/90 backdrop-blur hover:bg-white text-slate-700 flex items-center justify-center shadow"
-                  title="Descargar">
-                  <Download size={15} />
-                </button>
-              )}
-              {current && (
-                <button onClick={() => { onDelete(current); }} data-testid="banner-delete"
-                  className="w-9 h-9 rounded-full bg-white/90 backdrop-blur hover:bg-rose-500 hover:text-white text-rose-500 flex items-center justify-center shadow"
-                  title="Eliminar">
-                  <Trash2 size={15} />
-                </button>
-              )}
-            </div>
-
-            {/* Flechas */}
-            {idx > 0 && (
-              <button onClick={() => nav(-1)} data-testid="banner-prev"
-                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur text-white flex items-center justify-center transition-colors">
-                <ChevronLeft size={20} />
-              </button>
-            )}
-            {idx < media.length - 1 && (
-              <button onClick={() => nav(1)} data-testid="banner-next"
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur text-white flex items-center justify-center transition-colors">
-                <ChevronRight size={20} />
-              </button>
-            )}
-
-            {/* Pie: hint + nombre */}
-            <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-3 flex items-end justify-between gap-3 pointer-events-none"
-              style={{ background: "linear-gradient(to top, rgba(0,0,0,0.7), transparent)" }}>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Arrastra a WhatsApp Web →</p>
-                <p className="text-sm font-black text-white truncate">{current?.filename}</p>
-              </div>
-            </div>
-          </>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
 
-      {/* Tira de miniaturas + botón añadir */}
-      <div className="mt-3 flex items-center gap-2">
-        <button onClick={pick} data-testid="strip-add"
-          className="shrink-0 w-16 h-16 rounded-2xl border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 flex flex-col items-center justify-center gap-0.5 text-indigo-500 transition-colors"
-          title="Añadir archivos">
-          <Plus size={18} strokeWidth={2.6} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Añadir</span>
+      {/* Overlay de progreso */}
+      <AnimatePresence>
+        {uploading && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-30 bg-black/40 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3">
+            <Loader2 size={32} className="text-white animate-spin" />
+            <p className="text-sm font-black text-white">Guardando… {progress}%</p>
+            <div className="w-48 h-1.5 bg-white/25 rounded-full overflow-hidden">
+              <div className="h-full bg-white transition-all" style={{ width: `${progress}%` }} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {media.length === 0 ? (
+        <button onClick={pick} data-testid="banner-empty-add"
+          className="w-full rounded-2xl glass flex flex-col items-center justify-center gap-3 text-slate-500 hover:bg-white/50 transition-colors"
+          style={{ aspectRatio: "3 / 2" }}>
+          <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 2.5, repeat: Infinity }}
+            className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg,#818cf8,#8b5cf6)" }}>
+            <UploadCloud size={28} className="text-white" />
+          </motion.div>
+          <p className="text-base font-black text-slate-800">Arrastra o toca para agregar</p>
+          <p className="text-xs text-slate-400 font-medium">JPG · PNG · MP4 · MOV · PDF · guardado local</p>
         </button>
-        <div ref={stripRef} className="flex-1 flex items-center gap-2 overflow-x-auto pb-1 catalog-strip">
-          {media.map((m, i) => (
-            <button key={m.id} data-thumb={i} data-testid={`strip-thumb-${i}`}
-              onClick={() => setIdx(i)}
-              className={`shrink-0 relative w-16 h-16 rounded-2xl overflow-hidden transition-all ${
-                i === idx ? "ring-2 ring-indigo-500 ring-offset-2 scale-105" : "opacity-70 hover:opacity-100"
-              }`}
-              title={m.filename}
-            >
-              {(m.kind === "image" || m.kind === "video") ? (
-                <img src={m.thumbUrl || m.url} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-rose-50 flex items-center justify-center text-rose-500">
-                  <FileText size={22} />
-                </div>
-              )}
-              {m.kind === "video" && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-6 h-6 rounded-full bg-black/60 flex items-center justify-center">
-                    <Play size={10} className="text-white ml-0.5" fill="white" />
+      ) : (
+        <>
+          {/* Feed estilo Instagram — cuadrícula limpia */}
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2" data-testid="media-grid">
+            {media.map((m, i) => (
+              <motion.div
+                key={m.id}
+                initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.25, delay: Math.min(i * 0.02, 0.2) }}
+                className="group relative aspect-square rounded-lg overflow-hidden bg-slate-900 cursor-pointer"
+                data-testid={`feed-tile-${i}`}
+                draggable={m.kind === "image" || m.kind === "video"}
+                onDragStart={(e) => onDragStartTile(e, m)}
+                onClick={() => openItem(m)}
+              >
+                {(m.kind === "image" || m.kind === "video") ? (
+                  <img src={m.thumbUrl || m.url} alt="" draggable={false}
+                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-rose-50 to-rose-100 flex flex-col items-center justify-center gap-1 text-rose-500">
+                    <FileText size={30} strokeWidth={1.6} />
+                    <span className="text-[10px] font-black uppercase tracking-wide">PDF</span>
                   </div>
-                </div>
-              )}
+                )}
+
+                {/* Icono de play para video */}
+                {m.kind === "video" && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-11 h-11 rounded-full bg-black/50 backdrop-blur flex items-center justify-center">
+                      <Play size={18} className="text-white ml-0.5" fill="white" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Overlay hover + eliminar */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDelete(m); }}
+                  data-testid={`feed-delete-${i}`}
+                  className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/50 hover:bg-rose-500 backdrop-blur text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                  title="Eliminar">
+                  <Trash2 size={13} />
+                </button>
+              </motion.div>
+            ))}
+
+            {/* Tile para añadir */}
+            <button onClick={pick} data-testid="strip-add"
+              className="aspect-square rounded-lg border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 flex flex-col items-center justify-center gap-1 text-indigo-500 transition-colors"
+              title="Añadir archivos">
+              <Plus size={22} strokeWidth={2.6} />
+              <span className="text-[10px] font-black uppercase tracking-wider">Añadir</span>
             </button>
-          ))}
-          {media.length === 0 && (
-            <p className="text-xs text-slate-400 font-medium">Aún no hay archivos</p>
-          )}
-        </div>
-      </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-slate-400 font-medium text-center">
+            Toca para ampliar · arrastra una imagen a WhatsApp Web
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -989,15 +901,13 @@ function ServiceDetail({ service, onBack, onChanged }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* IZQUIERDA: archivos (visor grande + strip) */}
-        <div className="lg:col-span-5">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <ImageIcon size={17} className="text-indigo-500" />
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Fotos · Videos · PDF</h3>
-              <span className="text-xs font-bold text-slate-400">({media.length})</span>
-            </div>
+        <div className="lg:col-span-8">
+          <div className="flex items-center gap-2 mb-4">
+            <ImageIcon size={14} className="text-indigo-400" />
+            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.15em]">Fotos · Videos · PDF</h3>
+            <span className="text-[11px] font-bold text-slate-300">({media.length})</span>
           </div>
           <MediaBanner
             media={media}
@@ -1009,55 +919,55 @@ function ServiceDetail({ service, onBack, onChanged }) {
           />
         </div>
 
-        {/* CENTRO: guiones */}
-        <div className="lg:col-span-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={17} className="text-emerald-500" />
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Mis guiones</h3>
-              <span className="text-xs font-bold text-slate-400">({scripts.length})</span>
-            </div>
-            <button onClick={addNewScript} data-testid="add-script-btn"
-              className="inline-flex items-center gap-1.5 text-xs font-black text-white rounded-full px-3 py-1.5"
-              style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
-              <PlusCircle size={13} /> Añadir guion
-            </button>
-          </div>
-          <p className="text-xs text-slate-400 font-medium mb-3">
-            Crea varios guiones con títulos (Saludo, Precios, Cierre…). Selecciona <Eye size={11} className="inline" /> para verlo en la vista previa.
-          </p>
-          <div className="space-y-2">
-            <AnimatePresence>
-              {scripts.length === 0 ? (
-                <motion.button
-                  onClick={addNewScript}
-                  data-testid="empty-add-script"
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                  className="w-full glass rounded-2xl border-2 border-dashed border-emerald-200 text-emerald-700 font-black text-sm py-8 hover:bg-emerald-50 transition-colors inline-flex flex-col items-center gap-2"
-                >
-                  <PlusCircle size={22} />
-                  Crear mi primer guion
-                </motion.button>
-              ) : scripts.map((s, i) => (
-                <ScriptCard
-                  key={s.id}
-                  script={s}
-                  index={i}
-                  open={openScripts.has(s.id)}
-                  onToggle={() => toggleScript(s.id)}
-                  onChange={(patch) => changeScript(s.id, patch)}
-                  onDelete={() => removeScript(s.id)}
-                  onSelectForPreview={() => setPreviewScriptId(s.id)}
-                  selected={previewScriptId === s.id}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        </div>
-
         {/* DERECHA: vista previa móvil animada */}
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-4">
           <MobilePreview service={{ ...service, media }} script={activeScript} />
+        </div>
+      </div>
+
+      {/* GUIONES: fila propia, espaciosa y a lo ancho */}
+      <div className="mt-12 pt-8 border-t border-slate-200/60">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <MessageCircle size={17} className="text-emerald-500" />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Mis guiones</h3>
+            <span className="text-xs font-bold text-slate-400">({scripts.length})</span>
+          </div>
+          <button onClick={addNewScript} data-testid="add-script-btn"
+            className="inline-flex items-center gap-1.5 text-xs font-black text-white rounded-full px-3 py-1.5"
+            style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
+            <PlusCircle size={13} /> Añadir guion
+          </button>
+        </div>
+        <p className="text-xs text-slate-400 font-medium mb-5">
+          Crea varios guiones con títulos (Saludo, Precios, Cierre…). Selecciona <Eye size={11} className="inline" /> para verlo en la vista previa.
+        </p>
+        <div className="space-y-3">
+          <AnimatePresence>
+            {scripts.length === 0 ? (
+              <motion.button
+                onClick={addNewScript}
+                data-testid="empty-add-script"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="w-full glass rounded-2xl border-2 border-dashed border-emerald-200 text-emerald-700 font-black text-sm py-8 hover:bg-emerald-50 transition-colors inline-flex flex-col items-center gap-2"
+              >
+                <PlusCircle size={22} />
+                Crear mi primer guion
+              </motion.button>
+            ) : scripts.map((s, i) => (
+              <ScriptCard
+                key={s.id}
+                script={s}
+                index={i}
+                open={openScripts.has(s.id)}
+                onToggle={() => toggleScript(s.id)}
+                onChange={(patch) => changeScript(s.id, patch)}
+                onDelete={() => removeScript(s.id)}
+                onSelectForPreview={() => setPreviewScriptId(s.id)}
+                selected={previewScriptId === s.id}
+              />
+            ))}
+          </AnimatePresence>
         </div>
       </div>
 
