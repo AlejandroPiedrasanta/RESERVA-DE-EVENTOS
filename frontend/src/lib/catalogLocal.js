@@ -134,6 +134,7 @@ export async function listServices() {
       icon: s.icon || "package",
       gradient: s.gradient,
       order: s.order || 0,
+      cover_media_id: s.cover_media_id || null,
       scripts: Array.isArray(s.scripts) && s.scripts.length
         ? s.scripts
         : (s.sales_text ? [{ id: uuid(), title: "Guion principal", text: s.sales_text }] : []),
