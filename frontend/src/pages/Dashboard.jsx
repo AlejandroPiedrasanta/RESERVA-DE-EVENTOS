@@ -182,6 +182,7 @@ export default function Dashboard() {
       const monthEvents = [...r]
         .filter(res => {
           if (!res.event_date) return false;
+          if (res.status === "Cancelado") return false;
           const d = new Date(res.event_date + "T00:00:00");
           return d.getMonth() === cm && d.getFullYear() === cy;
         })
@@ -209,6 +210,8 @@ export default function Dashboard() {
   const dateStr = new Date().toLocaleDateString(language === "es" ? "es-MX" : "en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   const active = all.filter(r => r.status !== "Cancelado");
+  // Helper: is a reservation fully paid (status Pagado OR advance_paid >= total_amount)
+  const isReservationPaid = (r) => r?.status === "Pagado" || ((r?.total_amount || 0) > 0 && (r?.advance_paid || 0) >= (r?.total_amount || 0));
   const totalEventAmount = active.reduce((sum, r) => sum + (r.total_amount || 0), 0);
   const completedIncome  = all.filter(r => r.status === "Pagado").reduce((sum, r) => sum + (r.total_amount || 0), 0);
   const advanceIncome    = active.reduce((sum, r) => sum + (r.advance_paid || 0), 0);
@@ -431,7 +434,7 @@ export default function Dashboard() {
               const EvIcon = cfg.icon;
               const partners = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio);
               const firstPartner = partners[0];
-              const isPaid = firstPartner?.payment_status === "Pagado";
+              const isPaid = isReservationPaid(r);
               return (
                 <EventHoverCard
                   key={r.id}
@@ -496,7 +499,7 @@ export default function Dashboard() {
               const EvIcon = cfg.icon;
               const partners = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio);
               const firstPartner = partners[0];
-              const isPaid = firstPartner?.payment_status === "Pagado";
+              const isPaid = isReservationPaid(r);
               return (
                 <EventHoverCard
                   key={r.id}
@@ -550,7 +553,7 @@ export default function Dashboard() {
               const cfg = getEventConfig(r.event_type);
               const partners = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio);
               const firstPartner = partners[0];
-              const isPaid = firstPartner?.payment_status === "Pagado";
+              const isPaid = isReservationPaid(r);
               return (
                 <EventHoverCard
                   key={r.id}
@@ -585,7 +588,7 @@ export default function Dashboard() {
               const EvIcon = cfg.icon;
               const partners = (r.assigned_partners || []).map(p => ({ ...p, socio: socioMap[p.socio_id] })).filter(p => p.socio);
               const firstPartner = partners[0];
-              const isPaid = firstPartner?.payment_status === "Pagado";
+              const isPaid = isReservationPaid(r);
               return (
                 <EventHoverCard
                   key={r.id}
@@ -632,7 +635,7 @@ export default function Dashboard() {
                 .map(p => ({ ...p, socio: socioMap[p.socio_id] }))
                 .filter(p => p.socio);
               const firstPartner = partners[0];
-              const isPaid = firstPartner?.payment_status === "Pagado";
+              const isPaid = isReservationPaid(r);
 
               // Day + month abbrev
               const [ey, em, ed] = (r.event_date || "").split("-");

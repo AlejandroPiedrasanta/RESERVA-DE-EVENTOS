@@ -167,11 +167,11 @@ export default function ReservationDetail() {
       toast({ title: "Define un total antes de marcar como pagado", variant: "destructive" });
       return;
     }
-    if ((reservation.advance_paid || 0) >= total) return;
+    if ((reservation.advance_paid || 0) >= total && reservation.status === "Pagado") return;
     try {
-      await updateReservation(id, { advance_paid: total });
-      setReservation(prev => ({ ...prev, advance_paid: total }));
-      setDraft(prev => ({ ...prev, advance_paid: total }));
+      await updateReservation(id, { advance_paid: total, status: "Pagado" });
+      setReservation(prev => ({ ...prev, advance_paid: total, status: "Pagado" }));
+      setDraft(prev => ({ ...prev, advance_paid: total, status: "Pagado" }));
       toast({ title: dt.markedPaid || "Marcada como pagada" });
     } catch {
       toast({ title: "Error al actualizar", variant: "destructive" });

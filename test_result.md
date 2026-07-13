@@ -2430,3 +2430,27 @@ agent_communication:
       - The fix will activate in the next .exe build/release
       
       Test file: /app/backend_sanity_test.py
+
+  - task: "Dashboard 'Próximas Reservas' Pagado badge reflects reservation payment"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/Dashboard.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Fixed: In Dashboard.jsx the Pagado/Pendiente badge in "Próximas Reservas"
+          (all 5 layout variants) was tied to firstPartner.payment_status
+          (the socio's paid state), so marking the reservation as paid in
+          ReservationDetail (advance_paid = total_amount OR status=Pagado) did not
+          reflect in the badge.
+          Changed isPaid to a new helper isReservationPaid(r) that returns true when
+          r.status === "Pagado" OR advance_paid >= total_amount.
+          Also excluded "Cancelado" from `recent` list to keep counts consistent
+          with the "Tipos de Evento" section.
+          Needs UI testing: create a reservation, open detail, click "Marcar como
+          pagado", go back to Dashboard, verify the "Pagado" green badge shows in
+          Próximas Reservas.
