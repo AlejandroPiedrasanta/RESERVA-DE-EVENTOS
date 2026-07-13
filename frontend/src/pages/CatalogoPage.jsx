@@ -7,7 +7,7 @@ import {
   ArrowUpDown, Filter, Rows3, Grid3x3, ChevronLeft, ChevronRight, Maximize2,
   Send, Zap, FileImage, FileType, CheckCircle2, Circle, Wand2, Eye,
   ChevronDown, ChevronUp, Film, Play, Pause, RotateCcw, Smartphone,
-  Pencil, PlusCircle, HardDrive,
+  Pencil, PlusCircle, HardDrive, Settings2, Save, GripVertical, Images, Video,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/PageHeader";
@@ -34,11 +34,7 @@ const TEMPLATES = [
   { name: "DJ y Música", icon: "music", gradient: GRADIENTS[4] },
   { name: "Fotografía", icon: "camera", gradient: GRADIENTS[5] },
 ];
-const SCRIPT_TEMPLATES = [
-  { label: "Saludo cálido", text: "¡Hola! 😊 Gracias por escribirnos. Con mucho gusto te comparto la información de nuestro servicio.\n\nCuéntame:\n• ¿Para qué fecha lo necesitas?\n• ¿Cuántas personas asistirán?\n• ¿Tienes ya lugar o buscas recomendación?" },
-  { label: "Paquetes", text: "Estos son nuestros paquetes:\n\n🎉 BÁSICO — $XXXX\n• Punto 1\n• Punto 2\n\n✨ PREMIUM — $XXXX\n• Todo lo anterior\n• Extras\n\n👑 DELUXE — $XXXX\n• Todo lo anterior\n• Servicios adicionales" },
-  { label: "Cierre de venta", text: "Para apartar la fecha solo necesitamos un anticipo del 30%. Aceptamos transferencia y pago con tarjeta.\n\n¿Quieres que te aparte esta fecha? Solo tenemos algunos horarios disponibles este mes 📆" },
-];
+const SCRIPT_TEMPLATES = CL.DEFAULT_SCRIPT_TEMPLATES;
 
 function IconOf(key) { return ICONS[key] || ICONS.package; }
 
@@ -447,7 +443,7 @@ function UploadZone({ onFiles, uploading, progress }) {
 // ─────────────────────────────────────────────────────────────
 // Card de guion (colapsable, editable, título + texto)
 // ─────────────────────────────────────────────────────────────
-function ScriptCard({ script, index, open, onToggle, onChange, onDelete, onSelectForPreview, selected }) {
+function ScriptCard({ script, index, open, onToggle, onChange, onDelete, onSelectForPreview, selected, templates, onEditTemplates }) {
   const [title, setTitle] = useState(script.title);
   const [text, setText] = useState(script.text);
   const saveTimer = useRef(null);
@@ -526,13 +522,18 @@ function ScriptCard({ script, index, open, onToggle, onChange, onDelete, onSelec
             <div className="px-4 pb-4 pt-1">
               <div className="flex items-center gap-1.5 flex-wrap mb-2">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Insertar:</span>
-                {SCRIPT_TEMPLATES.map((t) => (
-                  <button key={t.label} onClick={() => insertTpl(t)}
+                {(templates || []).map((t) => (
+                  <button key={t.id || t.label} onClick={() => insertTpl(t)}
                     className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-full px-2 py-1"
                     data-testid={`script-tpl-${script.id}-${t.label}`}>
                     <Wand2 size={10} className="inline -mt-0.5 mr-0.5" /> {t.label}
                   </button>
                 ))}
+                <button onClick={onEditTemplates}
+                  className="text-[10px] font-black text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-full px-2 py-1 inline-flex items-center gap-1"
+                  data-testid={`edit-templates-${script.id}`} title="Editar plantillas de inserción">
+                  <Pencil size={10} /> Editar plantillas
+                </button>
               </div>
               <textarea
                 value={text}
@@ -724,6 +725,352 @@ function MobilePreview({ service, script }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Banner divisor de sección (Fotos / Videos / PDF)
+// ─────────────────────────────────────────────────────────────
+function SectionBanner({ icon: Icon, label, count, gradient }) {
+  return (
+    <div className="flex items-center gap-2.5 mt-5 mb-2.5 first:mt-0" data-testid={`section-banner-${label}`}>
+      <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-sm shrink-0" style={{ background: gradient }}>
+        <Icon size={14} className="text-white" strokeWidth={2.4} />
+      </div>
+      <h4 className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-600">{label}</h4>
+      <span className="text-[10px] font-black text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{count}</span>
+      <div className="flex-1 h-px bg-gradient-to-r from-slate-200 to-transparent" />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Miniatura del feed (click = preview grande, arrastrable a WhatsApp)
+// ─────────────────────────────────────────────────────────────
+function FeedThumb({ m, active, onSelect, onDelete }) {
+  const onDragStartTile = (e) => {
+    if (m.kind === "image") return; // imagen es arrastre nativo
+    try {
+      e.dataTransfer.setData("DownloadURL", `${m.mime || "application/octet-stream"}:${m.filename}:${m.url}`);
+      e.dataTransfer.effectAllowed = "copy";
+    } catch { /* ignore */ }
+  };
+  return (
+    <motion.div
+      layout initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+      className={`group relative aspect-square rounded-xl overflow-hidden bg-slate-900 cursor-pointer transition-all ${
+        active ? "ring-[3px] ring-indigo-500 ring-offset-2 ring-offset-white" : "hover:ring-2 hover:ring-indigo-300"
+      }`}
+      data-testid={`feed-thumb-${m.id}`}
+      draggable={m.kind === "image" || m.kind === "video"}
+      onDragStart={onDragStartTile}
+      onClick={() => onSelect(m)}
+    >
+      {(m.kind === "image" || m.kind === "video") ? (
+        <img src={m.thumbUrl || m.url} alt="" draggable={false}
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+      ) : (
+        <div className="w-full h-full bg-gradient-to-br from-rose-50 to-rose-100 flex flex-col items-center justify-center gap-1 text-rose-500">
+          <FileText size={26} strokeWidth={1.6} />
+          <span className="text-[9px] font-black uppercase tracking-wide">PDF</span>
+        </div>
+      )}
+      {m.kind === "video" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-9 h-9 rounded-full bg-black/50 backdrop-blur flex items-center justify-center">
+            <Play size={15} className="text-white ml-0.5" fill="white" />
+          </div>
+        </div>
+      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(m); }}
+        data-testid={`feed-delete-${m.id}`}
+        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/50 hover:bg-rose-500 backdrop-blur text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+        title="Eliminar">
+        <Trash2 size={12} />
+      </button>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Preview grande (derecha). Arrastra directo a WhatsApp Web.
+// ─────────────────────────────────────────────────────────────
+function BigPreview({ media, onOpenLightbox, onDownload, onDelete }) {
+  if (!media) {
+    return (
+      <div className="glass rounded-3xl flex flex-col items-center justify-center gap-3 text-slate-400 h-full min-h-[340px]" data-testid="big-preview-empty">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#c7d2fe,#e9d5ff)" }}>
+          <ImageIcon size={28} className="text-indigo-500" />
+        </div>
+        <p className="text-sm font-black text-slate-600">Selecciona una foto o video</p>
+        <p className="text-xs text-slate-400 font-medium">Aparecerá aquí en grande</p>
+      </div>
+    );
+  }
+  const isVideo = media.kind === "video";
+  const onDragStart = (e) => {
+    if (media.kind === "image") return;
+    try {
+      e.dataTransfer.setData("DownloadURL", `${media.mime || "application/octet-stream"}:${media.filename}:${media.url}`);
+      e.dataTransfer.effectAllowed = "copy";
+    } catch { /* ignore */ }
+  };
+  return (
+    <div className="sticky top-24" data-testid="big-preview">
+      <motion.div
+        key={media.id}
+        initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="relative rounded-3xl overflow-hidden glass shadow-xl"
+      >
+        <div className="relative bg-slate-900 flex items-center justify-center" style={{ minHeight: "clamp(300px, 46vh, 520px)" }}>
+          {isVideo ? (
+            <video key={media.id} src={media.url} controls playsInline
+              className="w-full max-h-[520px] object-contain bg-black" />
+          ) : (
+            <img src={media.url} alt={media.filename} draggable
+              onDragStart={onDragStart}
+              className="w-full max-h-[520px] object-contain cursor-grab active:cursor-grabbing select-none" />
+          )}
+          <span className={`absolute top-3 left-3 text-[10px] font-black uppercase tracking-wider rounded-full px-2.5 py-1 backdrop-blur ${
+            isVideo ? "bg-purple-500/90 text-white" : "bg-white/90 text-slate-700"
+          }`}>{isVideo ? "Video" : "Foto"}</span>
+          <button onClick={() => onOpenLightbox(media)} data-testid="big-preview-expand"
+            className="absolute top-3 right-3 w-9 h-9 rounded-full bg-white/90 hover:bg-white backdrop-blur flex items-center justify-center text-slate-700 shadow transition-colors" title="Ampliar">
+            <Maximize2 size={16} />
+          </button>
+        </div>
+
+        {/* Barra de acciones — arrastrar a WhatsApp */}
+        <div className="flex items-center gap-2 px-3 py-3 bg-white/60">
+          <div className="flex-1 min-w-0 inline-flex items-center gap-2 text-[11px] font-bold text-slate-500">
+            <GripVertical size={14} className="text-indigo-400 shrink-0" />
+            <span className="truncate">Arrastra la imagen a WhatsApp Web</span>
+          </div>
+          <button onClick={() => onDownload(media)} data-testid="big-preview-download"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-full px-3 py-2 transition-colors">
+            <Download size={14} /> Bajar
+          </button>
+          <button onClick={() => onDelete(media)} data-testid="big-preview-delete"
+            className="w-9 h-9 rounded-full text-rose-500 bg-rose-50 hover:bg-rose-500 hover:text-white flex items-center justify-center transition-colors" title="Eliminar">
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </motion.div>
+      <p className="mt-2 text-[11px] text-slate-400 font-medium text-center truncate" title={media.filename}>{media.filename}</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Workspace de medios: feed (izq) con banners divisores + preview (der)
+// ─────────────────────────────────────────────────────────────
+function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightbox, onFilesDrop, uploading, progress }) {
+  const [drag, setDrag] = useState(false);
+  const inputRef = useRef(null);
+  const pick = () => inputRef.current?.click();
+  const handleDrop = (e) => {
+    e.preventDefault(); setDrag(false);
+    if (e.dataTransfer?.files?.length) onFilesDrop(e.dataTransfer.files);
+  };
+
+  const images = media.filter((m) => m.kind === "image");
+  const videos = media.filter((m) => m.kind === "video");
+  const pdfs = media.filter((m) => m.kind === "pdf");
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" data-testid="media-workspace">
+      {/* IZQUIERDA — Feed tipo Instagram con banners divisores */}
+      <div className="lg:col-span-5">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={handleDrop}
+          className={`relative rounded-2xl transition-all ${drag ? "ring-4 ring-indigo-400 ring-offset-2" : ""}`}
+        >
+          <input ref={inputRef} type="file" accept="image/*,video/*,application/pdf" multiple className="hidden"
+            onChange={(e) => { if (e.target.files?.length) onFilesDrop(e.target.files); e.target.value = ""; }}
+            data-testid="upload-input" />
+
+          <AnimatePresence>
+            {drag && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 z-30 bg-indigo-500/20 backdrop-blur-sm rounded-2xl flex items-center justify-center pointer-events-none">
+                <div className="bg-white rounded-full px-5 py-3 shadow-xl inline-flex items-center gap-2">
+                  <UploadCloud size={20} className="text-indigo-500" />
+                  <span className="text-sm font-black text-slate-800">Suelta para agregar</span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {uploading && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 z-30 bg-black/40 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3">
+                <Loader2 size={30} className="text-white animate-spin" />
+                <p className="text-sm font-black text-white">Guardando… {progress}%</p>
+                <div className="w-44 h-1.5 bg-white/25 rounded-full overflow-hidden">
+                  <div className="h-full bg-white transition-all" style={{ width: `${progress}%` }} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {media.length === 0 ? (
+            <button onClick={pick} data-testid="workspace-empty-add"
+              className="w-full rounded-2xl glass flex flex-col items-center justify-center gap-3 text-slate-500 hover:bg-white/50 transition-colors"
+              style={{ aspectRatio: "3 / 4" }}>
+              <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 2.5, repeat: Infinity }}
+                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg,#818cf8,#8b5cf6)" }}>
+                <UploadCloud size={28} className="text-white" />
+              </motion.div>
+              <p className="text-base font-black text-slate-800">Arrastra o toca para agregar</p>
+              <p className="text-xs text-slate-400 font-medium">JPG · PNG · MP4 · MOV · PDF · local</p>
+            </button>
+          ) : (
+            <div className="glass rounded-2xl p-3">
+              {/* Botón añadir siempre visible arriba */}
+              <button onClick={pick} data-testid="workspace-add"
+                className="w-full mb-1 rounded-xl border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-600 font-black text-xs py-2.5 inline-flex items-center justify-center gap-1.5 transition-colors">
+                <Plus size={15} strokeWidth={2.6} /> Añadir fotos, videos o PDF
+              </button>
+
+              {images.length > 0 && (
+                <>
+                  <SectionBanner icon={Images} label="Fotos" count={images.length} gradient="linear-gradient(135deg,#f472b6,#db2777)" />
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {images.map((m) => (
+                      <FeedThumb key={m.id} m={m} active={selectedMedia?.id === m.id} onSelect={onSelect} onDelete={onDelete} />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {videos.length > 0 && (
+                <>
+                  <SectionBanner icon={Video} label="Videos" count={videos.length} gradient="linear-gradient(135deg,#a855f7,#7c3aed)" />
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {videos.map((m) => (
+                      <FeedThumb key={m.id} m={m} active={selectedMedia?.id === m.id} onSelect={onSelect} onDelete={onDelete} />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {pdfs.length > 0 && (
+                <>
+                  <SectionBanner icon={FileType} label="PDF" count={pdfs.length} gradient="linear-gradient(135deg,#fb7185,#e11d48)" />
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {pdfs.map((m) => (
+                      <FeedThumb key={m.id} m={m} active={false} onSelect={() => window.open(m.url, "_blank", "noopener")} onDelete={onDelete} />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <p className="mt-3 text-[11px] text-slate-400 font-medium text-center">
+                Toca una miniatura para verla grande a la derecha
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* DERECHA — Preview grande */}
+      <div className="lg:col-span-7">
+        <BigPreview
+          media={selectedMedia}
+          onOpenLightbox={onOpenLightbox}
+          onDownload={(m) => CL.downloadMedia(m.id, m.filename)}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Modal editor de plantillas de inserción (editables + guardadas)
+// ─────────────────────────────────────────────────────────────
+function TemplatesEditorModal({ open, onClose, templates, onSave }) {
+  const [list, setList] = useState([]);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (open) setList((templates || []).map((t) => ({ ...t })));
+  }, [open, templates]);
+
+  const update = (id, patch) => setList((prev) => prev.map((t) => t.id === id ? { ...t, ...patch } : t));
+  const remove = (id) => setList((prev) => prev.filter((t) => t.id !== id));
+  const add = () => setList((prev) => [...prev, { id: CL.newTemplateId(), label: `Plantilla ${prev.length + 1}`, text: "" }]);
+  const resetDefaults = () => setList(CL.DEFAULT_SCRIPT_TEMPLATES.map((t) => ({ ...t })));
+  const save = () => {
+    onSave(list);
+    toast({ description: "Plantillas guardadas 👍" });
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl p-0 bg-white border border-slate-200 rounded-2xl overflow-hidden [&>button]:hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <DialogTitle className="text-lg font-black text-slate-900 inline-flex items-center gap-2">
+            <Settings2 size={18} className="text-indigo-500" /> Editar plantillas
+          </DialogTitle>
+          <button onClick={onClose} className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500"><X size={16} /></button>
+        </div>
+
+        <div className="p-5 max-h-[60vh] overflow-y-auto space-y-3">
+          <p className="text-xs text-slate-400 font-medium">
+            Estas plantillas aparecen como botones <span className="font-bold text-indigo-600">Insertar</span> dentro de cada guion. Edítalas a tu gusto y se guardan en tu equipo.
+          </p>
+          <AnimatePresence>
+            {list.map((t, i) => (
+              <motion.div key={t.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                className="rounded-2xl border border-slate-200 p-3 bg-slate-50" data-testid={`tpl-editor-item-${i}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                    <Wand2 size={13} />
+                  </span>
+                  <input value={t.label} onChange={(e) => update(t.id, { label: e.target.value })}
+                    data-testid={`tpl-editor-label-${i}`} placeholder="Nombre del botón (ej: Precios)"
+                    className="flex-1 min-w-0 text-sm font-black text-slate-800 bg-white rounded-lg px-3 py-2 border border-slate-200 focus:border-indigo-400 outline-none" />
+                  <button onClick={() => remove(t.id)} data-testid={`tpl-editor-delete-${i}`}
+                    className="w-8 h-8 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 flex items-center justify-center shrink-0" title="Eliminar plantilla">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+                <textarea value={t.text} onChange={(e) => update(t.id, { text: e.target.value })}
+                  data-testid={`tpl-editor-text-${i}`} placeholder="Texto que se insertará…"
+                  className="w-full min-h-[90px] bg-white border border-slate-200 focus:border-indigo-300 rounded-xl p-3 text-sm text-slate-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-100 resize-y" />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          <button onClick={add} data-testid="tpl-editor-add"
+            className="w-full rounded-2xl border-2 border-dashed border-indigo-200 text-indigo-600 font-black text-sm py-4 hover:bg-indigo-50 transition-colors inline-flex items-center justify-center gap-2">
+            <PlusCircle size={18} /> Nueva plantilla
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-slate-100">
+          <button onClick={resetDefaults} data-testid="tpl-editor-reset"
+            className="text-xs font-bold text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+            <RotateCcw size={13} /> Restaurar por defecto
+          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="text-sm font-bold text-slate-600 hover:text-slate-900 px-4 py-2 rounded-full">Cancelar</button>
+            <button onClick={save} data-testid="tpl-editor-save"
+              className="text-sm font-black text-white px-5 py-2.5 rounded-full inline-flex items-center gap-2"
+              style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
+              <Save size={15} /> Guardar
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────
 // Vista de detalle
 // ─────────────────────────────────────────────────────────────
 function ServiceDetail({ service, onBack, onChanged }) {
@@ -738,6 +1085,9 @@ function ServiceDetail({ service, onBack, onChanged }) {
   const [openScripts, setOpenScripts] = useState(() => new Set(service.scripts?.[0]?.id ? [service.scripts[0].id] : []));
   const [previewScriptId, setPreviewScriptId] = useState(service.scripts?.[0]?.id || null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [selectedMediaId, setSelectedMediaId] = useState(null);
+  const [templates, setTemplates] = useState(() => CL.getScriptTemplates());
+  const [tplEditorOpen, setTplEditorOpen] = useState(false);
   const nameTimer = useRef(null);
 
   useEffect(() => {
@@ -746,6 +1096,8 @@ function ServiceDetail({ service, onBack, onChanged }) {
     setName(service.name);
     setOpenScripts(new Set(service.scripts?.[0]?.id ? [service.scripts[0].id] : []));
     setPreviewScriptId(service.scripts?.[0]?.id || null);
+    const firstPreviewable = (service.media || []).find((m) => m.kind === "image" || m.kind === "video");
+    setSelectedMediaId(firstPreviewable?.id || null);
   }, [service.id]); // eslint-disable-line
 
   // Auto-guardar nombre
@@ -771,6 +1123,9 @@ function ServiceDetail({ service, onBack, onChanged }) {
       try {
         const m = await CL.addMedia(service.id, f, (p) => setProgress(Math.round(((i + p / 100) / arr.length) * 100)));
         setMedia((prev) => [...prev, m]);
+        if ((m.kind === "image" || m.kind === "video")) {
+          setSelectedMediaId((cur) => cur || m.id);
+        }
         ok += 1;
       } catch (e) {
         toast({ description: `No se pudo agregar ${f.name}: ${e.message || "error"}`, variant: "destructive" });
@@ -783,6 +1138,11 @@ function ServiceDetail({ service, onBack, onChanged }) {
 
   const removeMedia = async (m) => {
     setMedia((prev) => prev.filter((x) => x.id !== m.id));
+    setSelectedMediaId((cur) => {
+      if (cur !== m.id) return cur;
+      const rest = media.filter((x) => x.id !== m.id && (x.kind === "image" || x.kind === "video"));
+      return rest[0]?.id || null;
+    });
     try { await CL.deleteMedia(m.id); onChanged({ silent: true }); }
     catch { toast({ description: "No se pudo eliminar", variant: "destructive" }); }
   };
@@ -827,6 +1187,12 @@ function ServiceDetail({ service, onBack, onChanged }) {
   const pdfs = media.filter((m) => m.kind === "pdf");
   const previewables = media.filter((m) => m.kind === "image" || m.kind === "video");
   const activeScript = scripts.find((s) => s.id === previewScriptId) || scripts[0] || null;
+  const selectedMedia = previewables.find((m) => m.id === selectedMediaId) || previewables[0] || null;
+
+  const saveTemplates = (list) => {
+    const saved = CL.saveScriptTemplates(list);
+    setTemplates(saved);
+  };
 
   const openLightboxAt = (m) => {
     const i = previewables.findIndex((x) => x.id === m.id);
@@ -901,29 +1267,17 @@ function ServiceDetail({ service, onBack, onChanged }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-        {/* IZQUIERDA: archivos (visor grande + strip) */}
-        <div className="lg:col-span-8">
-          <div className="flex items-center gap-2 mb-4">
-            <ImageIcon size={14} className="text-indigo-400" />
-            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.15em]">Fotos · Videos · PDF</h3>
-            <span className="text-[11px] font-bold text-slate-300">({media.length})</span>
-          </div>
-          <MediaBanner
-            media={media}
-            onDelete={removeMedia}
-            onOpenLightbox={openLightboxAt}
-            onFilesDrop={handleFiles}
-            uploading={uploading}
-            progress={progress}
-          />
-        </div>
-
-        {/* DERECHA: vista previa móvil animada */}
-        <div className="lg:col-span-4">
-          <MobilePreview service={{ ...service, media }} script={activeScript} />
-        </div>
-      </div>
+      {/* MEDIOS: feed tipo Instagram (izquierda) + preview grande (derecha) */}
+      <MediaWorkspace
+        media={media}
+        selectedMedia={selectedMedia}
+        onSelect={(m) => setSelectedMediaId(m.id)}
+        onDelete={removeMedia}
+        onOpenLightbox={openLightboxAt}
+        onFilesDrop={handleFiles}
+        uploading={uploading}
+        progress={progress}
+      />
 
       {/* GUIONES: fila propia, espaciosa y a lo ancho */}
       <div className="mt-12 pt-8 border-t border-slate-200/60">
@@ -933,14 +1287,20 @@ function ServiceDetail({ service, onBack, onChanged }) {
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Mis guiones</h3>
             <span className="text-xs font-bold text-slate-400">({scripts.length})</span>
           </div>
-          <button onClick={addNewScript} data-testid="add-script-btn"
-            className="inline-flex items-center gap-1.5 text-xs font-black text-white rounded-full px-3 py-1.5"
-            style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
-            <PlusCircle size={13} /> Añadir guion
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setTplEditorOpen(true)} data-testid="open-templates-editor"
+              className="inline-flex items-center gap-1.5 text-xs font-black text-slate-600 hover:text-slate-900 bg-white/70 hover:bg-white border border-slate-200 rounded-full px-3 py-1.5 transition-colors">
+              <Settings2 size={13} /> Plantillas
+            </button>
+            <button onClick={addNewScript} data-testid="add-script-btn"
+              className="inline-flex items-center gap-1.5 text-xs font-black text-white rounded-full px-3 py-1.5"
+              style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
+              <PlusCircle size={13} /> Añadir guion
+            </button>
+          </div>
         </div>
         <p className="text-xs text-slate-400 font-medium mb-5">
-          Crea varios guiones con títulos (Saludo, Precios, Cierre…). Selecciona <Eye size={11} className="inline" /> para verlo en la vista previa.
+          Crea varios guiones con títulos (Saludo, Precios, Cierre…). Selecciona <Eye size={11} className="inline" /> para verlo en la vista previa · Edita tus <span className="font-bold text-slate-500">plantillas de inserción</span> y se guardan.
         </p>
         <div className="space-y-3">
           <AnimatePresence>
@@ -965,10 +1325,17 @@ function ServiceDetail({ service, onBack, onChanged }) {
                 onDelete={() => removeScript(s.id)}
                 onSelectForPreview={() => setPreviewScriptId(s.id)}
                 selected={previewScriptId === s.id}
+                templates={templates}
+                onEditTemplates={() => setTplEditorOpen(true)}
               />
             ))}
           </AnimatePresence>
         </div>
+      </div>
+
+      {/* CÓMO LO VE TU CLIENTE — al final de la página */}
+      <div className="mt-12 pt-8 border-t border-slate-200/60">
+        <MobilePreview service={{ ...service, media }} script={activeScript} />
       </div>
 
       <AnimatePresence>
@@ -981,6 +1348,13 @@ function ServiceDetail({ service, onBack, onChanged }) {
           />
         )}
       </AnimatePresence>
+
+      <TemplatesEditorModal
+        open={tplEditorOpen}
+        onClose={() => setTplEditorOpen(false)}
+        templates={templates}
+        onSave={saveTemplates}
+      />
     </div>
   );
 }
@@ -1097,6 +1471,200 @@ function ServiceCard({ service, index, onOpen, onQuickSend, onQuickCopy, compact
 }
 
 // ─────────────────────────────────────────────────────────────
+// Carrusel COVERFLOW / RULETA — scroll para cambiar de servicio
+// ─────────────────────────────────────────────────────────────
+function CarouselCard({ service, offset, isCenter, maxSide, onOpen, onFocus }) {
+  const Icon = IconOf(service.icon);
+  const media = service.media || [];
+  const cover = media.find((m) => m.kind === "image") || media.find((m) => m.kind === "video");
+  const abs = Math.abs(offset);
+  const hidden = abs > maxSide + 0.5;
+
+  return (
+    <motion.div
+      data-testid={`carousel-card-${service.id}`}
+      className="absolute left-1/2 top-1/2 will-change-transform"
+      style={{ width: "min(300px, 74vw)" }}
+      initial={false}
+      animate={{
+        x: `calc(-50% + ${offset * 200}px)`,
+        y: "-50%",
+        scale: isCenter ? 1 : Math.max(0.72, 1 - abs * 0.14),
+        rotateY: offset * -20,
+        opacity: hidden ? 0 : isCenter ? 1 : Math.max(0.5, 1 - abs * 0.26),
+        zIndex: 100 - Math.round(abs * 10),
+      }}
+      transition={{ type: "spring", stiffness: 260, damping: 30 }}
+      onClick={() => (isCenter ? onOpen(service.id) : onFocus())}
+    >
+      <div
+        className="relative rounded-[28px] overflow-hidden cursor-pointer select-none"
+        style={{
+          height: "clamp(340px, 48vh, 420px)",
+          boxShadow: isCenter ? "0 30px 60px -26px rgba(79,70,229,0.5)" : "0 16px 34px -22px rgba(15,23,42,0.35)",
+        }}
+      >
+        {cover ? (
+          <img src={cover.thumbUrl || cover.url} alt={service.name} draggable={false}
+            className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0" style={{ background: service.gradient }}>
+            <div className="w-full h-full opacity-30" style={{
+              backgroundImage: "radial-gradient(circle at 25% 20%, rgba(255,255,255,0.55), transparent 46%), radial-gradient(circle at 80% 78%, rgba(255,255,255,0.3), transparent 46%)"
+            }} />
+          </div>
+        )}
+        {/* Brillo superior sutil (sin velo oscuro, sin texto) */}
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "linear-gradient(to bottom, rgba(255,255,255,0.16), transparent 28%)" }} />
+        {/* Ícono */}
+        <div className="absolute top-4 left-4 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: service.gradient }}>
+          <Icon size={22} className="text-white" strokeWidth={2.2} />
+        </div>
+        {/* Atenuar tarjetas laterales */}
+        {!isCenter && <div className="absolute inset-0 bg-white/25" />}
+      </div>
+    </motion.div>
+  );
+}
+
+function ServiceCarousel({ services, onOpen }) {
+  const [active, setActive] = useState(0);
+  const n = services.length;
+  const wrapRef = useRef(null);
+  const accum = useRef(0);
+  const lock = useRef(false);
+
+  useEffect(() => { setActive((a) => Math.min(a, Math.max(0, n - 1))); }, [n]);
+
+  const go = useCallback((dir) => {
+    setActive((a) => ((a + dir) % n + n) % n);
+  }, [n]);
+
+  // Rueda del mouse cambia de servicio (sin arrastrar la página)
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || n <= 1) return;
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      accum.current += e.deltaY;
+      if (lock.current) return;
+      if (accum.current > 30) { go(1); accum.current = 0; lock.current = true; setTimeout(() => (lock.current = false), 320); }
+      else if (accum.current < -30) { go(-1); accum.current = 0; lock.current = true; setTimeout(() => (lock.current = false), 320); }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [go, n]);
+
+  // Teclado
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "ArrowLeft") go(-1);
+      if (e.key === "ArrowRight") go(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [go]);
+
+  const offsetOf = (i) => {
+    let off = i - active;
+    if (off > n / 2) off -= n;
+    if (off < -n / 2) off += n;
+    return off;
+  };
+
+  // Cantidad simétrica de tarjetas visibles a cada lado
+  const maxSide = Math.max(1, Math.min(2, Math.floor((n - 1) / 2)));
+  const activeSvc = services[active] || services[0];
+
+  return (
+    <div data-testid="service-carousel">
+      <div ref={wrapRef} className="relative" style={{ perspective: "1400px" }}>
+        <div className="relative flex items-center justify-center px-4" style={{ height: "clamp(400px, 54vh, 500px)" }}>
+          <motion.div
+            className="relative w-full h-full"
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.16}
+            onDragEnd={(e, info) => {
+              if (info.offset.x < -60) go(1);
+              else if (info.offset.x > 60) go(-1);
+            }}
+            style={{ transformStyle: "preserve-3d" }}
+          >
+            {services.map((s, i) => {
+              const off = offsetOf(i);
+              return (
+                <CarouselCard
+                  key={s.id}
+                  service={s}
+                  offset={off}
+                  isCenter={off === 0}
+                  maxSide={maxSide}
+                  onOpen={onOpen}
+                  onFocus={() => setActive(i)}
+                />
+              );
+            })}
+          </motion.div>
+
+          {/* Flechas (tema claro) */}
+          {n > 1 && (
+            <>
+              <button onClick={() => go(-1)} data-testid="carousel-prev"
+                className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-[200] w-11 h-11 rounded-full bg-white shadow-lg text-slate-700 hover:text-indigo-600 hover:scale-105 flex items-center justify-center transition-all">
+                <ChevronLeft size={22} />
+              </button>
+              <button onClick={() => go(1)} data-testid="carousel-next"
+                className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-[200] w-11 h-11 rounded-full bg-white shadow-lg text-slate-700 hover:text-indigo-600 hover:scale-105 flex items-center justify-center transition-all">
+                <ChevronRight size={22} />
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Título bonito del servicio activo */}
+        <div className="text-center mt-4">
+          <AnimatePresence mode="wait">
+            <motion.h2
+              key={activeSvc?.id}
+              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+              className="text-3xl sm:text-4xl font-black tracking-tight"
+              style={{
+                fontFamily: "Cabinet Grotesk, sans-serif",
+                backgroundImage: "linear-gradient(135deg,#6366f1,#8b5cf6,#ec4899)",
+                WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent",
+              }}
+              data-testid="carousel-active-title"
+            >
+              {activeSvc?.name}
+            </motion.h2>
+          </AnimatePresence>
+        </div>
+
+        {/* Indicadores tipo ruleta */}
+        {n > 1 && (
+          <div className="relative z-[200] flex items-center justify-center gap-1.5 mt-4 flex-wrap px-6">
+            {services.map((s, i) => (
+              <button key={s.id} onClick={() => setActive(i)} data-testid={`carousel-dot-${i}`}
+                className={`rounded-full transition-all ${i === active ? "w-7 h-2 bg-indigo-500" : "w-2 h-2 bg-slate-300 hover:bg-slate-400"}`}
+                title={s.name} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="text-center text-xs text-slate-400 font-medium mt-3 inline-flex items-center justify-center gap-1.5 w-full">
+        <ArrowUpDown size={13} /> Haz scroll o arrastra para cambiar · toca la tarjeta central para abrir
+      </p>
+    </div>
+  );
+}
+
+
+
+// ─────────────────────────────────────────────────────────────
 // Modal nuevo servicio
 // ─────────────────────────────────────────────────────────────
 function NewServiceModal({ open, onClose, onCreate }) {
@@ -1195,7 +1763,7 @@ export default function CatalogoPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [sortBy, setSortBy] = useState("order");
   const [filter, setFilter] = useState("all");
-  const [view, setView] = useState("comfy");
+  const [view, setView] = useState("carousel");
   const { toast } = useToast();
 
   const load = useCallback(async (opts = {}) => {
@@ -1209,19 +1777,6 @@ export default function CatalogoPage() {
   useEffect(() => { load(); }, [load]);
 
   const selected = useMemo(() => services.find((s) => s.id === selectedId) || null, [services, selectedId]);
-
-  const stats = useMemo(() => {
-    let images = 0, videos = 0, pdfs = 0, scripts = 0;
-    services.forEach((s) => {
-      (s.media || []).forEach((m) => {
-        if (m.kind === "image") images += 1;
-        else if (m.kind === "video") videos += 1;
-        else if (m.kind === "pdf") pdfs += 1;
-      });
-      if ((s.scripts || []).some((sc) => sc.text?.trim())) scripts += 1;
-    });
-    return { services: services.length, images, videos, pdfs, scripts };
-  }, [services]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1281,14 +1836,7 @@ export default function CatalogoPage() {
     catch { toast({ description: "No se pudo copiar", variant: "destructive" }); }
   };
 
-  const FILTER_CHIPS = [
-    { key: "all", label: "Todos", count: services.length },
-    { key: "photos", label: "Con fotos", count: services.filter((s) => (s.media || []).some((m) => m.kind === "image")).length },
-    { key: "videos", label: "Con videos", count: services.filter((s) => (s.media || []).some((m) => m.kind === "video")).length },
-    { key: "pdf", label: "Con PDF", count: services.filter((s) => (s.media || []).some((m) => m.kind === "pdf")).length },
-    { key: "script", label: "Con guion", count: services.filter((s) => (s.scripts || []).some((sc) => sc.text?.trim())).length },
-    { key: "incomplete", label: "Por completar", count: services.filter((s) => !((s.media || []).some((m) => m.kind === "image") && (s.scripts || []).some((sc) => sc.text?.trim()))).length },
-  ];
+  const FILTER_CHIPS = [];
 
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto" data-testid="catalogo-page">
@@ -1323,17 +1871,7 @@ export default function CatalogoPage() {
           ) : (
             <motion.div key="grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
               {services.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6" data-testid="stats-panel">
-                  <StatCard icon={LayoutGrid} label="Servicios" value={stats.services} gradient="linear-gradient(135deg,#818cf8,#6366f1)" delay={0} />
-                  <StatCard icon={FileImage} label="Fotos" value={stats.images} gradient="linear-gradient(135deg,#f472b6,#db2777)" delay={0.05} />
-                  <StatCard icon={Film} label="Videos" value={stats.videos} gradient="linear-gradient(135deg,#a855f7,#7c3aed)" delay={0.1} />
-                  <StatCard icon={FileType} label="PDFs" value={stats.pdfs} gradient="linear-gradient(135deg,#fbbf24,#f59e0b)" delay={0.15} />
-                  <StatCard icon={CheckCircle2} label="Guiones" value={stats.scripts} gradient="linear-gradient(135deg,#34d399,#10b981)" delay={0.2} />
-                </div>
-              )}
-
-              {services.length > 0 && (
-                <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 mb-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
                   <div className="relative flex-1 min-w-0">
                     <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input value={query} onChange={(e) => setQuery(e.target.value)}
@@ -1343,39 +1881,14 @@ export default function CatalogoPage() {
                       <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={16} /></button>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="glass rounded-full px-1 py-1 flex items-center gap-0.5" data-testid="sort-toggle">
-                      <ArrowUpDown size={14} className="text-slate-400 ml-2 mr-1" />
-                      {[{ k: "order", l: "Manual" }, { k: "name", l: "A–Z" }, { k: "files", l: "+ archivos" }].map((o) => (
-                        <button key={o.k} onClick={() => setSortBy(o.k)} data-testid={`sort-${o.k}`}
-                          className={`text-xs font-black rounded-full px-3 py-1.5 transition-colors ${sortBy === o.k ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`}>
-                          {o.l}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="glass rounded-full px-1 py-1 flex items-center gap-0.5" data-testid="view-toggle">
-                      <button onClick={() => setView("comfy")} data-testid="view-comfy"
-                        className={`p-2 rounded-full transition-colors ${view === "comfy" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`} title="Cómoda"><Grid3x3 size={14} /></button>
-                      <button onClick={() => setView("compact")} data-testid="view-compact"
-                        className={`p-2 rounded-full transition-colors ${view === "compact" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`} title="Compacta"><Rows3 size={14} /></button>
-                    </div>
+                  <div className="glass rounded-full px-1 py-1 flex items-center gap-0.5 shrink-0" data-testid="view-toggle">
+                    <button onClick={() => setView("carousel")} data-testid="view-carousel"
+                      className={`p-2 rounded-full transition-colors ${view === "carousel" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`} title="Ruleta"><Aperture size={14} /></button>
+                    <button onClick={() => setView("comfy")} data-testid="view-comfy"
+                      className={`p-2 rounded-full transition-colors ${view === "comfy" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`} title="Cuadrícula"><Grid3x3 size={14} /></button>
+                    <button onClick={() => setView("compact")} data-testid="view-compact"
+                      className={`p-2 rounded-full transition-colors ${view === "compact" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"}`} title="Compacta"><Rows3 size={14} /></button>
                   </div>
-                </div>
-              )}
-
-              {services.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap mb-6" data-testid="filter-chips">
-                  <Filter size={14} className="text-slate-400 shrink-0" />
-                  {FILTER_CHIPS.map((c) => (
-                    <button key={c.key} onClick={() => setFilter(c.key)} data-testid={`filter-${c.key}`}
-                      className={`text-xs font-black rounded-full px-3 py-1.5 transition-all inline-flex items-center gap-1.5 ${
-                        filter === c.key ? "text-white shadow-lg" : "bg-white/70 text-slate-600 hover:bg-white hover:text-slate-900 border border-slate-200"
-                      }`}
-                      style={filter === c.key ? { background: "linear-gradient(135deg,#6366f1,#8b5cf6)" } : undefined}>
-                      {c.label}
-                      <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${filter === c.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{c.count}</span>
-                    </button>
-                  ))}
                 </div>
               )}
 
@@ -1424,6 +1937,13 @@ export default function CatalogoPage() {
                     Limpiar filtros
                   </button>
                 </div>
+              ) : view === "carousel" ? (
+                <ServiceCarousel
+                  services={filtered}
+                  onOpen={setSelectedId}
+                  onQuickSend={quickSend}
+                  onQuickCopy={quickCopy}
+                />
               ) : (
                 <motion.div layout className={`grid gap-4 ${view === "compact" ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"}`}>
                   <AnimatePresence>

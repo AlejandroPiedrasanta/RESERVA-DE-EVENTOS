@@ -303,3 +303,39 @@ export async function deleteScript(service_id, script_id) {
   await reqPromise(store.put({ ...svc, scripts }));
   return true;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Plantillas de guiones (editables + guardadas en localStorage)
+// ─────────────────────────────────────────────────────────────
+const TPL_KEY = "catalog_script_templates_v1";
+
+export const DEFAULT_SCRIPT_TEMPLATES = [
+  { id: "tpl-saludo", label: "Saludo cálido", text: "¡Hola! 😊 Gracias por escribirnos. Con mucho gusto te comparto la información de nuestro servicio.\n\nCuéntame:\n• ¿Para qué fecha lo necesitas?\n• ¿Cuántas personas asistirán?\n• ¿Tienes ya lugar o buscas recomendación?" },
+  { id: "tpl-paquetes", label: "Paquetes", text: "Estos son nuestros paquetes:\n\n🎉 BÁSICO — $XXXX\n• Punto 1\n• Punto 2\n\n✨ PREMIUM — $XXXX\n• Todo lo anterior\n• Extras\n\n👑 DELUXE — $XXXX\n• Todo lo anterior\n• Servicios adicionales" },
+  { id: "tpl-cierre", label: "Cierre de venta", text: "Para apartar la fecha solo necesitamos un anticipo del 30%. Aceptamos transferencia y pago con tarjeta.\n\n¿Quieres que te aparte esta fecha? Solo tenemos algunos horarios disponibles este mes 📆" },
+];
+
+export function getScriptTemplates() {
+  try {
+    const raw = localStorage.getItem(TPL_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((t) => t && (t.label || t.text))
+          .map((t) => ({ id: t.id || uuid(), label: (t.label || "Plantilla").trim(), text: t.text || "" }));
+      }
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_SCRIPT_TEMPLATES.map((t) => ({ ...t }));
+}
+
+export function saveScriptTemplates(list) {
+  const clean = (Array.isArray(list) ? list : [])
+    .filter((t) => t && (t.label?.trim() || t.text?.trim()))
+    .map((t) => ({ id: t.id || uuid(), label: (t.label || "Plantilla").trim(), text: t.text || "" }));
+  try { localStorage.setItem(TPL_KEY, JSON.stringify(clean)); } catch { /* ignore */ }
+  return clean;
+}
+
+export function newTemplateId() { return uuid(); }
