@@ -2075,3 +2075,10 @@ body.app-blur-unfocus::after {
 }
 .rd-info-tile .ultra-datetime-btn .empty { color: #cbd5e1; font-weight: 500; font-style: italic; }
 .rd-info-tile .ultra-datetime-btn .chevron { color: #94a3b8; right: 4px; }
+
+/* Catálogo: tira horizontal de miniaturas sin scrollbar visible */
+.catalog-strip { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,0.4) transparent; }
+.catalog-strip::-webkit-scrollbar { height: 6px; }
+.catalog-strip::-webkit-scrollbar-track { background: transparent; }
+.catalog-strip::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.35); border-radius: 999px; }
+.catalog-strip::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.55); }
