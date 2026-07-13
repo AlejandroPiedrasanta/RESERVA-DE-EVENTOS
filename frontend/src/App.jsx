@@ -11,6 +11,7 @@ import CalendarView from "@/pages/CalendarView";
 import Settings from "@/pages/Settings";
 import Socios from "@/pages/Socios";
 import Metas from "@/pages/Metas";
+import CatalogoPage from "@/pages/CatalogoPage";
 import DatabasePage from "@/pages/DatabasePage";
 import AppearancePage from "@/pages/AppearancePage";
 import UpdatesPage from "@/pages/UpdatesPage";
@@ -70,6 +71,7 @@ function AnimatedRoutes() {
           <Route path="/ajustes" element={<Settings />} />
           <Route path="/socios" element={<Socios />} />
           <Route path="/metas" element={<Metas />} />
+          <Route path="/catalogo" element={<CatalogoPage />} />
           <Route path="/base-de-datos" element={<DatabasePage />} />
           <Route path="/apariencia" element={<AppearancePage />} />
           <Route path="/actualizaciones" element={<UpdatesPage />} />

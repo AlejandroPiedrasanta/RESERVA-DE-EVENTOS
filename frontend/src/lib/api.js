@@ -87,6 +87,28 @@ export const deleteMeta = (year, type, month) => {
 };
 export const getMetasProgress = (year, type) => api.get(`/metas/progress?year=${year}&type=${type}`).then(r => r.data);
 
+// Catálogo de Ventas (Sales Catalog)
+export const getCatalog = () => api.get("/catalog").then(r => r.data);
+export const createCatalogService = (data) => api.post("/catalog", data).then(r => r.data);
+export const updateCatalogService = (id, data) => api.put(`/catalog/${id}`, data).then(r => r.data);
+export const deleteCatalogService = (id) => api.delete(`/catalog/${id}`).then(r => r.data);
+export const reorderCatalog = (order) => api.post("/catalog/reorder", { order }).then(r => r.data);
+export const uploadCatalogMedia = (id, file, onProgress) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api.post(`/catalog/${id}/media`, form, {
+    timeout: 120000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  }).then(r => r.data);
+};
+export const reorderCatalogMedia = (id, order) => api.post(`/catalog/${id}/media/reorder`, { order }).then(r => r.data);
+export const deleteCatalogMedia = (mediaId) => api.delete(`/catalog/media/${mediaId}`).then(r => r.data);
+// URL absoluta para mostrar / descargar un archivo del catálogo
+export const catalogMediaUrl = (mediaId, download = false) =>
+  `${BASE}/catalog/media/${mediaId}${download ? "?download=1" : ""}`;
+
 // App Settings
 export const getAppSettings = () => api.get("/settings").then(r => r.data);
 export const updateAppSettings = (data) => api.put("/settings", data).then(r => r.data);

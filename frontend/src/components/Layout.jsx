@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, CalendarDays, List, Menu, X, SlidersHorizontal, Users, Database, Palette, RefreshCw, ArrowRight, Target } from "lucide-react";
+import { LayoutDashboard, CalendarDays, List, Menu, X, SlidersHorizontal, Users, Database, Palette, RefreshCw, ArrowRight, Target, LayoutGrid } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings } from "@/context/SettingsContext";
@@ -93,6 +93,7 @@ export default function Layout({ children }) {
     "/calendario":      { label: tr.nav.reservations,                icon: CalendarDays,       tile: "linear-gradient(135deg,#34d399,#059669)" },
     "/socios":          { label: tr.nav.socios || "Socios",          icon: Users,              tile: "linear-gradient(135deg,#f472b6,#db2777)" },
     "/metas":           { label: tr.nav.metas || "Metas",            icon: Target,             tile: "linear-gradient(135deg,#fbbf24,#f59e0b)" },
+    "/catalogo":        { label: tr.nav.catalogo || "Catálogo",      icon: LayoutGrid,         tile: "linear-gradient(135deg,#c084fc,#8b5cf6)" },
     "/base-de-datos":   { label: tr.nav.database || "Base de Datos", icon: Database,           tile: "linear-gradient(135deg,#22d3ee,#0891b2)" },
     "/apariencia":      { label: tr.nav.appearance || "Apariencia",  icon: Palette,            tile: "linear-gradient(135deg,#a78bfa,#7c3aed)" },
     "/ajustes":         { label: tr.nav.settings,                    icon: SlidersHorizontal,  tile: "linear-gradient(135deg,#94a3b8,#475569)" },

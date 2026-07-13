@@ -2454,3 +2454,58 @@ agent_communication:
           Needs UI testing: create a reservation, open detail, click "Marcar como
           pagado", go back to Dashboard, verify the "Pagado" green badge shows in
           Próximas Reservas.
+
+
+#====================================================================================================
+# Catálogo de Ventas (Sales Catalog) — nueva página bajo "Metas"
+#====================================================================================================
+backend:
+  - task: "Catálogo de Ventas: CRUD de servicios + subida/descarga de media (imágenes y PDF)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Nuevos endpoints (todos bajo /api):
+          - GET  /api/catalog                         → lista servicios con su media (sin base64)
+          - POST /api/catalog                         → crea servicio {name, icon, gradient}
+          - PUT  /api/catalog/{id}                    → actualiza {name?, icon?, gradient?, sales_text?}
+          - DELETE /api/catalog/{id}                  → elimina servicio + su media
+          - POST /api/catalog/reorder                 → {order:[ids]}
+          - POST /api/catalog/{id}/media              → multipart file (image/pdf, máx 25MB), devuelve meta
+          - POST /api/catalog/{id}/media/reorder      → {order:[media_ids]}
+          - DELETE /api/catalog/media/{media_id}      → elimina archivo
+          - GET  /api/catalog/media/{media_id}?download=0|1 → sirve el archivo (inline o attachment)
+          Almacenamiento: colecciones db.catalog y db.catalog_media (base64 en Mongo, patrón igual a receipts/socio photo).
+          Validado manualmente con curl (crear servicio, subir PNG, actualizar sales_text, listar, headers de descarga, eliminar) — todo OK.
+          Por favor probar el ciclo completo: crear servicio, subir imagen y PDF, verificar kind detectado, servir media inline y con download=1 (Content-Disposition), actualizar sales_text, reordenar, eliminar media, eliminar servicio (debe borrar su media en cascada), y casos 404.
+
+frontend:
+  - task: "Página Catálogo (herramienta de ventas): subir fotos/PDF, guion de venta, copiar y enviar a WhatsApp"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/CatalogoPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Nueva página en el menú lateral bajo "Metas" (/catalogo). Diseño simple e intuitivo por pedido del usuario:
+          grid de servicios → detalle con zona drag&drop para subir imágenes/PDF (descargar, arrastrar a WhatsApp, eliminar)
+          y un área de guion de venta con autoguardado + botones "Copiar texto" y "Enviar a WhatsApp".
+          Sin precios ni paquetes. Pendiente de test automatizado de UI (requiere permiso del usuario).
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      Agregué la página "Catálogo" (herramienta de ventas) bajo Metas, con backend nuevo para
+      persistir servicios y archivos del usuario (imágenes/PDF) en MongoDB. Favor de PROBAR SOLO EL
+      BACKEND del catálogo (endpoints /api/catalog*). No re-probar features previos.
+

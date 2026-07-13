@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { setEventConfigOverrides } from "@/lib/eventConfig";
 import { getCloudAppearance, saveCloudAppearance, getSecurityStatus } from "@/lib/api";
 
-export const NAV_PATHS = ["/dashboard", "/calendario", "/socios", "/metas", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
+export const NAV_PATHS = ["/dashboard", "/calendario", "/socios", "/metas", "/catalogo", "/base-de-datos", "/apariencia", "/ajustes", "/actualizaciones"];
 
 export const APPEARANCE_KEYS = [
   "theme", "preset", "animations", "radius", "pdf_theme", "dark_mode", "font_scale", "bg_intensity",
@@ -75,7 +75,7 @@ export const STATUS_COLOR_CLASSES = {
 
 const T = {
   es: {
-    nav: { dashboard: "Panel", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", database: "Base de Datos", appearance: "Apariencia" },
+    nav: { dashboard: "Panel", reservations: "Reservaciones", calendar: "Calendario", settings: "Ajustes", tagline: "Gestión de Reservas", socios: "Socios", metas: "Metas", catalogo: "Catálogo", database: "Base de Datos", appearance: "Apariencia" },
     common: { newReservation: "Nueva Reserva", cancel: "Cancelar", save: "Guardar cambios", create: "Crear reserva", saving: "Guardando...", edit: "Editar", viewAll: "Ver todas" },
     statuses: { Reservado: "Reservado", Pagado: "Pagado" },
     months: ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"],
@@ -154,7 +154,7 @@ const T = {
     },
   },
   en: {
-    nav: { dashboard: "Panel", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", metas: "Goals", database: "Database", appearance: "Appearance" },
+    nav: { dashboard: "Panel", reservations: "Reservations", calendar: "Calendar", settings: "Settings", tagline: "Reservation Manager", socios: "Partners", metas: "Goals", catalogo: "Catalog", database: "Database", appearance: "Appearance" },
     common: { newReservation: "New Reservation", cancel: "Cancel", save: "Save changes", create: "Create reservation", saving: "Saving...", edit: "Edit", viewAll: "View all" },
     statuses: { Reservado: "Reserved", Pagado: "Paid" },
     months: ["January","February","March","April","May","June","July","August","September","October","November","December"],

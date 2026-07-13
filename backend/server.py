@@ -1836,6 +1836,160 @@ async def delete_socio_photo(socio_id: str):
     return {"message": "Foto eliminada"}
 
 
+# ─── Catálogo de Ventas (Sales Catalog) ───────────────────────────
+# Herramienta de ventas: por cada servicio el usuario sube SUS imágenes/PDFs
+# y escribe SU guion de venta. Sin precios ni paquetes. Los archivos se
+# guardan en MongoDB (base64) y se sirven con un endpoint para poder
+# descargarlos o arrastrarlos a WhatsApp.
+
+class CatalogServiceCreate(BaseModel):
+    name: str
+    icon: Optional[str] = "package"
+    gradient: Optional[str] = "linear-gradient(135deg,#6366f1,#8b5cf6)"
+
+class CatalogServiceUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    gradient: Optional[str] = None
+    sales_text: Optional[str] = None
+
+class CatalogReorder(BaseModel):
+    order: List[str]
+
+def _catalog_media_meta(m, service_id):
+    return {
+        "id": m["id"],
+        "service_id": service_id,
+        "filename": m.get("filename"),
+        "content_type": m.get("content_type"),
+        "kind": m.get("kind"),
+        "size": m.get("size"),
+        "order": m.get("order", 0),
+        "url": f"/api/catalog/media/{m['id']}",
+    }
+
+@api_router.get("/catalog")
+async def list_catalog():
+    services = await db.catalog.find().sort("order", 1).to_list(1000)
+    result = []
+    for s in services:
+        media_docs = await db.catalog_media.find(
+            {"service_id": s["id"]}, {"data": 0}
+        ).sort("order", 1).to_list(1000)
+        result.append({
+            "id": s["id"],
+            "name": s.get("name"),
+            "icon": s.get("icon", "package"),
+            "gradient": s.get("gradient"),
+            "sales_text": s.get("sales_text", ""),
+            "order": s.get("order", 0),
+            "media": [_catalog_media_meta(m, s["id"]) for m in media_docs],
+        })
+    return result
+
+@api_router.post("/catalog")
+async def create_catalog_service(payload: CatalogServiceCreate):
+    count = await db.catalog.count_documents({})
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": (payload.name or "").strip() or "Nuevo servicio",
+        "icon": payload.icon or "package",
+        "gradient": payload.gradient or "linear-gradient(135deg,#6366f1,#8b5cf6)",
+        "sales_text": "",
+        "order": count,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.catalog.insert_one(doc)
+    doc.pop("_id", None)
+    doc["media"] = []
+    return doc
+
+@api_router.put("/catalog/{service_id}")
+async def update_catalog_service(service_id: str, payload: CatalogServiceUpdate):
+    updates = {k: v for k, v in payload.dict().items() if v is not None}
+    if not updates:
+        return {"message": "sin cambios"}
+    result = await db.catalog.update_one({"id": service_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado")
+    return {"message": "actualizado"}
+
+@api_router.delete("/catalog/{service_id}")
+async def delete_catalog_service(service_id: str):
+    await db.catalog_media.delete_many({"service_id": service_id})
+    result = await db.catalog.delete_one({"id": service_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado")
+    return {"message": "eliminado"}
+
+@api_router.post("/catalog/reorder")
+async def reorder_catalog(payload: CatalogReorder):
+    for idx, sid in enumerate(payload.order):
+        await db.catalog.update_one({"id": sid}, {"$set": {"order": idx}})
+    return {"message": "reordenado"}
+
+@api_router.post("/catalog/{service_id}/media")
+async def upload_catalog_media(service_id: str, file: UploadFile = File(...)):
+    svc = await db.catalog.find_one({"id": service_id})
+    if not svc:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado")
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Archivo muy grande (máx 25MB)")
+    ctype = file.content_type or "application/octet-stream"
+    fname = file.filename or ""
+    is_pdf = "pdf" in ctype.lower() or fname.lower().endswith(".pdf")
+    kind = "pdf" if is_pdf else "image"
+    count = await db.catalog_media.count_documents({"service_id": service_id})
+    media = {
+        "id": str(uuid.uuid4()),
+        "service_id": service_id,
+        "filename": fname or f"archivo-{count + 1}",
+        "content_type": ctype,
+        "kind": kind,
+        "size": len(content),
+        "data": base64.b64encode(content).decode("utf-8"),
+        "order": count,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.catalog_media.insert_one(media)
+    return _catalog_media_meta(media, service_id)
+
+@api_router.post("/catalog/{service_id}/media/reorder")
+async def reorder_catalog_media(service_id: str, payload: CatalogReorder):
+    for idx, mid in enumerate(payload.order):
+        await db.catalog_media.update_one(
+            {"id": mid, "service_id": service_id}, {"$set": {"order": idx}}
+        )
+    return {"message": "reordenado"}
+
+@api_router.delete("/catalog/media/{media_id}")
+async def delete_catalog_media(media_id: str):
+    result = await db.catalog_media.delete_one({"id": media_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return {"message": "eliminado"}
+
+@api_router.get("/catalog/media/{media_id}")
+async def get_catalog_media(media_id: str, download: int = 0):
+    m = await db.catalog_media.find_one({"id": media_id})
+    if not m:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    data = base64.b64decode(m["data"])
+    disp = "attachment" if download else "inline"
+    fname = m.get("filename") or media_id
+    headers = {
+        "Content-Disposition": f'{disp}; filename="{fname}"',
+        "Cache-Control": "public, max-age=86400",
+    }
+    return Response(
+        content=data,
+        media_type=m.get("content_type", "application/octet-stream"),
+        headers=headers,
+    )
+
+
+
 @api_router.get("/financials")
 async def get_financials():
     cursor = db.reservations.find(
