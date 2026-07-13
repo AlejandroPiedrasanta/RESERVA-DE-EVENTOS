@@ -108,6 +108,7 @@ const T = {
       paymentSummary: "Resumen de Pago", totalLabel: "Total", advancePaid: "Anticipo pagado",
       pendingBalance: "Saldo pendiente", paid: "pagado", filesUploaded: "archivo(s) subido(s)", receiptsCount: "Comprobantes",
       realEarnings: "Ganancia real", owedByClient: "Deben", allPaid: "Todo cobrado", ofTotal: "de",
+      markPaid: "Marcar pagado", markedPaid: "Marcada como pagada",
     },
     settings: {
       title: "Ajustes", subtitle: "Personaliza tu experiencia",
@@ -186,6 +187,7 @@ const T = {
       paymentSummary: "Payment Summary", totalLabel: "Total", advancePaid: "Deposit paid",
       pendingBalance: "Pending balance", paid: "paid", filesUploaded: "file(s) uploaded", receiptsCount: "Receipts",
       realEarnings: "Actual earnings", owedByClient: "Owed", allPaid: "Fully paid", ofTotal: "of",
+      markPaid: "Mark as paid", markedPaid: "Marked as paid",
     },
     settings: {
       title: "Settings", subtitle: "Customize your experience",

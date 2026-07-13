@@ -160,6 +160,24 @@ export default function ReservationDetail() {
     }
   };
 
+  const handleMarkPaid = async () => {
+    if (!reservation) return;
+    const total = reservation.total_amount || 0;
+    if (total <= 0) {
+      toast({ title: "Define un total antes de marcar como pagado", variant: "destructive" });
+      return;
+    }
+    if ((reservation.advance_paid || 0) >= total) return;
+    try {
+      await updateReservation(id, { advance_paid: total });
+      setReservation(prev => ({ ...prev, advance_paid: total }));
+      setDraft(prev => ({ ...prev, advance_paid: total }));
+      toast({ title: dt.markedPaid || "Marcada como pagada" });
+    } catch {
+      toast({ title: "Error al actualizar", variant: "destructive" });
+    }
+  };
+
   const daysToEvent = useMemo(() => {
     if (!reservation?.event_date) return null;
     const [y,m,d] = reservation.event_date.split("-").map(Number);
@@ -474,6 +492,20 @@ export default function ReservationDetail() {
                 <CircleDollarSign size={14} className="text-indigo-500" />
               </div>
               <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">{dt.paymentSummary}</h2>
+              {paidPct < 100 && (reservation.total_amount || 0) > 0 && (
+                <motion.button
+                  type="button"
+                  onClick={handleMarkPaid}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/70 transition-colors"
+                  data-testid="btn-mark-paid"
+                  title={dt.markPaid}
+                >
+                  <CheckCircle2 size={11} />
+                  {dt.markPaid}
+                </motion.button>
+              )}
             </div>
 
             {/* Two key metrics: what you earned + what they owe */}
