@@ -263,6 +263,7 @@ export function SettingsProvider({ children }) {
   const [fontScale,      setFontScale]      = useState(() => localStorage.getItem("font_scale") || "normal");
   const [bgIntensity,    setBgIntensity]    = useState(() => localStorage.getItem("bg_intensity") || "normal");
   const [cinematic,      setCinematic]      = useState(() => localStorage.getItem("cinematic") || "normal");
+  const [cinematicPattern, setCinematicPattern] = useState(() => localStorage.getItem("cinematic_pattern") || "cinema");
   const [sidebarCompact, setSidebarCompact] = useState(() => localStorage.getItem("sidebar_compact") === "true");
   const [dateFormat,     setDateFormat]     = useState(() => localStorage.getItem("date_format") || "DD/MM/YYYY");
 
@@ -612,6 +613,11 @@ export function SettingsProvider({ children }) {
   const changeCinematic = (val) => {
     setCinematic(val);
     localStorage.setItem("cinematic", val);
+  };
+
+  const changeCinematicPattern = (val) => {
+    setCinematicPattern(val);
+    localStorage.setItem("cinematic_pattern", val);
   };
 
   const changeDateFormat = (val) => {
@@ -1085,6 +1091,7 @@ export function SettingsProvider({ children }) {
       fontScale, changeFontScale,
       bgIntensity, changeBgIntensity,
       cinematic, changeCinematic,
+      cinematicPattern, changeCinematicPattern,
       sidebarCompact, changeSidebarCompact,
       dateFormat, changeDateFormat,
       // Appearance (extended)

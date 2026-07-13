@@ -116,6 +116,7 @@ export default function AppearancePage() {
     fontScale, changeFontScale,
     bgIntensity, changeBgIntensity,
     cinematic, changeCinematic,
+    cinematicPattern, changeCinematicPattern,
     sidebarCompact, changeSidebarCompact,
     dateFormat, changeDateFormat,
     fontFamily, changeFontFamily,
@@ -516,6 +517,120 @@ export default function AppearancePage() {
                 { id:"intense", label: es ? "Intensa" : "Intense",   hint: es ? "Cine total" : "Full cinema",
                   preview: <div className="w-14 h-9 rounded-lg bg-slate-100 relative overflow-hidden"><div className="absolute right-1 bottom-0.5 w-5 h-5 rounded-full border-2 border-[var(--t-from)]/70" /><div className="absolute left-1 top-1 w-3 h-3 rounded-full border-2 border-[var(--t-to)]/70" /><div className="absolute left-1/2 -top-1 w-2 h-8 bg-white/60 blur-[2px] -rotate-12" /></div> },
               ]} />
+
+            {cinematic !== "off" && (
+              <OptionRow label={es ? "Diseño del patrón 2D" : "2D pattern design"} testPrefix="cinematic-pattern"
+                current={cinematicPattern || "cinema"}
+                onChange={(v) => { changeCinematicPattern(v); toast({ title: es ? "Diseño actualizado" : "Design updated" }); }}
+                cols={3}
+                options={[
+                  { id: "cinema",
+                    label: es ? "Cine clásico" : "Classic cinema",
+                    hint: es ? "Cámaras · rollos · claquetas" : "Cameras · reels · clappers",
+                    preview: (
+                      <div className="w-16 h-10 rounded-lg bg-slate-100 relative overflow-hidden">
+                        {/* film reel */}
+                        <svg className="absolute left-1 top-1" width="14" height="14" viewBox="0 0 20 20">
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--t-from)" strokeWidth="1.4" opacity="0.9" />
+                          <circle cx="10" cy="10" r="2" fill="var(--t-from)" opacity="0.9" />
+                          <circle cx="10" cy="4"  r="1.4" fill="none" stroke="var(--t-from)" strokeWidth="1" />
+                          <circle cx="10" cy="16" r="1.4" fill="none" stroke="var(--t-from)" strokeWidth="1" />
+                          <circle cx="4"  cy="10" r="1.4" fill="none" stroke="var(--t-from)" strokeWidth="1" />
+                          <circle cx="16" cy="10" r="1.4" fill="none" stroke="var(--t-from)" strokeWidth="1" />
+                        </svg>
+                        {/* clapper */}
+                        <svg className="absolute right-1 top-1.5" width="16" height="12" viewBox="0 0 22 16">
+                          <rect x="1" y="4" width="20" height="10" rx="1.5" fill="var(--t-to)" opacity="0.85" />
+                          <polygon points="2,3 5,3 4,7 1,7" fill="var(--t-to)" opacity="0.9" />
+                          <polygon points="7,3 10,3 9,7 6,7" fill="var(--t-to)" opacity="0.9" />
+                          <polygon points="12,3 15,3 14,7 11,7" fill="var(--t-to)" opacity="0.9" />
+                        </svg>
+                        {/* film strip */}
+                        <svg className="absolute left-1 bottom-1" width="36" height="8" viewBox="0 0 40 10">
+                          <rect x="0" y="0" width="40" height="10" rx="1.5" fill="var(--t-to)" opacity="0.55" />
+                          <rect x="2" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="8" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="14" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="20" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="26" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="32" y="1" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="2" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="8" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="14" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="20" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="26" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                          <rect x="32" y="7" width="3" height="2" fill="#fff" opacity="0.8" />
+                        </svg>
+                      </div>
+                    ),
+                  },
+                  { id: "party",
+                    label: es ? "Fiesta" : "Party",
+                    hint: es ? "Globos · confeti · brillo" : "Balloons · confetti · sparkle",
+                    preview: (
+                      <div className="w-16 h-10 rounded-lg bg-slate-100 relative overflow-hidden">
+                        {/* balloon */}
+                        <svg className="absolute left-1 top-0.5" width="10" height="14" viewBox="0 0 14 20">
+                          <ellipse cx="7" cy="8" rx="5.5" ry="6.5" fill="var(--t-from)" opacity="0.9" />
+                          <path d="M6 15 L7 17 L8 15 Z" fill="var(--t-from)" opacity="0.9" />
+                          <path d="M7 17 Q5 19 8 20" stroke="var(--t-from)" strokeWidth="0.7" fill="none" opacity="0.7" />
+                        </svg>
+                        {/* disco */}
+                        <svg className="absolute right-1 top-1" width="12" height="14" viewBox="0 0 14 16">
+                          <line x1="7" y1="0" x2="7" y2="3" stroke="var(--t-to)" strokeWidth="0.8" />
+                          <circle cx="7" cy="9" r="5.5" fill="var(--t-to)" opacity="0.9" />
+                          <circle cx="5" cy="7" r="0.9" fill="#fff" opacity="0.9" />
+                          <circle cx="9" cy="8" r="0.9" fill="#fff" opacity="0.7" />
+                          <circle cx="6" cy="11" r="0.9" fill="#fff" opacity="0.8" />
+                          <circle cx="9" cy="11" r="0.9" fill="#fff" opacity="0.6" />
+                        </svg>
+                        {/* confetti */}
+                        <svg className="absolute left-1 bottom-0.5" width="46" height="9" viewBox="0 0 46 10">
+                          <rect x="1"  y="4" width="4" height="1.6" rx="0.6" fill="var(--t-from)" transform="rotate(-20 3 4.8)" opacity="0.9" />
+                          <rect x="10" y="2" width="4" height="1.6" rx="0.6" fill="var(--t-to)"   transform="rotate(20 12 2.8)"  opacity="0.9" />
+                          <rect x="18" y="6" width="4" height="1.6" rx="0.6" fill="var(--t-from)" transform="rotate(-30 20 6.8)" opacity="0.9" />
+                          <rect x="26" y="3" width="4" height="1.6" rx="0.6" fill="var(--t-to)"   transform="rotate(40 28 3.8)"  opacity="0.9" />
+                          <rect x="34" y="5" width="4" height="1.6" rx="0.6" fill="var(--t-from)" transform="rotate(-10 36 5.8)" opacity="0.9" />
+                          <path d="M14,8 l0.6,-1.5 l1.5,-0.2 l-1.1,-1 l0.3,-1.5 l-1.3,0.8 l-1.3,-0.8 l0.3,1.5 l-1.1,1 l1.5,0.2 z" fill="var(--t-from)" opacity="0.85" />
+                        </svg>
+                      </div>
+                    ),
+                  },
+                  { id: "mixed",
+                    label: es ? "Mixto" : "Mixed",
+                    hint: es ? "Cine + fiesta alternado" : "Cinema + party mix",
+                    preview: (
+                      <div className="w-16 h-10 rounded-lg bg-slate-100 relative overflow-hidden">
+                        {/* camera */}
+                        <svg className="absolute left-1 top-1" width="16" height="10" viewBox="0 0 22 14">
+                          <circle cx="6"  cy="4" r="3" fill="none" stroke="var(--t-from)" strokeWidth="1.1" opacity="0.9" />
+                          <circle cx="12" cy="4" r="3" fill="none" stroke="var(--t-from)" strokeWidth="1.1" opacity="0.9" />
+                          <rect x="3" y="7" width="14" height="6" rx="1.2" fill="var(--t-from)" opacity="0.85" />
+                          <rect x="17" y="9" width="4" height="3" fill="var(--t-from)" opacity="0.9" />
+                        </svg>
+                        {/* balloon */}
+                        <svg className="absolute right-1 top-0.5" width="9" height="13" viewBox="0 0 12 18">
+                          <ellipse cx="6" cy="7" rx="4.5" ry="5.5" fill="var(--t-to)" opacity="0.9" />
+                          <path d="M5 13 L6 15 L7 13 Z" fill="var(--t-to)" opacity="0.9" />
+                        </svg>
+                        {/* popcorn */}
+                        <svg className="absolute left-1 bottom-0.5" width="10" height="10" viewBox="0 0 14 14">
+                          <circle cx="4" cy="4" r="2" fill="#fff" stroke="var(--t-from)" strokeWidth="0.6" />
+                          <circle cx="8" cy="3" r="2.2" fill="#fff" stroke="var(--t-from)" strokeWidth="0.6" />
+                          <circle cx="10" cy="6" r="1.8" fill="#fff" stroke="var(--t-from)" strokeWidth="0.6" />
+                          <path d="M2 6 L12 6 L11 13 L3 13 Z" fill="var(--t-from)" opacity="0.85" />
+                          <rect x="4" y="6" width="1" height="7" fill="#fff" opacity="0.6" />
+                          <rect x="8" y="6" width="1" height="7" fill="#fff" opacity="0.6" />
+                        </svg>
+                        {/* star */}
+                        <svg className="absolute right-1 bottom-0.5" width="10" height="10" viewBox="0 0 14 14">
+                          <path d="M7,1 L8.2,5 L12.5,5 L9,7.6 L10.2,11.8 L7,9.2 L3.8,11.8 L5,7.6 L1.5,5 L5.8,5 Z"
+                            fill="var(--t-to)" opacity="0.9" />
+                        </svg>
+                      </div>
+                    ),
+                  },
+                ]} /> )}
 
             {/* Island panel — enhanced controls + live preview, only when island is active */}
             {sidebarStyle === "island" && (() => {
