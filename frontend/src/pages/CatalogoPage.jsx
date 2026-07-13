@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutGrid, Search, Plus, Copy, Check, ArrowLeft, MessageCircle,
@@ -971,7 +972,6 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
       const t = e.target;
       if (!(t instanceof Element)) return;
       if (t.closest("button, a, input, textarea, select, label, [role='button'], [contenteditable], video, audio")) return;
-      if (t.closest("[data-testid^='feed-thumb-']")) return;
       if (t.closest("[data-testid='multi-action-bar']")) return;
       if (t.closest("[data-testid='mobile-preview']")) return;
       // Debe iniciar dentro de la vista de detalle
@@ -982,14 +982,35 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
       rubberStartRef.current = { x0: e.clientX, y0: e.clientY };
       initialSelectionRef.current = e.shiftKey || e.metaKey || e.ctrlKey ? new Set(selectedIds) : new Set();
       movedRef.current = false;
-      // Bloquear selección nativa de texto e íconos mientras dibujamos
+      // Bloquear drag nativo HTML5 y selección de texto SIEMPRE que iniciemos
+      // dentro del detalle. Esto garantiza que el rubber-band funcione desde
+      // cualquier punto (izquierda/derecha, sobre miniaturas o gaps).
+      // No evita el evento `click`, así que un click simple sobre una miniatura
+      // seguirá abriéndola en el preview.
       e.preventDefault();
-      document.body.style.userSelect = "none";
-      document.body.style.webkitUserSelect = "none";
       setRubber({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, armed: true });
     };
     window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
+    // Bloquear drag nativo HTML5 dentro del detalle del servicio. Los
+    // <motion.div> de las miniaturas tienen draggable=true (para arrastrar a
+    // WhatsApp Web) — pero si el usuario está intentando dibujar el
+    // rubber-band, el drag nativo interrumpe los mousemove y "roba" el
+    // gesto. Solo lo permitimos cuando el usuario NO está iniciando un
+    // rubber-band (por ejemplo, arrastrando 1 miniatura ya seleccionada
+    // por la barra de acciones).
+    const onDragStart = (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (!t.closest("[data-testid^='service-detail-']")) return;
+      if (t.closest("[data-detail-topbar]")) return;
+      // Si el mousedown recién armó el rubber-band, cancelar drag nativo
+      if (rubberStartRef.current) e.preventDefault();
+    };
+    window.addEventListener("dragstart", onDragStart);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("dragstart", onDragStart);
+    };
   }, [selectedIds]);
 
   useEffect(() => {
@@ -1000,6 +1021,12 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
       if (!movedRef.current && (Math.abs(x1 - x0) < 4 && Math.abs(y1 - y0) < 4)) {
         // aún dentro del umbral, no dibujamos todavía
         return;
+      }
+      if (!movedRef.current) {
+        // Primera vez que superamos umbral: activamos modo drag,
+        // bloqueamos selección nativa y evitamos click accidental en miniaturas.
+        document.body.style.userSelect = "none";
+        document.body.style.webkitUserSelect = "none";
       }
       movedRef.current = true;
       setRubber({ x0, y0, x1, y1 });
@@ -1034,6 +1061,7 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
       setSelectedIds(nextSel);
     };
     const onUp = () => {
+      const wasDrag = movedRef.current;
       rubberStartRef.current = null;
       initialSelectionRef.current = null;
       movedRef.current = false;
@@ -1041,6 +1069,17 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
       document.body.style.userSelect = "";
       document.body.style.webkitUserSelect = "";
       setRubber(null);
+      // Si hubo drag real, "comernos" el próximo click para que la miniatura
+      // sobre la que iniciamos no se abra en el preview.
+      if (wasDrag) {
+        const eat = (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          window.removeEventListener("click", eat, true);
+        };
+        window.addEventListener("click", eat, true);
+        setTimeout(() => window.removeEventListener("click", eat, true), 60);
+      }
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -1261,8 +1300,12 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
         />
       </div>
 
-      {/* Rubber-band overlay: se dibuja sobre TODA la ventana */}
-      {rubber && (Math.abs(rubber.x1 - rubber.x0) > 3 || Math.abs(rubber.y1 - rubber.y0) > 3) && (
+      {/* Rubber-band overlay: se dibuja sobre TODA la ventana.
+          Se portaliza a document.body porque el árbol de React está dentro
+          de un ancestro con `transform`/`filter` (motion.div en App.jsx),
+          lo que rompería `position: fixed` (se anclaría al ancestro y
+          quedaría desplazado ~240px por la sidebar). */}
+      {rubber && (Math.abs(rubber.x1 - rubber.x0) > 3 || Math.abs(rubber.y1 - rubber.y0) > 3) && createPortal(
         <div
           className="pointer-events-none fixed z-[400] rounded-lg border-2 border-emerald-500 bg-emerald-400/15 backdrop-blur-[1px]"
           style={{
@@ -1282,7 +1325,8 @@ function MediaWorkspace({ media, selectedMedia, onSelect, onDelete, onOpenLightb
               <Paperclip size={11} /> {selectedIds.size}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Barra de acciones flotante para selección múltiple */}
