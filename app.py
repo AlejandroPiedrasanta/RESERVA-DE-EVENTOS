@@ -4494,7 +4494,7 @@ async def run_diagnostic():
         })
 
     # 1) Dependencias Python críticas (SOLO las que la app de escritorio usa)
-    critical_py = ["fastapi", "motor", "pymongo", "pydantic", "pyzipper"]
+    critical_py = ["fastapi", "motor", "pymongo", "pydantic", "pyzipper", "dns"]
     # nota: apscheduler/bcrypt NO se usan en desktop (contraseñas via hashlib.pbkdf2)
     missing_py = [p for p in critical_py if importlib.util.find_spec(p) is None]
     add("python_deps",

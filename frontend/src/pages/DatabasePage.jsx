@@ -949,6 +949,19 @@ export default function DatabasePage() {
     } finally { setDbTesting(false); }
   };
 
+  // Probar la conexión ACTUAL (sin tocar el campo de nueva URL)
+  const handleTestCurrent = async () => {
+    const url = (dbStats?.current_url || "").trim();
+    if (!url) return;
+    setDbTesting(true); setDbTestResult(null);
+    try {
+      await testDbConnection(url);
+      setDbTestResult({ ok: true, msg: "Conexión actual OK ✓" });
+    } catch (err) {
+      setDbTestResult({ ok: false, msg: err.response?.data?.detail || "Error de conexión" });
+    } finally { setDbTesting(false); }
+  };
+
   const handleDbConnect = async () => {
     if (!activeConnUrl.trim()) return;
     setDbConnecting(true);
@@ -1746,7 +1759,7 @@ export default function DatabasePage() {
                   <Link2 size={12} className="text-slate-400 shrink-0" />
                   <p className="text-[10px] font-mono text-slate-500 truncate flex-1 min-w-0">{dbStats.current_url || "—"}</p>
                   <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                    onClick={() => { setNewDbUrl(dbStats.current_url || ""); handleDbTest(); }}
+                    onClick={handleTestCurrent}
                     disabled={dbTesting}
                     data-testid="db-test-btn"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-50 bg-slate-900 text-white hover:bg-slate-800 shadow-sm">
@@ -1762,15 +1775,65 @@ export default function DatabasePage() {
                 </div>
               )}
 
-              {/* ── Info card breve ── */}
-              <div className="flex items-start gap-3 rounded-2xl bg-slate-50/70 px-4 py-3 border border-slate-200/70">
-                <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center shrink-0 border border-slate-200">
-                  <Info size={13} className="text-slate-500" />
+              {/* ── Cambiar conexión / Conectar a la nube ── */}
+              <div data-testid="db-change-connection" className="rounded-2xl border border-slate-200/70 bg-slate-50/40 p-4 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900 flex items-center justify-center shrink-0">
+                    <Cloud size={15} className="text-white" strokeWidth={2.2} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-black text-slate-900 leading-none" style={{ fontFamily: "Cabinet Grotesk, sans-serif" }}>
+                      Cambiar conexión
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">Pega la URL de tu base de datos (MongoDB Atlas u otra) y conéctate</p>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  El respaldo guarda una copia completa de tus datos (reservas, socios, apariencia, ajustes) en la carpeta <code className="font-mono text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-200">backups/</code> junto a la app.
-                </p>
+
+                <Input
+                  value={newDbUrl}
+                  onChange={(e) => { setNewDbUrl(e.target.value); setDbTestResult(null); }}
+                  placeholder="mongodb+srv://usuario:clave@cluster.mongodb.net"
+                  data-testid="db-new-url-input"
+                  autoComplete="off" spellCheck={false}
+                  className="font-mono text-[12px] bg-white border-slate-200"
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <motion.button whileHover={{ scale: newDbUrl.trim() ? 1.03 : 1 }} whileTap={{ scale: newDbUrl.trim() ? 0.97 : 1 }}
+                    onClick={handleDbTest}
+                    disabled={!newDbUrl.trim() || dbTesting}
+                    data-testid="db-new-test-btn"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-white text-slate-800 border border-slate-200 hover:bg-slate-50 shadow-sm">
+                    {dbTesting ? <Loader2 size={12} className="animate-spin" /> : <Wifi size={12} />}
+                    {dbTesting ? "Probando…" : "Probar"}
+                  </motion.button>
+
+                  <motion.button whileHover={{ scale: newDbUrl.trim() ? 1.03 : 1 }} whileTap={{ scale: newDbUrl.trim() ? 0.97 : 1 }}
+                    onClick={handleDbConnect}
+                    disabled={!newDbUrl.trim() || dbConnecting}
+                    data-testid="db-connect-btn"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-slate-900 text-white hover:bg-slate-800 shadow-sm">
+                    {dbConnecting ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />}
+                    {dbConnecting ? "Conectando…" : "Conectar"}
+                  </motion.button>
+
+                  <button
+                    onClick={handleDbReset}
+                    disabled={dbResetting}
+                    data-testid="db-reset-btn"
+                    className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all disabled:opacity-40">
+                    {dbResetting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                    {dbResetting ? "Restaurando…" : "Restaurar local"}
+                  </button>
+                </div>
+
+                <div className="flex items-start gap-2 text-[10px] text-slate-500 leading-relaxed">
+                  <ShieldCheck size={12} className="text-emerald-500 shrink-0 mt-0.5" />
+                  <span>Al conectar, tus datos locales se fusionan con la nube (no se sobrescribe nada). La conexión queda guardada para las próximas sesiones.</span>
+                </div>
               </div>
+
+              {/* ── Info card breve ── */}
 
               {/* ── Automático + Restaurar (grid) ── */}
               <div className="grid md:grid-cols-2 gap-3">
