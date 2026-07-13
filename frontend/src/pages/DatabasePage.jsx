@@ -949,19 +949,6 @@ export default function DatabasePage() {
     } finally { setDbTesting(false); }
   };
 
-  // Probar la conexión ACTUAL (sin tocar el campo de nueva URL)
-  const handleTestCurrent = async () => {
-    const url = (dbStats?.current_url || "").trim();
-    if (!url) return;
-    setDbTesting(true); setDbTestResult(null);
-    try {
-      await testDbConnection(url);
-      setDbTestResult({ ok: true, msg: "Conexión actual OK ✓" });
-    } catch (err) {
-      setDbTestResult({ ok: false, msg: err.response?.data?.detail || "Error de conexión" });
-    } finally { setDbTesting(false); }
-  };
-
   const handleDbConnect = async () => {
     if (!activeConnUrl.trim()) return;
     setDbConnecting(true);
@@ -1753,19 +1740,11 @@ export default function DatabasePage() {
                 </div>
               )}
 
-              {/* ── Conexión (URL + Probar) ── */}
+              {/* ── Conexión actual (solo lectura) ── */}
               {dbStats && (
                 <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200/70 bg-white px-3 py-2.5">
                   <Link2 size={12} className="text-slate-400 shrink-0" />
                   <p className="text-[10px] font-mono text-slate-500 truncate flex-1 min-w-0">{dbStats.current_url || "—"}</p>
-                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                    onClick={handleTestCurrent}
-                    disabled={dbTesting}
-                    data-testid="db-test-btn"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-50 bg-slate-900 text-white hover:bg-slate-800 shadow-sm">
-                    {dbTesting ? <Loader2 size={11} className="animate-spin" /> : <Wifi size={11} />}
-                    {dbTesting ? "Probando…" : "Probar"}
-                  </motion.button>
                 </div>
               )}
               {dbTestResult && (
