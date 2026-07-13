@@ -237,10 +237,13 @@ export default function Dashboard() {
     return d.getMonth() === _tfMonth && d.getFullYear() === _tfYear;
   });
   const typeDataFiltered = activeForTypes.reduce((acc, r) => {
-    acc[r.event_type || "Otro"] = (acc[r.event_type || "Otro"] || 0) + 1;
+    const key = r.event_type || "Otro";
+    if (!acc[key]) acc[key] = { total: 0, paid: 0 };
+    acc[key].total += 1;
+    if (isReservationPaid(r)) acc[key].paid += 1;
     return acc;
   }, {});
-  const typeEntriesFiltered = Object.entries(typeDataFiltered).sort((a, b) => b[1] - a[1]);
+  const typeEntriesFiltered = Object.entries(typeDataFiltered).sort((a, b) => b[1].total - a[1].total);
 
   // Build ordered, enabled widget list
   const WIDGET_DATA = {
@@ -946,7 +949,10 @@ export default function Dashboard() {
                     animate={{ opacity: [1, 0.3, 1], scale: [1, 1.3, 1] }}
                     transition={{ duration: 1.6, repeat: Infinity }}
                   />
-                  {activeForTypes.length} {language === "es" ? "reservas" : "reservations"}
+                  {(() => {
+                    const paid = activeForTypes.filter(isReservationPaid).length;
+                    return `${paid} / ${activeForTypes.length} ${language === "es" ? "pagados" : "paid"}`;
+                  })()}
                   <span className="text-slate-300 mx-1">·</span>
                   {typeEntriesFiltered.length} {language === "es" ? "categorías" : "categories"}
                   <span className="text-slate-300 mx-1">·</span>
@@ -1003,8 +1009,16 @@ export default function Dashboard() {
                 animate="show"
                 className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
               >
-                {typeEntriesFiltered.map(([type, count], idx) => (
-                  <AnimatedEventTypeCard key={type} type={type} count={count} total={activeForTypes.length} index={idx} />
+                {typeEntriesFiltered.map(([type, data], idx) => (
+                  <AnimatedEventTypeCard
+                    key={type}
+                    type={type}
+                    count={data.total}
+                    total={data.total}
+                    paidCount={data.paid}
+                    index={idx}
+                    language={language}
+                  />
                 ))}
               </motion.div>
             ) : (

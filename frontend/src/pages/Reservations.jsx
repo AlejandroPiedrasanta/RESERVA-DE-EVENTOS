@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getReservations, deleteReservation } from "@/lib/api";
-import { Plus, Trash2, Eye, Search, FileDown, ChevronDown, ChevronUp, SlidersHorizontal, CalendarCheck } from "lucide-react";
+import { Plus, Trash2, Eye, Search, FileDown, ChevronDown, ChevronUp, SlidersHorizontal, CalendarCheck, CalendarRange, Layers, Tag, CheckCircle2, Clock3, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings, STATUS_COLOR_CLASSES } from "@/context/SettingsContext";
 import ReservationForm from "@/components/ReservationForm";
@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { generateReservationPDF } from "@/lib/generatePDF";
 import { getEventConfig, getEventTypeName } from "@/lib/eventConfig";
 import PageHeader from "@/components/PageHeader";
+import FancySelect from "@/components/ui/FancySelect";
 
 const FALLBACK_COLOR = "bg-slate-100/80 text-slate-700 border-slate-200/60";
 
@@ -21,6 +22,7 @@ export default function Reservations({ embedded = false }) {
   const [filterPackage, setFilterPackage] = useState("all");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterMonth, setFilterMonth] = useState("current"); // "current" | "all"
   const [visibleCount, setVisibleCount] = useState(12);
   const [showExtraFilters, setShowExtraFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -73,6 +75,20 @@ export default function Reservations({ embedded = false }) {
 
   const formatDate = (d) => { if (!d) return "-"; const [y,m,day] = d.split("-"); return `${day}/${m}/${y}`; };
 
+  // Current-month bounds (inclusive) as YYYY-MM-DD
+  const monthBounds = useMemo(() => {
+    const n = new Date();
+    const y = n.getFullYear();
+    const m = n.getMonth();
+    const first = new Date(y, m, 1);
+    const last = new Date(y, m + 1, 0);
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    return { from: iso(first), to: iso(last), monthIdx: m, year: y };
+  }, []);
+  const monthNameEs = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const monthNameEn = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const currentMonthLabel = (es ? monthNameEs : monthNameEn)[monthBounds.monthIdx];
+
   const filtered = reservations.filter(r => {
     const q = search.toLowerCase();
     const ms = r.client_name?.toLowerCase().includes(q)
@@ -82,8 +98,16 @@ export default function Reservations({ embedded = false }) {
     const mt = filterType === "all" || r.event_type === filterType;
     const ms2 = filterStatus === "all" || r.status === filterStatus;
     const mp = filterPackage === "all" || (r.package_type || "") === filterPackage;
-    const mdf = !filterDateFrom || (r.event_date && r.event_date >= filterDateFrom);
-    const mdt = !filterDateTo || (r.event_date && r.event_date <= filterDateTo);
+    // Explicit range (advanced filters) takes precedence over quick month toggle
+    const usingExplicitRange = !!(filterDateFrom || filterDateTo);
+    let mdf = true, mdt = true;
+    if (usingExplicitRange) {
+      mdf = !filterDateFrom || (r.event_date && r.event_date >= filterDateFrom);
+      mdt = !filterDateTo   || (r.event_date && r.event_date <= filterDateTo);
+    } else if (filterMonth === "current") {
+      mdf = r.event_date && r.event_date >= monthBounds.from;
+      mdt = r.event_date && r.event_date <= monthBounds.to;
+    }
     return ms && mt && ms2 && mp && mdf && mdt;
   });
 
@@ -93,6 +117,7 @@ export default function Reservations({ embedded = false }) {
   const resetFilters = () => {
     setSearch(""); setFilterType("all"); setFilterStatus("all");
     setFilterPackage("all"); setFilterDateFrom(""); setFilterDateTo("");
+    setFilterMonth("current");
     setVisibleCount(12);
   };
 
@@ -156,32 +181,80 @@ export default function Reservations({ embedded = false }) {
             </div>
           </motion.div>
 
-          {/* Filtros compactos - iconos */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="relative">
-              <select
-                value={filterType}
-                onChange={e => { setFilterType(e.target.value); setVisibleCount(12); }}
-                data-testid="filter-type"
-                className={`appearance-none text-sm rounded-2xl pl-4 pr-9 py-3 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-bold cursor-pointer transition-all ${filterType !== "all" ? "btn-primary text-white" : "glass text-slate-600"}`}
-              >
-                <option value="all" className="bg-white text-slate-700">{es ? "Todos tipos" : "All types"}</option>
-                {EVENT_TYPES.map(t => <option key={t} value={t} className="bg-white text-slate-700">{getEventTypeName(t)}</option>)}
-              </select>
-              <ChevronDown size={14} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterType !== "all" ? "text-white" : "text-slate-400"}`} />
+          {/* Filtros modernos */}
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            {/* Segmented: Mes actual / Todos */}
+            <div
+              className="flex items-center gap-1 p-1 rounded-2xl glass border border-white/60 shadow-sm"
+              data-testid="filter-month-segment"
+            >
+              {[
+                { key: "current", label: es ? currentMonthLabel : currentMonthLabel, icon: CalendarRange },
+                { key: "all",     label: es ? "Todos"          : "All",              icon: LayoutGrid },
+              ].map(opt => {
+                const isActive = filterMonth === opt.key;
+                const OptIcon = opt.icon;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => { setFilterMonth(opt.key); setVisibleCount(12); }}
+                    data-testid={`filter-month-${opt.key}`}
+                    className={`relative px-3.5 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-colors flex items-center gap-1.5 ${
+                      isActive ? "text-white" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="reservations-month-pill"
+                        className="absolute inset-0 rounded-xl btn-primary shadow-md"
+                        transition={{ type: "spring", stiffness: 320, damping: 28 }}
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center gap-1.5">
+                      <OptIcon size={12} strokeWidth={2.4} />
+                      {opt.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={e => { setFilterStatus(e.target.value); setVisibleCount(12); }}
-                data-testid="filter-status"
-                className={`appearance-none text-sm rounded-2xl pl-4 pr-9 py-3 bg-transparent focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-bold cursor-pointer transition-all ${filterStatus !== "all" ? "btn-primary text-white" : "glass text-slate-600"}`}
-              >
-                <option value="all" className="bg-white text-slate-700">{es ? "Todos estados" : "All statuses"}</option>
-                {activeStatuses.map(s => <option key={s.key} value={s.key} className="bg-white text-slate-700">{s.label}</option>)}
-              </select>
-              <ChevronDown size={14} className={`absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${filterStatus !== "all" ? "text-white" : "text-slate-400"}`} />
-            </div>
+
+            <FancySelect
+              value={filterType}
+              onChange={(v) => { setFilterType(v); setVisibleCount(12); }}
+              active={filterType !== "all"}
+              testId="filter-type"
+              options={[
+                { value: "all", label: es ? "Todos los tipos" : "All types", icon: Layers },
+                ...EVENT_TYPES.map(t => {
+                  const cfg = getEventConfig(t);
+                  return { value: t, label: getEventTypeName(t), icon: cfg.icon, color: cfg.fg };
+                }),
+              ]}
+              minWidth={180}
+            />
+
+            <FancySelect
+              value={filterStatus}
+              onChange={(v) => { setFilterStatus(v); setVisibleCount(12); }}
+              active={filterStatus !== "all"}
+              testId="filter-status"
+              options={[
+                { value: "all", label: es ? "Todos los estados" : "All statuses", icon: Tag },
+                ...activeStatuses.map(s => {
+                  const colorHex = ({
+                    blue: "#3b82f6", emerald: "#10b981", amber: "#f59e0b", rose: "#f43f5e",
+                    purple: "#8b5cf6", cyan: "#06b6d4", slate: "#64748b", orange: "#f97316",
+                    indigo: "#6366f1", pink: "#ec4899", teal: "#14b8a6", lime: "#84cc16",
+                  })[s.color] || "#64748b";
+                  const Icon = s.key === "Pagado" ? CheckCircle2 : Clock3;
+                  return { value: s.key, label: s.label, icon: Icon, color: colorHex, dot: colorHex };
+                }),
+              ]}
+              minWidth={190}
+            />
+
             <motion.button
               whileHover={{ scale:1.05 }}
               whileTap={{ scale:0.95 }}
@@ -206,11 +279,19 @@ export default function Reservations({ embedded = false }) {
               <div className="flex flex-col sm:flex-row gap-3 pt-1">
                 <div className="flex flex-col gap-1 flex-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">{es ? "Paquete" : "Package"}</label>
-                  <select value={filterPackage} onChange={e => { setFilterPackage(e.target.value); setVisibleCount(12); }} data-testid="filter-package"
-                    className="text-sm glass rounded-2xl px-4 py-2.5 bg-transparent text-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--t-from)]/30 font-medium">
-                    <option value="all" className="bg-white">{es ? "Todos los paquetes" : "All packages"}</option>
-                    {["Básico","Intermedio","Completo"].map(p => <option key={p} value={p} className="bg-white">{p}</option>)}
-                  </select>
+                  <FancySelect
+                    value={filterPackage}
+                    onChange={(v) => { setFilterPackage(v); setVisibleCount(12); }}
+                    active={filterPackage !== "all"}
+                    testId="filter-package"
+                    options={[
+                      { value: "all", label: es ? "Todos los paquetes" : "All packages", icon: Layers },
+                      { value: "Básico",     label: "Básico",     dot: "#64748b" },
+                      { value: "Intermedio", label: "Intermedio", dot: "#6366f1" },
+                      { value: "Completo",   label: "Completo",   dot: "#f59e0b" },
+                    ]}
+                    minWidth={200}
+                  />
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">{es ? "Desde" : "From"}</label>

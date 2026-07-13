@@ -36,11 +36,12 @@ const hexA = (hex, a) => {
  * - Animated horizontal progress bar
  * - Subtle hover lift
  */
-export default function AnimatedEventTypeCard({ type, count, total, index }) {
+export default function AnimatedEventTypeCard({ type, count, total, paidCount = 0, index, language = "es" }) {
   const cfg = getEventConfig(type);
   const Icon = cfg.icon;
-  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-  const num = useCounter(count, 900 + index * 70);
+  const pct = total > 0 ? Math.round((paidCount / total) * 100) : 0;
+  const num = useCounter(paidCount, 900 + index * 70);
+  const isAllPaid = total > 0 && paidCount >= total;
 
   return (
     <motion.div
@@ -111,8 +112,8 @@ export default function AnimatedEventTypeCard({ type, count, total, index }) {
           <span
             className="ml-auto text-xs font-black px-2.5 py-1 rounded-full"
             style={{
-              background: hexA(cfg.fg, 0.12),
-              color: cfg.fg,
+              background: isAllPaid ? "rgba(16,185,129,0.14)" : hexA(cfg.fg, 0.12),
+              color: isAllPaid ? "#059669" : cfg.fg,
             }}
           >
             {pct}%
@@ -130,7 +131,9 @@ export default function AnimatedEventTypeCard({ type, count, total, index }) {
             animate={{ width: `${pct}%` }}
             transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1], delay: 0.3 + index * 0.07 }}
             style={{
-              background: `linear-gradient(90deg, ${cfg.fg}, ${hexA(cfg.fg, 0.7)})`,
+              background: isAllPaid
+                ? "linear-gradient(90deg,#10b981,#22c55e)"
+                : `linear-gradient(90deg, ${cfg.fg}, ${hexA(cfg.fg, 0.7)})`,
             }}
           >
             {/* Shine sweep across the bar */}
@@ -146,8 +149,14 @@ export default function AnimatedEventTypeCard({ type, count, total, index }) {
         </div>
 
         {/* Subtitle */}
-        <p className="text-[11px] text-slate-500 font-semibold mt-2 uppercase tracking-wider">
-          {count === 1 ? "reserva" : "reservas"}
+        <p className="text-[11px] text-slate-500 font-semibold mt-2 uppercase tracking-wider flex items-center gap-1.5">
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full"
+            style={{ background: isAllPaid ? "#10b981" : cfg.fg }}
+          />
+          {language === "es"
+            ? `${paidCount} pagado${paidCount === 1 ? "" : "s"} de ${total}`
+            : `${paidCount} paid of ${total}`}
         </p>
       </div>
     </motion.div>
