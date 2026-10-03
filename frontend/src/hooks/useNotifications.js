@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
+import { BACKEND_URL } from "@/lib/api";
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = BACKEND_URL;
 
 // Convert base64url to Uint8Array for VAPID key
 function urlBase64ToUint8Array(base64String) {

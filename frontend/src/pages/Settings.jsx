@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useSettings, CURRENCIES } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
-import { getAppSettings, updateAppSettings, getDbStats, testDbConnection, switchDatabase, resetDatabase, sendTestReminder, testEmailConnection, getBackupHistory, createServerBackup, deleteBackupFile, downloadBackupUrl, restoreBackup, getGithubConfig, saveGithubConfig, checkGithubUpdates, applyGithubUpdate } from "@/lib/api";
+import { getAppSettings, updateAppSettings, getDbStats, testDbConnection, switchDatabase, resetDatabase, sendTestReminder, testEmailConnection, getBackupHistory, createServerBackup, deleteBackupFile, downloadBackupUrl, restoreBackup, getGithubConfig, saveGithubConfig, checkGithubUpdates, applyGithubUpdate, BACKEND_URL } from "@/lib/api";
 import { celebrateUpdate } from "@/lib/celebrations";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Section, SectionSearchBar } from "@/components/appearance/SectionShell";
@@ -327,7 +327,7 @@ export default function Settings() {
 
   const loadGmailStatus = async () => {
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       const r = await fetch(`${API}/api/oauth/gmail/status`);
       if (r.ok) setGmailStatus(await r.json());
     } catch { /* noop */ }
@@ -336,7 +336,7 @@ export default function Settings() {
   const handleConnectGmail = async () => {
     setGmailBusy(true);
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       // First save credentials + settings so backend has them
       await updateAppSettings({
         google_client_id: notif.google_client_id,
@@ -356,7 +356,7 @@ export default function Settings() {
     if (!window.confirm("¿Desconectar Gmail? Los recordatorios ya no llegarán por este canal.")) return;
     setGmailBusy(true);
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       await fetch(`${API}/api/oauth/gmail/disconnect`, { method: "DELETE" });
       toast({ title: "Gmail desconectado" });
       await loadGmailStatus();
@@ -369,7 +369,7 @@ export default function Settings() {
     setGmailBusy(true);
     setGmailTestResult(null);
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       const r = await fetch(`${API}/api/oauth/gmail/test`, { method: "POST" });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || "Error al enviar prueba");
@@ -383,7 +383,7 @@ export default function Settings() {
     setWaVerifyBusy(true);
     setWaResult(null);
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       // Save first if user typed new credentials
       const payload = {};
       if (notif.whatsapp_access_token && !notif.whatsapp_access_token.includes("•")) payload.access_token = notif.whatsapp_access_token;
@@ -403,7 +403,7 @@ export default function Settings() {
     setWaTestBusy(true);
     setWaResult(null);
     try {
-      const API = process.env.REACT_APP_BACKEND_URL;
+      const API = BACKEND_URL;
       const payload = { recipient: notif.whatsapp_recipient };
       if (notif.whatsapp_access_token && !notif.whatsapp_access_token.includes("•")) payload.access_token = notif.whatsapp_access_token;
       if (notif.whatsapp_phone_number_id) payload.phone_number_id = notif.whatsapp_phone_number_id;
@@ -496,7 +496,7 @@ export default function Settings() {
 
   const handleExport = async (format) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/export/reservations?format=${format}`);
+      const response = await fetch(`${BACKEND_URL}/api/export/reservations?format=${format}`);
       if (!response.ok) throw new Error();
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -570,7 +570,7 @@ export default function Settings() {
   const handleTelegramTest = async () => {
     setTelegramTestLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/telegram/test`, { method: "POST" });
+      const res = await fetch(`${BACKEND_URL}/api/telegram/test`, { method: "POST" });
       const data = await res.json();
       if (data.ok) toast({ title: data.message || "Mensaje enviado a Telegram ✓" });
       else toast({ title: data.error || "Error al enviar a Telegram", variant: "destructive" });
@@ -584,7 +584,7 @@ export default function Settings() {
   const handleNtfyTest = async () => {
     setNtfyTestLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/ntfy/test`, { method: "POST" });
+      const res = await fetch(`${BACKEND_URL}/api/ntfy/test`, { method: "POST" });
       const data = await res.json();
       if (data.ok) toast({ title: data.message || "Notificación enviada vía ntfy ✓" });
       else toast({ title: data.error || "Error al enviar ntfy", variant: "destructive" });
@@ -688,7 +688,7 @@ export default function Settings() {
     }
     setImmediateLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/push/test`, { method: "POST" });
+      const res = await fetch(`${BACKEND_URL}/api/push/test`, { method: "POST" });
       const data = await res.json();
       if (data.ok) {
         toast({ title: language === "es" ? `Push enviado a ${data.sent_to} dispositivo(s) ✓` : `Push sent to ${data.sent_to} device(s) ✓` });
@@ -709,7 +709,7 @@ export default function Settings() {
   const handleClearAll = async () => {
     setClearLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/data/clear-all`, { method: "DELETE" });
+      const res = await fetch(`${BACKEND_URL}/api/data/clear-all`, { method: "DELETE" });
       const data = await res.json();
       setShowClearConfirm(false);
       toast({ title: `✓ Datos eliminados — ${data.deleted_reservations} reservas, ${data.deleted_socios} socios` });

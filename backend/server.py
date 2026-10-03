@@ -1395,11 +1395,19 @@ async def restore_backup(file: UploadFile = File(...)):
         if cname == "_meta" or not isinstance(docs, list):
             continue
         try:
-            # Remove serialized ids so MongoDB assigns fresh _id
             clean_docs = []
+            seen_ids = set()
             for d in docs:
-                d.pop("id", None)
+                if not isinstance(d, dict):
+                    continue
                 d.pop("_id", None)
+                old_id = d.pop("id", None)
+                # Conservar el _id original: las reservas referencian a los socios
+                # por id (assigned_partners[].socio_id) y app_settings.default_theme_id
+                # apunta a saved_themes. Con _id nuevos esas referencias se rompían.
+                if isinstance(old_id, str) and ObjectId.is_valid(old_id) and old_id not in seen_ids:
+                    seen_ids.add(old_id)
+                    d["_id"] = ObjectId(old_id)
                 clean_docs.append(d)
             await db[cname].delete_many({})
             if clean_docs:
@@ -6450,7 +6458,7 @@ async def run_diagnostic():
         })
 
     # 1) Dependencias Python críticas
-    critical_py = ["fastapi", "motor", "pymongo", "apscheduler", "bcrypt", "pyzipper", "requests"]
+    critical_py = ["fastapi", "motor", "pymongo", "apscheduler", "pyzipper", "httpx", "openpyxl"]
     missing_py = [p for p in critical_py if importlib.util.find_spec(p) is None]
     add("python_deps",
         f"Dependencias Python ({len(critical_py)} críticas)",

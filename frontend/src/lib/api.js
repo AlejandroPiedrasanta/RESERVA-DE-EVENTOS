@@ -1,6 +1,10 @@
 import axios from "axios";
 
-const BASE = `${window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL}/api`;
+// URL del backend. En la app de escritorio (.exe) el servidor inyecta
+// window.__API_BASE_URL__ (= mismo origen, http o https). Úsala SIEMPRE en
+// lugar de process.env.REACT_APP_BACKEND_URL, que queda horneada en el build.
+export const BACKEND_URL = window.__API_BASE_URL__ || process.env.REACT_APP_BACKEND_URL || "";
+const BASE = `${BACKEND_URL}/api`;
 
 // Timeout global (30s) para que si un endpoint tarda demasiado (ej. GitHub API
 // caído en la app de escritorio) el frontend no se quede colgado en spinners.

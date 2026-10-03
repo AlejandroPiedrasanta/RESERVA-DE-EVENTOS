@@ -35,14 +35,56 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 
-# ROOT_DIR: dónde vive el módulo (para .env, cinema_data.json, backups, etc.)
-ROOT_DIR = Path(__file__).parent
+def _user_data_dir() -> Path:
+    """Carpeta PERSISTENTE de datos del usuario para el ejecutable.
+
+    Windows: %LOCALAPPDATA%\\CinemaProductions  (misma carpeta que usa el instalador)
+    macOS:   ~/Library/Application Support/CinemaProductions
+    Linux:   ~/.local/share/CinemaProductions
+    Se puede forzar otra ruta con la variable de entorno CP_DATA_DIR.
+    """
+    override = os.environ.get("CP_DATA_DIR", "").strip()
+    if override:
+        base = Path(override).expanduser()
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "CinemaProductions"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "CinemaProductions"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "CinemaProductions"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
 
 # BUNDLE_DIR: dónde PyInstaller extrae los recursos --add-data (build/, themes/, ...).
-# En modo frozen (--onefile) es sys._MEIPASS (temp dir _MEI*). En dev = ROOT_DIR.
+# En modo frozen es sys._MEIPASS (--onefile: temp dir _MEI*; --onedir: _internal/).
+# ROOT_DIR: dónde se guardan los datos (.env, cinema_data.json, backups, etc.).
+#
+# BUGFIX pérdida de datos: antes ROOT_DIR = Path(__file__).parent, que en el
+# ejecutable congelado apunta a sys._MEIPASS. En el .exe portable (--onefile)
+# eso es una carpeta temporal que PyInstaller BORRA al cerrar la app, así que
+# cinema_data.json, los backups y la conexión a Mongo se perdían en cada cierre.
+# Ahora, congelado, los datos viven en una carpeta persistente del usuario.
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     BUNDLE_DIR = Path(sys._MEIPASS)
+    ROOT_DIR = _user_data_dir()
+    # Migración: instalaciones --onedir anteriores guardaban los datos dentro
+    # de _internal/ (sys._MEIPASS). Si existen y aún no hay datos en la nueva
+    # carpeta, se copian una sola vez para no perder nada al actualizar.
+    try:
+        import shutil as _mig_sh
+        for _name in ("cinema_data.json", ".db_override", ".env", "error_reports.log"):
+            _old, _new = BUNDLE_DIR / _name, ROOT_DIR / _name
+            if _old.is_file() and not _new.exists():
+                _mig_sh.copy2(_old, _new)
+        for _name in ("backups", "uploads"):
+            _old, _new = BUNDLE_DIR / _name, ROOT_DIR / _name
+            if _old.is_dir() and not _new.exists():
+                _mig_sh.copytree(_old, _new)
+    except Exception:
+        pass
 else:
+    ROOT_DIR = Path(__file__).parent
     BUNDLE_DIR = ROOT_DIR
 
 load_dotenv(ROOT_DIR / '.env')
@@ -197,18 +239,38 @@ async def _load_embedded_data():
         logger.info(f"Loaded {sum(len(v) for v in data.values())} docs from {DATA_FILE.name}")
     except Exception as e:
         logger.error(f"Failed to load saved data: {e}")
+        # No sobrescribir un archivo que no se pudo leer: se aparta para poder
+        # recuperarlo manualmente (el auto-guardado lo pisaría en 60 s).
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            DATA_FILE.rename(DATA_FILE.with_name(f"cinema_data.corrupt_{ts}.json"))
+        except Exception:
+            pass
+
+
+_EMBEDDED_COLLECTIONS = ['reservations', 'socios', 'app_settings', 'saved_themes', 'metas',
+                         'app_updates', 'error_reports']
 
 
 async def _save_embedded_data():
     try:
+        names = set(_EMBEDDED_COLLECTIONS)
+        try:
+            names.update(n for n in await db.list_collection_names() if not n.startswith("system."))
+        except Exception:
+            pass
         data = {}
-        for col_name in ['reservations', 'socios', 'app_settings', 'saved_themes', 'metas']:
+        for col_name in sorted(names):
             docs = await db[col_name].find({}).to_list(100000)
             data[col_name] = [_serialize_doc(d) for d in docs]
-        DATA_FILE.write_text(
+        # Escritura atómica: si el proceso muere a mitad de escritura (taskkill
+        # del instalador, apagado, etc.) cinema_data.json no queda truncado.
+        tmp = DATA_FILE.with_name(DATA_FILE.name + '.tmp')
+        tmp.write_text(
             json.dumps(data, ensure_ascii=False, indent=2, default=str),
             encoding='utf-8'
         )
+        os.replace(tmp, DATA_FILE)
         logger.info(f"Data saved → {DATA_FILE.name}")
     except Exception as e:
         logger.error(f"Failed to save data: {e}")
@@ -280,6 +342,10 @@ async def lifespan(app_instance: FastAPI):
         seeded_default_id = None
         seeded_default_snapshot = None
         themes_json_path = ROOT_DIR / "themes" / "saved_themes.json"
+        if not themes_json_path.exists():
+            # Primer arranque del .exe: el mirror local aún no existe en la
+            # carpeta de datos → usar el saved_themes.json empaquetado.
+            themes_json_path = BUNDLE_DIR / "themes" / "saved_themes.json"
         if themes_json_path.exists():
             try:
                 data = json.loads(themes_json_path.read_text(encoding="utf-8"))
@@ -920,6 +986,48 @@ async def test_db_connection(req: DBConnectRequest):
         raise HTTPException(status_code=400, detail=f"No se pudo conectar: {e}")
 
 
+@api_router.post("/settings/database/compare")
+async def compare_database(req: DBConnectRequest):
+    """Compara los conteos de documentos de la BD actual contra una BD destino
+    (nube) para indicar cuántos registros locales aún no se han subido.
+    Paridad con server.py: la página Base de Datos lo llama al abrirse."""
+    current_counts: dict = {}
+    for cname in await _all_collections():
+        try:
+            current_counts[cname] = await db[cname].count_documents({})
+        except Exception:
+            current_counts[cname] = 0
+    target_counts: dict = {}
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        target_client = AsyncIOMotorClient(req.url, serverSelectionTimeoutMS=5000)
+        try:
+            target_db = target_client[DB_NAME]
+            await target_db.command("ping")
+            for cname in await target_db.list_collection_names():
+                if cname.startswith("system."):
+                    continue
+                try:
+                    target_counts[cname] = await target_db[cname].count_documents({})
+                except Exception:
+                    target_counts[cname] = 0
+        finally:
+            target_client.close()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al comparar: {e}")
+    pending = {k: v - target_counts.get(k, 0) for k, v in current_counts.items() if v > target_counts.get(k, 0)}
+    pending_total = sum(pending.values())
+    return {
+        "current": current_counts,
+        "current_total": sum(current_counts.values()),
+        "target": target_counts,
+        "target_total": sum(target_counts.values()),
+        "pending_upload": pending,
+        "pending_total": pending_total,
+        "needs_sync": pending_total > 0,
+    }
+
+
 @api_router.post("/settings/database/connect")
 async def switch_database(req: DBConnectRequest):
     global db, client, _using_embedded
@@ -1154,9 +1262,18 @@ async def restore_backup(file: UploadFile = File(...)):
             continue
         try:
             clean_docs = []
+            seen_ids = set()
             for d in docs:
-                d.pop("id", None)
+                if not isinstance(d, dict):
+                    continue
                 d.pop("_id", None)
+                old_id = d.pop("id", None)
+                # Conservar el _id original: las reservas referencian a los socios
+                # por id (assigned_partners[].socio_id) y app_settings.default_theme_id
+                # apunta a saved_themes. Con _id nuevos esas referencias se rompían.
+                if isinstance(old_id, str) and ObjectId.is_valid(old_id) and old_id not in seen_ids:
+                    seen_ids.add(old_id)
+                    d["_id"] = ObjectId(old_id)
                 clean_docs.append(d)
             await db[cname].delete_many({})
             if clean_docs:
@@ -4998,11 +5115,15 @@ def _inject_local_url(html: str) -> str:
 
     # Eliminar script de posthog (bloquea la carga sin internet)
     import re as _re
+    # El patrón anterior solo reconocía el snippet minificado
+    # («!function(e,t){var r,s,o,i;t.__SV…»); el index.html actual lo trae sin
+    # minificar («!(function (t, e) {…»), así que PostHog seguía cargándose en
+    # el .exe. Ahora se elimina cualquier <script> que mencione posthog.
     html = _re.sub(
-        r'<script[^>]*>\s*!function\(e,t\)\{var r,s,o,i;t\.__SV.*?posthog\.init\([^)]+\)\s*</script>',
+        r'<script\b[^>]*>(?:(?!</script>).)*?posthog(?:(?!</script>).)*</script>',
         '<!-- analytics removed for offline use -->',
         html,
-        flags=_re.DOTALL,
+        flags=_re.DOTALL | _re.IGNORECASE,
     )
 
     # Inyectar URL local
@@ -5136,7 +5257,7 @@ if __name__ == "__main__":
     # En modo --windowed (frozen sin consola) sys.stdout puede ser None.
     # Redirigimos los prints a un log file para no crashear con AttributeError.
     if getattr(sys, "frozen", False) and (sys.stdout is None or not hasattr(sys.stdout, "write")):
-        _log_dir = ROOT_DIR / "logs" if not getattr(sys, "_MEIPASS", None) else Path.home() / "CinemaProductions" / "logs"
+        _log_dir = ROOT_DIR / "logs"
         try:
             _log_dir.mkdir(parents=True, exist_ok=True)
             _log_path = _log_dir / "cinema.log"
@@ -5270,7 +5391,11 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-    _uv_kwargs = dict(host="0.0.0.0", port=8001, log_level="warning", access_log=False)
+    # Solo localhost por defecto: la API no tiene autenticación y con 0.0.0.0
+    # quedaba expuesta a toda la red local (además de disparar el aviso del
+    # Firewall de Windows al primer arranque). CP_HOST=0.0.0.0 para abrirla a la LAN.
+    _uv_host = os.environ.get("CP_HOST", "").strip() or "127.0.0.1"
+    _uv_kwargs = dict(host=_uv_host, port=8001, log_level="warning", access_log=False)
     if _ssl_cert_file and _ssl_key_file:
         _uv_kwargs["ssl_certfile"] = _ssl_cert_file
         _uv_kwargs["ssl_keyfile"] = _ssl_key_file

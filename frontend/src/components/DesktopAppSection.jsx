@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
+import { BACKEND_URL } from "@/lib/api";
 import { Section } from "@/components/appearance/SectionShell";
 
 /**
@@ -48,7 +49,7 @@ export function DesktopAppSection() {
     setProgress(95);
     setMessage(language === "es" ? "Descargando el paquete .zip…" : "Downloading the .zip package…");
     try {
-      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package`);
+      const response = await fetch(`${BACKEND_URL}/api/download/package`);
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.detail || (language === "es" ? "Error al generar el paquete" : "Failed to build package"));
@@ -77,7 +78,7 @@ export function DesktopAppSection() {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/build-status`);
+        const res = await fetch(`${BACKEND_URL}/api/download/package/build-status`);
         const data = await res.json();
         // Escalamos progreso 0-100 del backend a 0-90 (10% reservado para descarga)
         const scaled = Math.min(90, Math.round((data.progress || 0) * 0.9));
@@ -105,7 +106,7 @@ export function DesktopAppSection() {
     setCurrentStep(1);
     setMessage(language === "es" ? "Iniciando compilación…" : "Starting build…");
     try {
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/package/rebuild`, { method: "POST" });
+      const res = await fetch(`${BACKEND_URL}/api/download/package/rebuild`, { method: "POST" });
       const data = await res.json();
       if (data.status === "building") {
         toast({ title: language === "es" ? "Compilando app… espera 1–3 minutos" : "Building app… wait 1–3 min" });
@@ -148,8 +149,8 @@ export function DesktopAppSection() {
         setExePhase("loading");
         setInstallerPhase("loading");
         const [r1, r2] = await Promise.all([
-          fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-exe/info`),
-          fetch(`${process.env.REACT_APP_BACKEND_URL}/api/download/desktop-installer/info`),
+          fetch(`${BACKEND_URL}/api/download/desktop-exe/info`),
+          fetch(`${BACKEND_URL}/api/download/desktop-installer/info`),
         ]);
         setExeInfo(await r1.json());
         setInstallerInfo(await r2.json());
