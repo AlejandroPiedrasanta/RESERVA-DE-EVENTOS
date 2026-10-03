@@ -1,0 +1,32 @@
+# Entorno de desarrollo en Emergent: dependencias de ejecución + paquetes
+# internos de Emergent (NO están en PyPI) + herramientas de desarrollo.
+#     pip install -r backend/requirements-emergent.txt
+# Fuera de Emergent usa solo requirements.txt.
+-r requirements.txt
+
+# Paquetes internos de Emergent (no los usa el código de la app)
+emergentintegrations==0.1.0
+litellm @ https://customer-assets.emergentagent.com/internal-asset/library/litellm-1.80.0-py3-none-any.whl#sha256=adf398c513273de9341f61822296c6b2145f7f2dc4a69daf3ac04829f5bde3f8
+
+# Pruebas y calidad de código
+pytest==9.1.1
+pytest-xdist==3.8.0
+requests==2.34.2
+black==26.5.1
+flake8==7.4.1
+isort==9.0.2
+mypy==2.4.0
+pipdeptree==4.2.5
+
+# Utilidades de la plantilla Emergent (no las usa el código de la app)
+boto3==1.43.108
+PyJWT==2.15.1
+python-jose==3.5.0
+passlib==1.7.4
+# passlib 1.7.4 no es compatible con bcrypt 5.x
+bcrypt>=4.1,<5
+email-validator==2.3.0
+requests-oauthlib==2.0.0
+typer==0.27.2
+jq==1.11.0
+s5cmd==0.3.3

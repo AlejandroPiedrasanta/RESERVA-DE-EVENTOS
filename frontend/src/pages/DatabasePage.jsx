@@ -9,12 +9,13 @@ import {
   Play, Square, RotateCcw, Folder, FileSpreadsheet, Plus,
   Star, Bookmark, ChevronDown, Sparkles, Scissors,
   Network, Server, ToggleLeft, ToggleRight, Package, Globe, MonitorSpeaker,
-  Github, BookOpen, Copy, Brain, Key, Eye, EyeOff,
+  BookOpen, Copy, Brain, Key, Eye, EyeOff,
   Stethoscope, Wrench, ShieldAlert, LogIn, LogOut, UserCheck, ExternalLink, GitCommit,
   Lock, LifeBuoy, Cloud, Laptop, CloudUpload, FileCheck2, Info, ListChecks,
   GitCompare, FilePlus2, FilePenLine, FileMinus2,
   Users, UserX, Ban, Crown, Gift, CreditCard, KeyRound,
 } from "lucide-react";
+import { Github } from "@/components/icons/Github";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";

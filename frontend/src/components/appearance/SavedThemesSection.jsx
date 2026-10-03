@@ -2,8 +2,9 @@ import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Bookmark, Save, Trash2, Play, RotateCcw, Cloud, CloudOff, Loader2,
-  CheckCircle2, RefreshCw, Star, Github, Database, HardDrive,
+  CheckCircle2, RefreshCw, Star, Database, HardDrive,
 } from "lucide-react";
+import { Github } from "@/components/icons/Github";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {

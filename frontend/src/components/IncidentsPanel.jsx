@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  ShieldAlert, RefreshCw, CheckCircle2, Trash2, ExternalLink, Github, Loader2, Inbox,
+  ShieldAlert, RefreshCw, CheckCircle2, Trash2, ExternalLink, Loader2, Inbox,
 } from "lucide-react";
+import { Github } from "@/components/icons/Github";
 import { Section } from "@/components/appearance/SectionShell";
 import { useToast } from "@/hooks/use-toast";
 import {

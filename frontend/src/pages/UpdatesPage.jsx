@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, Trash2, Download, Star, RefreshCw, Package,
   Clock, FileArchive, ArrowRight, Monitor, Cloud, CheckCircle2, Database, Globe, Sparkles,
-  Github, GitBranch, GitCommit, ArrowDownCircle, AlertTriangle, Loader2, ExternalLink
+  GitBranch, GitCommit, ArrowDownCircle, AlertTriangle, Loader2, ExternalLink
 } from "lucide-react";
+import { Github } from "@/components/icons/Github";
 import { useToast } from "@/hooks/use-toast";
 import { useSettings } from "@/context/SettingsContext";
 import { getUpdatesHistory, uploadAppUpdate, deleteUpdate, setLatestUpdate, getUpdateDownloadUrl, checkForUpdates,
