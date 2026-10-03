@@ -401,6 +401,34 @@ jobs:
             dist/CinemaProductions-Setup.exe.sha256
           retention-days: 14
 
+      # Paquete completo: ejecutables + código fuente del mismo commit + LEEME,
+      # en un solo artefacto descargable (CinemaProductions-completo.zip).
+      - name: Armar paquete completo (exe + código fuente)
+        shell: pwsh
+        run: |
+          $pkg = "paquete/CinemaProductions"
+          New-Item -ItemType Directory -Force -Path "$pkg/Ejecutable" | Out-Null
+          Copy-Item dist/CinemaProductions.exe, dist/CinemaProductions.exe.sha256, `
+                    dist/CinemaProductions-Setup.exe, dist/CinemaProductions-Setup.exe.sha256 `
+                    -Destination "$pkg/Ejecutable/"
+          # Sin el caché node_modules.tar.gz (47 MB): `yarn install` lo regenera.
+          git archive --format=zip --prefix=CodigoFuente/ -o paquete/fuente.zip HEAD -- . ':(exclude)frontend/node_modules.tar.gz'
+          if ($LASTEXITCODE -ne 0) { throw "git archive falló con exit $LASTEXITCODE" }
+          Expand-Archive paquete/fuente.zip -DestinationPath $pkg
+          Remove-Item paquete/fuente.zip
+          # version.txt del runner (puede venir sobreescrito por app_version).
+          Copy-Item version.txt "$pkg/CodigoFuente/version.txt" -Force
+          Copy-Item docs/LEEME-PAQUETE.txt "$pkg/LEEME.txt"
+          if (-not (Test-Path "$pkg/CodigoFuente/scripts/build_exe.py")) { throw "El paquete no contiene el código fuente" }
+          Get-ChildItem $pkg, "$pkg/Ejecutable" | Select-Object FullName, Length
+
+      - name: Subir paquete completo como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: CinemaProductions-completo
+          path: paquete/
+          retention-days: 14
+
       - name: Determine release tag
         id: tag
         shell: bash

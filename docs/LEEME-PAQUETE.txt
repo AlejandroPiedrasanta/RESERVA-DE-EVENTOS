@@ -1,0 +1,90 @@
+CINEMA PRODUCTIONS — PAQUETE COMPLETO
+=====================================
+
+Contenido
+---------
+  Ejecutable\
+    CinemaProductions.exe         App portable: doble clic y listo, no instala nada.
+    CinemaProductions-Setup.exe   Instalador (acceso directo en el escritorio,
+                                  menú Inicio y desinstalador).
+    *.sha256                      Sumas para verificar que los archivos están íntegros.
+  CodigoFuente\                   Proyecto completo para seguir editándolo.
+
+
+1. USAR LA APP
+--------------
+  Doble clic en Ejecutable\CinemaProductions.exe. Se abre el navegador en
+  https://localhost:8001.
+
+  · La primera vez el navegador avisa del certificado local: pulsa
+    "Configuración avanzada → Continuar a localhost". Es normal: el certificado
+    lo genera la propia app en tu PC.
+  · Si Windows SmartScreen avisa: "Más información → Ejecutar de todos modos".
+  · Tus datos se guardan en %LocalAppData%\CinemaProductions
+    (cinema_data.json, backups\, logs\). Copia esa carpeta para respaldarlos.
+  · Para cerrar la app: Administrador de tareas → CinemaProductions → Finalizar.
+
+
+2. EDITAR EL PROYECTO
+---------------------
+  Requisitos (una sola vez):
+    · Python 3.11 o superior   https://www.python.org/downloads/
+      (marca "Add python.exe to PATH" al instalar)
+    · Node.js 22 o superior    https://nodejs.org/
+    · Yarn:                    npm install -g yarn
+
+  Los comandos de abajo son para "Símbolo del sistema" (cmd), no PowerShell.
+  Para abrirlo en la carpeta: escribe cmd en la barra de direcciones del
+  Explorador estando dentro de CodigoFuente y pulsa Enter.
+
+  Instalar dependencias (una sola vez):
+
+    pip install -r backend\requirements.txt
+    cd frontend
+    yarn install
+    cd ..
+
+  Probar mientras editas (dos terminales):
+
+    Terminal 1 — servidor (API en http://localhost:8001):
+      set CP_DISABLE_SSL=1
+      python backend\standalone_app.py
+
+    Terminal 2 — interfaz con recarga automática (http://localhost:3000):
+      cd frontend
+      echo REACT_APP_BACKEND_URL=http://localhost:8001> .env
+      yarn dev
+
+  Abre http://localhost:3000: cada vez que guardes un archivo de frontend\src\
+  la página se actualiza sola. Si cambias algo de backend\, reinicia la
+  terminal 1 (Ctrl+C y vuelve a ejecutar el comando).
+  Al ejecutar desde el código, los datos de prueba se guardan en
+  backend\cinema_data.json (no se suben a git).
+
+
+3. VOLVER A GENERAR EL .EXE
+---------------------------
+  En Windows, dentro de CodigoFuente:
+
+    pip install pyinstaller
+    python scripts\build_exe.py
+
+  Resultado: dist\CinemaProductions.exe (un solo archivo con todo incluido).
+  Opciones: python scripts\build_exe.py --help
+  El instalador (Setup.exe) necesita Inno Setup 6; los pasos están en README.md,
+  sección "Compilar el .exe manualmente".
+
+  También puedes subir tus cambios a GitHub: el workflow "Build Windows .exe"
+  compila el .exe y el instalador automáticamente.
+
+
+4. DÓNDE ESTÁ CADA COSA
+-----------------------
+  backend\standalone_app.py   Servidor de la app de escritorio (lo que va en el .exe)
+  backend\server.py           Versión web (FastAPI + MongoDB)
+  frontend\src\pages\         Páginas: Panel, Calendario, Socios, Ajustes, ...
+  frontend\src\components\    Componentes reutilizables de la interfaz
+  frontend\src\lib\api.js     Todas las llamadas de la interfaz al servidor
+  scripts\build_exe.py        Compila el .exe
+  installer.iss               Script del instalador (Inno Setup 6)
+  README.md, ARCHITECTURE.md  Documentación completa del proyecto

@@ -102,3 +102,9 @@ frontend/node_modules/.cache/default-development/4.pack
 
 # Payload temporal de scripts/build_exe.py
 backend/_bundle/
+
+# Datos locales de la app de escritorio al ejecutarla desde el código fuente
+cinema_data.json
+cinema_data.json.tmp
+cinema_data.corrupt_*.json
+error_reports.log

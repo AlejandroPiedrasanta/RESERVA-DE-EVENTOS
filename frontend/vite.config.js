@@ -9,6 +9,15 @@ import path from "path";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname), "");
   const backendUrl = env.REACT_APP_BACKEND_URL || "";
+  // El preview de Emergent sirve el dev server por HTTPS en el puerto 443, así
+  // que el websocket de HMR debe salir por ahí. En un PC local (backend en
+  // http://localhost) eso rompía la recarga en caliente: se usa el puerto propio.
+  const behindHttpsPreview =
+    Boolean(env.WDS_SOCKET_PORT) ||
+    (/^https:\/\//.test(backendUrl) && !/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(backendUrl));
+  const hmr = behindHttpsPreview
+    ? { clientPort: Number(env.WDS_SOCKET_PORT) || 443, protocol: "wss" }
+    : undefined;
 
   return {
     plugins: [react()],
@@ -29,10 +38,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       // Preview is served over HTTPS on 443 and proxied to :3000.
       allowedHosts: true,
-      hmr: {
-        clientPort: 443,
-        protocol: "wss",
-      },
+      hmr,
       watch: {
         usePolling: true,
         interval: 1000,
