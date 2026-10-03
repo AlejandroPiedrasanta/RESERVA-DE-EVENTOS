@@ -4730,7 +4730,11 @@ async def diagnostic_fix(payload: dict = Body(...)):
     fixed = False
     detail = ""
 
-    if check_id == "python_deps":
+    if check_id == "python_deps" and getattr(sys, "frozen", False):
+        # En el .exe las librerías van empaquetadas y sys.executable es el propio
+        # .exe: «-m pip» lanzaría OTRA instancia de la app en vez de pip.
+        detail = "El ejecutable ya incluye todas las librerías; reinstala la app si falta alguna."
+    elif check_id == "python_deps":
         # Instalación robusta: usa el intérprete actual (pip como módulo, no del PATH),
         # prioriza las wheels OFFLINE de libs/ (-r requirements.txt) y cae a online.
         import importlib.util, sys as _sys

@@ -99,3 +99,6 @@ backend/backups/
 frontend/node_modules/.cache/default-development/5.pack
 frontend/node_modules/.cache/default-development/6.pack_
 frontend/node_modules/.cache/default-development/4.pack
+
+# Payload temporal de scripts/build_exe.py
+backend/_bundle/

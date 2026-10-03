@@ -199,7 +199,7 @@ Consulta [`ARCHITECTURE.md`](./ARCHITECTURE.md) para el detalle técnico.
 ### Requisitos
 
 - Python **3.11+**
-- Node.js **20+** y Yarn **1.22+**
+- Node.js **22+** y Yarn **1.22+**
 - MongoDB (local o Atlas)
 
 ### Backend
@@ -233,53 +233,43 @@ yarn start           # abre http://localhost:3000
 
 ## 🔨 Compilar el .exe manualmente
 
-> Solo Windows (o una VM/GitHub Actions con `windows-latest`).
+> PyInstaller no compila de forma cruzada: el `.exe` se genera en **Windows** (o con GitHub Actions).
+> En Linux/macOS el mismo comando produce el binario nativo de esa plataforma.
+
+Requisitos: Python 3.11+, Node.js 22+ y Yarn 1.22.
 
 ```powershell
-# 1. Dependencias
-python -m pip install --upgrade pip
-pip install -r backend\requirements.txt
-pip install "pyinstaller>=6.10,<7" pillow
+pip install -r backend\requirements.txt pyinstaller
+python scripts\build_exe.py
+```
 
-# 2. Frontend production build (apuntando al servidor local embebido)
-cd frontend
-$env:REACT_APP_BACKEND_URL="http://127.0.0.1:8001"
-$env:CI="false"
-yarn install --frozen-lockfile
-yarn build
-cd ..
+Eso es todo: el script compila el frontend, prepara el payload (UI, temas, `version.txt`, contexto IA) y
+llama a PyInstaller con todas las opciones necesarias. Resultado: **`dist\CinemaProductions.exe`**, un solo
+archivo que incluye Python, todas las librerías y la interfaz — no hace falta instalar nada más.
 
-# 3. Preparar payload
-New-Item -ItemType Directory -Force -Path backend\_bundle | Out-Null
-Copy-Item -Recurse -Force frontend\build backend\_bundle\build
-Copy-Item backend\ai_context_default.py backend\_bundle\
-Copy-Item version.txt                    backend\_bundle\
-New-Item -ItemType Directory -Force -Path backend\_bundle\themes | Out-Null
-Copy-Item themes\saved_themes.json       backend\_bundle\themes\
+Opciones útiles: `--onedir` (carpeta exe + `_internal\`, la que usa el instalador), `--skip-frontend`
+(reutiliza `frontend\build`), `--console` (muestra la consola para depurar). Ver `python scripts\build_exe.py --help`.
 
-# 4. Icono
-python -c "from PIL import Image; im=Image.open('frontend/public/logo.png').convert('RGBA'); w,h=im.size; s=max(w,h); c=Image.new('RGBA',(s,s),(0,0,0,0)); c.paste(im,((s-w)//2,(s-h)//2)); c.save('frontend/public/favicon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+Instalador (opcional, requiere [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
 
-# 5. PyInstaller
-pyinstaller --onefile --name CinemaProductions `
-  --icon frontend\public\favicon.ico `
-  --add-data "backend\_bundle\build;build" `
-  --add-data "backend\_bundle\ai_context_default.py;." `
-  --add-data "backend\_bundle\version.txt;." `
-  --add-data "backend\_bundle\themes;themes" `
-  --hidden-import motor.motor_asyncio --hidden-import pymongo --hidden-import bson `
-  --hidden-import apscheduler.schedulers.asyncio `
-  --hidden-import apscheduler.triggers.cron --hidden-import apscheduler.triggers.interval `
-  --hidden-import pywebpush --hidden-import PIL `
-  --collect-submodules uvicorn --collect-submodules fastapi `
-  backend\standalone_app.py
-
-# 6. Instalador (opcional, requiere Inno Setup 6)
-Copy-Item build\installer.iss dist\installer.iss
+```powershell
+python scripts\build_exe.py --skip-frontend --onedir --distpath dist_app
+Copy-Item -Recurse dist_app\CinemaProductions dist\app
+Copy-Item installer.iss, frontend\public\favicon.ico, installer_assets\*.bmp dist\
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.0.0 dist\installer.iss
 ```
 
-El artefacto quedará en `dist\CinemaProductions.exe` y `dist\CinemaProductions-Setup.exe`.
+### Dónde guarda los datos el ejecutable
+
+| Sistema | Carpeta |
+|---|---|
+| Windows | `%LocalAppData%\CinemaProductions\` |
+| macOS | `~/Library/Application Support/CinemaProductions/` |
+| Linux | `~/.local/share/CinemaProductions/` |
+
+Ahí quedan `cinema_data.json`, `backups\`, la conexión a MongoDB y el certificado SSL local.
+Variables opcionales: `CP_DATA_DIR` (otra carpeta de datos), `CP_HOST=0.0.0.0` (abrir la app a la red local;
+por defecto solo escucha en `127.0.0.1`), `CP_DISABLE_SSL=1` (servir por HTTP).
 
 ---
 
@@ -291,12 +281,13 @@ El workflow [`.github/workflows/build-exe.yml`](./.github/workflows/build-exe.ym
 
 | Disparador | Efecto |
 |---|---|
+| Ejecución manual con `publish = false` | Compila todo y deja los binarios como **artefactos** descargables del workflow, sin crear ni tocar ninguna release. |
 | `git push` de un tag `v*` (ej. `v1.2.0`) | Compila y crea/actualiza la release **`v1.2.0`** (definitiva). |
 | Ejecución manual (**Actions → Build Windows .exe → Run workflow**) | Compila y crea/actualiza la release **`latest-exe`** (prerelease). |
 
 ### Requisitos previos en el repo
 
-- `build/installer.iss` (incluido) — script de Inno Setup.
+- `installer.iss` (incluido, en la raíz) — script de Inno Setup.
 - `.github/workflows/refresh-deps.yml` mantiene el caché de dependencias frescas.
 - Permiso de escritura del workflow (`permissions: contents: write`, ya configurado).
 
@@ -351,28 +342,24 @@ Para builds intermedios sin tag: **Actions → Build Windows .exe → Run workfl
 
 ## 🧯 Solución de problemas
 
-### El workflow `Build Windows .exe` falla con *"No existe build/installer.iss en el repo"*
+### El workflow `Build Windows .exe` falla con *"No existe installer.iss en la raiz del repo"*
 
-Este error ocurría en versiones anteriores del workflow. Ya está resuelto: `build/installer.iss` está incluido. Si aparece:
+El script de Inno Setup vive en la raíz del repo (`installer.iss`). Si aparece:
 
 ```bash
 git pull origin main   # asegúrate de tener la última versión
-ls build/installer.iss # debe existir
+ls installer.iss       # debe existir
 ```
 
 ### El .exe se cierra al abrir en Windows
 
-Ejecútalo desde `cmd` para ver el log:
-
-```powershell
-cd %LocalAppData%\CinemaProductions
-CinemaProductions.exe
-```
+El `.exe` no muestra consola; su log queda en `%LocalAppData%\CinemaProductions\logs\cinema.log`
+(y, si el servidor no arrancó, en `%LocalAppData%\CinemaProductions\error_log.txt`).
 
 Causas comunes:
 
 - **Puerto 8001 ocupado**: cierra la instancia previa (`taskkill /IM CinemaProductions.exe /F`) o cambia el puerto en `standalone_app.py`.
-- **MongoDB no accesible**: la variante desktop usa una BD embebida en `%LocalAppData%\CinemaProductions\db`. Bórrala si se corrompió.
+- **Datos dañados**: la BD embebida es `%LocalAppData%\CinemaProductions\cinema_data.json`. Si no se puede leer, la app la renombra a `cinema_data.corrupt_<fecha>.json` y arranca vacía; puedes restaurar un respaldo de `backups\`.
 - **Antivirus** bloqueando el `.exe`: añádelo a exclusiones.
 
 ### SmartScreen bloquea la instalación

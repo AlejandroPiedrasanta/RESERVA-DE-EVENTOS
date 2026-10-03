@@ -27,6 +27,10 @@ on:
         description: 'Versión a embeber en los binarios (override de version.txt SOLO en el runner)'
         required: false
         default: ''
+      publish:
+        description: '¿Publicar en una Release? (false = solo artefactos descargables del workflow)'
+        required: false
+        default: 'true'
   workflow_call:
     inputs:
       release_tag:
@@ -46,6 +50,10 @@ on:
         type: string
         required: false
         default: ''
+      publish:
+        type: string
+        required: false
+        default: 'true'
 
 permissions:
   contents: write
@@ -90,7 +98,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
           cache-dependency-path: frontend/yarn.lock
 
@@ -98,17 +106,9 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          # emergentintegrations is an Emergent-internal package (not on PyPI).
-          # Strip it out for the Windows build — it's only used by the LLM
-          # integration path which is not exercised in the .exe runtime.
-          # Quitamos paquetes que (a) no se usan en el runtime del binario y
-          # (b) rompen o ralentizan el build fuera de Emergent:
-          #   · emergentintegrations → paquete interno (no está en PyPI)
-          #   · litellm              → wheel interno de Emergent (URL privada)
-          #   · jq                   → extensión C sin wheel fiable en Windows
-          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
-          pip install -r /tmp/req.txt
-          pip install "pyinstaller>=6.10,<7" pillow
+          # requirements.txt solo trae paquetes públicos de PyPI (los internos de
+          # Emergent viven en requirements-emergent.txt), así que se instala tal cual.
+          pip install -r backend/requirements.txt "pyinstaller>=6.10,<7"
 
       - name: Install & build frontend
         working-directory: frontend
@@ -129,92 +129,23 @@ jobs:
           if (-not (Test-Path "frontend/public/favicon.ico")) { throw "No se pudo generar favicon.ico" }
           Write-Host "✓ favicon.ico generado"
 
-      - name: Prepare bundle payload
-        shell: pwsh
-        run: |
-          # Copiar el build del frontend al lado del standalone_app para que PyInstaller lo empaquete
-          if (-not (Test-Path frontend/build/index.html)) {
-            throw "❌ frontend/build/index.html no existe. ¿Falló 'yarn build'?"
-          }
-          New-Item -ItemType Directory -Force -Path backend/_bundle | Out-Null
-          # Copy-Item con /* copia el CONTENIDO, no la carpeta. Usamos rm previo + copia entera.
-          if (Test-Path backend/_bundle/build) { Remove-Item -Recurse -Force backend/_bundle/build }
-          Copy-Item -Recurse -Force frontend/build backend/_bundle/build
-          if (-not (Test-Path backend/_bundle/build/index.html)) {
-            throw "❌ backend/_bundle/build/index.html no existe tras la copia."
-          }
-          Write-Host "✓ Payload preparado. Contenido de backend/_bundle/build:"
-          Get-ChildItem backend/_bundle/build | Select-Object -First 20 Name, Length
-          # Copiar assets extra que espera el runtime (ai_context, versión, temas)
-          if (Test-Path backend/ai_context_default.py) { Copy-Item backend/ai_context_default.py backend/_bundle/ }
-          if (Test-Path version.txt) { Copy-Item version.txt backend/_bundle/ }
-          if (Test-Path themes/saved_themes.json) {
-            New-Item -ItemType Directory -Force -Path backend/_bundle/themes | Out-Null
-            Copy-Item themes/saved_themes.json backend/_bundle/themes/
-          }
-
       - name: Build .exe with PyInstaller (onefile portable + onedir para instalador)
         shell: pwsh
         run: |
-          $iconArg = @()
-          if (Test-Path frontend/public/favicon.ico) {
-            $iconArg = @("--icon", "frontend/public/favicon.ico")
-            Write-Host "✓ Usando favicon.ico"
-          } else {
-            Write-Host "⚠ favicon.ico no existe — construyendo sin icono personalizado"
-          }
-          # Args comunes a ambos modos (onefile y onedir).
-          $commonArgs = @(
-            "--windowed",
-            "--noconfirm",
-            "--name", "CinemaProductions",
-            "--add-data", "backend/_bundle/build;build",
-            "--add-data", "backend/_bundle/ai_context_default.py;.",
-            "--add-data", "backend/_bundle/version.txt;.",
-            "--add-data", "backend/_bundle/themes;themes",
-            "--hidden-import", "motor.motor_asyncio",
-            "--hidden-import", "pymongo",
-            "--hidden-import", "pymongo.srv_resolver",
-            "--hidden-import", "bson",
-            "--hidden-import", "dns",
-            "--hidden-import", "dns.resolver",
-            "--hidden-import", "dns.asyncresolver",
-            "--collect-submodules", "dns",
-            "--collect-submodules", "pymongo",
-            "--hidden-import", "ssl_bootstrap",
-            "--hidden-import", "openpyxl",
-            "--hidden-import", "apscheduler.schedulers.asyncio",
-            "--hidden-import", "apscheduler.triggers.cron",
-            "--hidden-import", "apscheduler.triggers.interval",
-            "--hidden-import", "pywebpush",
-            "--hidden-import", "PIL",
-            "--hidden-import", "certifi",
-            "--collect-data", "certifi",
-            "--collect-submodules", "uvicorn",
-            "--collect-submodules", "fastapi",
-            "--collect-submodules", "openpyxl",
-            "--collect-submodules", "cryptography",
-            "--collect-submodules", "mongomock_motor",
-            "--collect-submodules", "mongomock",
-            "--exclude-module", "tkinter",
-            "--exclude-module", "matplotlib"
-          ) + $iconArg + @("backend/standalone_app.py")
-
+          # scripts/build_exe.py arma el payload (build/, temas, version.txt,
+          # ai_context) y llama a PyInstaller con las MISMAS opciones en todas las
+          # plataformas. Usa frontend/public/favicon.ico como ícono en Windows.
           # (1) PORTABLE: --onefile → dist/CinemaProductions.exe (un solo archivo).
           Write-Host "→ Build onefile (portable)..."
-          pyinstaller --onefile @commonArgs
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onefile) falló con exit $LASTEXITCODE" }
-          if (-not (Test-Path "dist/CinemaProductions.exe")) { throw "onefile no generó dist/CinemaProductions.exe" }
+          python scripts/build_exe.py --skip-frontend --workpath build_onefile
+          if ($LASTEXITCODE -ne 0) { throw "build_exe.py (onefile) falló con exit $LASTEXITCODE" }
 
           # (2) INSTALADOR: --onedir → dist_app/CinemaProductions/ (carpeta con
           #     _internal/). Arranca instantáneo (sin descomprimir a %TEMP%) y sin
           #     el warning 'Failed to remove temporary directory _MEIxxx'.
           Write-Host "→ Build onedir (para instalador)..."
-          pyinstaller --onedir --distpath dist_app --workpath build_app @commonArgs
-          if ($LASTEXITCODE -ne 0) { throw "PyInstaller (onedir) falló con exit $LASTEXITCODE" }
-          if (-not (Test-Path "dist_app/CinemaProductions/CinemaProductions.exe")) {
-            throw "onedir no generó dist_app/CinemaProductions/CinemaProductions.exe"
-          }
+          python scripts/build_exe.py --skip-frontend --onedir --distpath dist_app --workpath build_app
+          if ($LASTEXITCODE -ne 0) { throw "build_exe.py (onedir) falló con exit $LASTEXITCODE" }
           Write-Host "✓ onefile + onedir generados"
 
       - name: Smoke test .exe (verify build/index.html is bundled + HTTPS works)
@@ -257,9 +188,23 @@ jobs:
             if ($ok) { break }
             Start-Sleep -Milliseconds 500
           }
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-          if (-not $ok) { throw "❌ Smoke test (b): el .exe no respondió en https://127.0.0.1:8001/api/ (ni http)" }
+          if (-not $ok) {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            throw "❌ Smoke test (b): el .exe no respondió en https://127.0.0.1:8001/api/ (ni http)"
+          }
           Write-Host "✓ (b) /api/ respondió 200 en $scheme — arranque OK sin consola"
+
+          # (c) Los datos deben guardarse en %LOCALAPPDATA%\CinemaProductions y NO
+          #     dentro de _MEI* (carpeta temporal que se borra al cerrar el .exe).
+          $dataFile = Join-Path $env:LOCALAPPDATA "CinemaProductions\cinema_data.json"
+          $found = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            if (Test-Path $dataFile) { $found = $true; break }
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          if (-not $found) { throw "❌ Smoke test (c): no se creó $dataFile (los datos no son persistentes)" }
+          Write-Host "✓ (c) datos persistentes en $dataFile"
 
       - name: Firmar .exe (certificado auto-firmado, uso interno)
         shell: pwsh
@@ -445,6 +390,17 @@ jobs:
           "sha256=$sha" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
           "size_mb=$([math]::Round($size,2))" | Out-File -Encoding ascii -Append $env:GITHUB_OUTPUT
 
+      - name: Subir binarios como artefacto del workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: CinemaProductions-windows
+          path: |
+            dist/CinemaProductions.exe
+            dist/CinemaProductions.exe.sha256
+            dist/CinemaProductions-Setup.exe
+            dist/CinemaProductions-Setup.exe.sha256
+          retention-days: 14
+
       - name: Determine release tag
         id: tag
         shell: bash
@@ -460,6 +416,7 @@ jobs:
           fi
 
       - name: Publish release
+        if: ${{ inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -522,21 +479,16 @@ jobs:
           cache: 'pip'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
           cache-dependency-path: frontend/yarn.lock
 
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          # Quitamos paquetes que (a) no se usan en el runtime del binario y
-          # (b) rompen o ralentizan el build fuera de Emergent:
-          #   · emergentintegrations → paquete interno (no está en PyPI)
-          #   · litellm              → wheel interno de Emergent (URL privada)
-          #   · jq                   → extensión C sin wheel fiable en Windows
-          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
-          pip install -r /tmp/req.txt
-          pip install "pyinstaller>=6.10,<7" pillow
+          # requirements.txt solo trae paquetes públicos de PyPI (los internos de
+          # Emergent viven en requirements-emergent.txt), así que se instala tal cual.
+          pip install -r backend/requirements.txt "pyinstaller>=6.10,<7"
 
       - name: Build frontend
         working-directory: frontend
@@ -547,45 +499,9 @@ jobs:
           yarn install --frozen-lockfile
           yarn build
 
-      - name: Prepare bundle payload
-        run: |
-          mkdir -p backend/_bundle
-          cp -r frontend/build backend/_bundle/build
-          [ -f backend/ai_context_default.py ] && cp backend/ai_context_default.py backend/_bundle/
-          [ -f version.txt ] && cp version.txt backend/_bundle/
-          if [ -f themes/saved_themes.json ]; then
-            mkdir -p backend/_bundle/themes
-            cp themes/saved_themes.json backend/_bundle/themes/
-          fi
-
       - name: Build binary with PyInstaller
-        run: |
-          pyinstaller \
-            --onefile \
-            --name CinemaProductions-linux-x86_64 \
-            --add-data "backend/_bundle/build:build" \
-            --add-data "backend/_bundle/ai_context_default.py:." \
-            --add-data "backend/_bundle/version.txt:." \
-            --add-data "backend/_bundle/themes:themes" \
-            --hidden-import motor.motor_asyncio \
-            --hidden-import pymongo \
-            --hidden-import bson \
-            --hidden-import ssl_bootstrap \
-            --hidden-import openpyxl \
-            --hidden-import apscheduler.schedulers.asyncio \
-            --hidden-import apscheduler.triggers.cron \
-            --hidden-import apscheduler.triggers.interval \
-            --hidden-import pywebpush \
-            --hidden-import PIL \
-            --collect-submodules uvicorn \
-            --collect-submodules fastapi \
-            --collect-submodules openpyxl \
-            --collect-submodules cryptography \
-            --collect-submodules mongomock_motor \
-            --collect-submodules mongomock \
-            --exclude-module tkinter \
-            --exclude-module matplotlib \
-            backend/standalone_app.py
+        # Mismas opciones que el .exe de Windows (scripts/build_exe.py).
+        run: python scripts/build_exe.py --skip-frontend --name CinemaProductions-linux-x86_64
 
       - name: Compute SHA256
         id: hash
@@ -599,6 +515,15 @@ jobs:
           echo "sha256=$SHA" >> $GITHUB_OUTPUT
           echo "size_mb=$SIZE" >> $GITHUB_OUTPUT
 
+      - name: Subir binario como artefacto del workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: CinemaProductions-linux-x86_64
+          path: |
+            dist/CinemaProductions-linux-x86_64
+            dist/CinemaProductions-linux-x86_64.sha256
+          retention-days: 14
+
       - name: Determine release tag
         id: tag
         run: |
@@ -611,6 +536,7 @@ jobs:
           fi
 
       - name: Publish to release
+        if: ${{ inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -656,21 +582,16 @@ jobs:
           cache: 'pip'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
           cache-dependency-path: frontend/yarn.lock
 
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          # Quitamos paquetes que (a) no se usan en el runtime del binario y
-          # (b) rompen o ralentizan el build fuera de Emergent:
-          #   · emergentintegrations → paquete interno (no está en PyPI)
-          #   · litellm              → wheel interno de Emergent (URL privada)
-          #   · jq                   → extensión C sin wheel fiable en Windows
-          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
-          pip install -r /tmp/req.txt
-          pip install "pyinstaller>=6.10,<7" pillow
+          # requirements.txt solo trae paquetes públicos de PyPI (los internos de
+          # Emergent viven en requirements-emergent.txt), así que se instala tal cual.
+          pip install -r backend/requirements.txt "pyinstaller>=6.10,<7"
 
       - name: Build frontend
         working-directory: frontend
@@ -680,17 +601,6 @@ jobs:
         run: |
           yarn install --frozen-lockfile
           yarn build
-
-      - name: Prepare bundle payload
-        run: |
-          mkdir -p backend/_bundle
-          cp -R frontend/build backend/_bundle/build
-          [ -f backend/ai_context_default.py ] && cp backend/ai_context_default.py backend/_bundle/
-          [ -f version.txt ] && cp version.txt backend/_bundle/
-          if [ -f themes/saved_themes.json ]; then
-            mkdir -p backend/_bundle/themes
-            cp themes/saved_themes.json backend/_bundle/themes/
-          fi
 
       - name: Generate .icns from logo.png
         run: |
@@ -709,34 +619,8 @@ jobs:
           ls -la app.icns
 
       - name: Build binary with PyInstaller
-        run: |
-          pyinstaller \
-            --onefile \
-            --name CinemaProductions-macos-arm64 \
-            --icon app.icns \
-            --add-data "backend/_bundle/build:build" \
-            --add-data "backend/_bundle/ai_context_default.py:." \
-            --add-data "backend/_bundle/version.txt:." \
-            --add-data "backend/_bundle/themes:themes" \
-            --hidden-import motor.motor_asyncio \
-            --hidden-import pymongo \
-            --hidden-import bson \
-            --hidden-import ssl_bootstrap \
-            --hidden-import openpyxl \
-            --hidden-import apscheduler.schedulers.asyncio \
-            --hidden-import apscheduler.triggers.cron \
-            --hidden-import apscheduler.triggers.interval \
-            --hidden-import pywebpush \
-            --hidden-import PIL \
-            --collect-submodules uvicorn \
-            --collect-submodules fastapi \
-            --collect-submodules openpyxl \
-            --collect-submodules cryptography \
-            --collect-submodules mongomock_motor \
-            --collect-submodules mongomock \
-            --exclude-module tkinter \
-            --exclude-module matplotlib \
-            backend/standalone_app.py
+        # Mismas opciones que el .exe de Windows (scripts/build_exe.py).
+        run: python scripts/build_exe.py --skip-frontend --name CinemaProductions-macos-arm64 --icon app.icns
 
       - name: Compute SHA256
         id: hash
@@ -750,6 +634,15 @@ jobs:
           echo "sha256=$SHA" >> $GITHUB_OUTPUT
           echo "size_mb=$SIZE" >> $GITHUB_OUTPUT
 
+      - name: Subir binario como artefacto del workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: CinemaProductions-macos-arm64
+          path: |
+            dist/CinemaProductions-macos-arm64
+            dist/CinemaProductions-macos-arm64.sha256
+          retention-days: 14
+
       - name: Determine release tag
         id: tag
         run: |
@@ -762,6 +655,7 @@ jobs:
           fi
 
       - name: Publish to release
+        if: ${{ inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -808,21 +702,16 @@ jobs:
           cache: 'pip'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'yarn'
           cache-dependency-path: frontend/yarn.lock
 
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
-          # Quitamos paquetes que (a) no se usan en el runtime del binario y
-          # (b) rompen o ralentizan el build fuera de Emergent:
-          #   · emergentintegrations → paquete interno (no está en PyPI)
-          #   · litellm              → wheel interno de Emergent (URL privada)
-          #   · jq                   → extensión C sin wheel fiable en Windows
-          grep -vE '^(emergentintegrations|litellm|jq)([=<>@ ]|$)' backend/requirements.txt > /tmp/req.txt
-          pip install -r /tmp/req.txt
-          pip install "pyinstaller>=6.10,<7" pillow
+          # requirements.txt solo trae paquetes públicos de PyPI (los internos de
+          # Emergent viven en requirements-emergent.txt), así que se instala tal cual.
+          pip install -r backend/requirements.txt "pyinstaller>=6.10,<7"
 
       - name: Build frontend
         working-directory: frontend
@@ -833,45 +722,9 @@ jobs:
           yarn install --frozen-lockfile
           yarn build
 
-      - name: Prepare bundle payload
-        run: |
-          mkdir -p backend/_bundle
-          cp -r frontend/build backend/_bundle/build
-          [ -f backend/ai_context_default.py ] && cp backend/ai_context_default.py backend/_bundle/
-          [ -f version.txt ] && cp version.txt backend/_bundle/
-          if [ -f themes/saved_themes.json ]; then
-            mkdir -p backend/_bundle/themes
-            cp themes/saved_themes.json backend/_bundle/themes/
-          fi
-
       - name: Build binary with PyInstaller
-        run: |
-          pyinstaller \
-            --onefile \
-            --name CinemaProductions-linux-arm64 \
-            --add-data "backend/_bundle/build:build" \
-            --add-data "backend/_bundle/ai_context_default.py:." \
-            --add-data "backend/_bundle/version.txt:." \
-            --add-data "backend/_bundle/themes:themes" \
-            --hidden-import motor.motor_asyncio \
-            --hidden-import pymongo \
-            --hidden-import bson \
-            --hidden-import ssl_bootstrap \
-            --hidden-import openpyxl \
-            --hidden-import apscheduler.schedulers.asyncio \
-            --hidden-import apscheduler.triggers.cron \
-            --hidden-import apscheduler.triggers.interval \
-            --hidden-import pywebpush \
-            --hidden-import PIL \
-            --collect-submodules uvicorn \
-            --collect-submodules fastapi \
-            --collect-submodules openpyxl \
-            --collect-submodules cryptography \
-            --collect-submodules mongomock_motor \
-            --collect-submodules mongomock \
-            --exclude-module tkinter \
-            --exclude-module matplotlib \
-            backend/standalone_app.py
+        # Mismas opciones que el .exe de Windows (scripts/build_exe.py).
+        run: python scripts/build_exe.py --skip-frontend --name CinemaProductions-linux-arm64
 
       - name: Compute SHA256
         id: hash
@@ -885,6 +738,15 @@ jobs:
           echo "sha256=$SHA" >> $GITHUB_OUTPUT
           echo "size_mb=$SIZE" >> $GITHUB_OUTPUT
 
+      - name: Subir binario como artefacto del workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: CinemaProductions-linux-arm64
+          path: |
+            dist/CinemaProductions-linux-arm64
+            dist/CinemaProductions-linux-arm64.sha256
+          retention-days: 14
+
       - name: Determine release tag
         id: tag
         run: |
@@ -897,6 +759,7 @@ jobs:
           fi
 
       - name: Publish to release
+        if: ${{ inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
